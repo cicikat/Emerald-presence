@@ -1,0 +1,148 @@
+"""
+mood_state — 角色情绪状态持久化。
+全局单一状态（角色是单用户项目）。
+情绪不硬切，每轮做加权漂移：新情绪占30%，旧情绪占70%。
+"""
+import json
+import logging
+import time
+from pathlib import Path
+
+from core.sandbox import get_paths
+from core.safe_write import safe_write_json
+from core.llm_output_validator import record_failure, is_paused, reset
+
+logger = logging.getLogger(__name__)
+
+# 情绪强度映射（用于漂移计算）
+EMOTION_INTENSITY = {
+    "neutral":   0.0,
+    "gentle":    0.3,
+    "thinking":  0.2,
+    "happy":     0.6,
+    "sad":       0.6,
+    "surprised": 0.7,
+    "angry":     0.8,
+    "sleepy":    0.3,
+    "yandere":   1.0,
+}
+
+# 情绪相邻关系（漂移时优先往相邻情绪过渡，不直接跳跃）
+EMOTION_NEIGHBORS = {
+    "neutral":   ["gentle", "thinking", "sleepy"],
+    "gentle":    ["neutral", "happy", "sad"],
+    "thinking":  ["neutral", "gentle"],
+    "happy":     ["gentle", "surprised", "neutral"],
+    "sad":       ["gentle", "neutral", "sleepy"],
+    "surprised": ["happy", "neutral"],
+    "angry":     ["surprised", "neutral"],
+    "sleepy":    ["neutral", "sad"],
+    "yandere":   ["surprised", "angry"],
+}
+
+_DEFAULT = {
+    "current": "neutral",
+    "intensity": 0.0,
+    "previous": "neutral",
+    "updated_at": 0.0,
+}
+
+
+def _path() -> Path:
+    return get_paths().mood_state()
+
+
+def load() -> dict:
+    try:
+        return json.loads(_path().read_text(encoding="utf-8"))
+    except Exception:
+        return dict(_DEFAULT)
+
+
+def save(state: dict) -> None:
+    if is_paused("mood_state"):
+        logger.warning("[mood_state] 写入已暂停（连续失败过多），跳过本次 save")
+        return
+
+    if (
+        not isinstance(state.get("current"), str)
+        or not isinstance(state.get("previous"), str)
+        or not isinstance(state.get("intensity"), (int, float))
+        or not (0.0 <= float(state["intensity"]) <= 1.0)
+    ):
+        record_failure("mood_state", str(state), "")
+        return
+
+    safe_write_json(_path(), state)
+    reset("mood_state")
+
+
+def update(new_emotion: str, new_intensity: float | None = None, source: str = "detect") -> dict:
+    """
+    根据本轮检测到的情绪，做加权漂移更新情绪状态。
+    新情绪占30%，旧情绪占70%。
+    返回更新后的状态。
+    """
+    state = load()
+    current = state.get("current", "neutral")
+
+    if new_intensity is None:
+        new_intensity = EMOTION_INTENSITY.get(new_emotion, 0.3)
+
+    old_intensity = state.get("intensity", 0.0)
+
+    # 强度加权漂移
+    blended_intensity = old_intensity * 0.7 + new_intensity * 0.3
+
+    # 情绪切换：只有新情绪强度足够高（>0.4）且持续两轮才切换
+    # 用 pending 字段记录"上轮想切换的情绪"
+    pending = state.get("pending", None)
+
+    if new_emotion != current:
+        if new_intensity >= 0.4:
+            if pending == new_emotion:
+                # 连续两轮相同新情绪，执行切换
+                state["previous"] = current
+                state["current"] = new_emotion
+                state["pending"] = None
+                logger.info(f"[mood] 情绪切换: {current} → {new_emotion} (intensity={blended_intensity:.2f})")
+            else:
+                # 第一轮先记录 pending
+                state["pending"] = new_emotion
+        else:
+            # 强度不够，清空 pending
+            state["pending"] = None
+    else:
+        state["pending"] = None
+
+    state["intensity"] = round(blended_intensity, 3)
+    state["updated_at"] = time.time()
+    save(state)
+    return state
+
+
+def get_current() -> str:
+    """快速获取当前情绪，不更新状态。"""
+    return load().get("current", "neutral")
+
+
+def get_intensity() -> float:
+    return load().get("intensity", 0.0)
+
+
+def nudge_from_memory(memory_emotion: str, memory_strength: float) -> None:
+    """
+    召回了强烈情绪记忆时，轻微推动当前情绪向该方向漂移。
+    只在 memory_strength > 0.7 时生效，幅度最多 +0.1。
+    """
+    if memory_strength < 0.7:
+        return
+    state = load()
+    current = state.get("current", "neutral")
+    # 只在记忆情绪是当前情绪的邻居时才推动
+    neighbors = EMOTION_NEIGHBORS.get(current, [])
+    if memory_emotion in neighbors or memory_emotion == current:
+        nudge = min(0.1, memory_strength * 0.1)
+        state["intensity"] = min(1.0, state.get("intensity", 0.0) + nudge)
+        save(state)
+        logger.debug(f"[mood] 记忆推动情绪强度: +{nudge:.3f} (from {memory_emotion})")

@@ -1,0 +1,15 @@
+aiohttp
+fastapi
+uvicorn
+httpx
+openai
+gradio_client
+PyYAML
+python-multipart
+websockets
+bcrypt
+python-dotenv
+requests
+pydantic
+pydantic-settings
+ddgs

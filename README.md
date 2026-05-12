@@ -1,0 +1,141 @@
+# qq-st-bot
+
+一个有长期记忆、能主动联系你的私人陪伴型 QQ 机器人。
+
+---
+
+## 特性
+
+### 记忆系统（五层并行）
+
+- **短期历史**：滑动窗口，最近 20 轮对话，写入前脱敏防止风格自反馈塌缩
+- **中期摘要**：12 小时内的对话压缩视图，三时间桶渲染（刚才 / 几小时前 / 早些时候），LLM 压缩 + fallback 兜底
+- **情景记忆**：LLM 提炼每轮对话为结构化片段，含 strength 衰减、MMR 多样性召回、emotion_texture 去重
+- **角色认知**（character_growth）：角色对你的长期认知，由固化 pipeline 四段链路驱动（capture → midterm → episodic → growth），重启不丢状态
+- **事件流水账**（event_log）：每日按天分文件，支持关键词搜索 + 强度衰减评分，7 天外低强度条目自动跳过
+
+### 情绪状态系统
+
+- 每轮对话后 LLM 检测角色回复情绪，写入 `mood_state`
+- 情绪漂移公式：`新强度 = 旧强度 × 0.7 + 新情绪强度 × 0.3`，切换需连续两轮确认
+- 情绪底色以软提示形式注入 prompt，随强度分三档描述
+- 情绪联动情景记忆召回评分，记忆越被想起越牢固
+
+### Prompt 架构（12+ 层）
+
+- 分层 prompt 架构，含 tag 门控、token 估算与质量梯度裁剪
+- 世界书 / 角色卡 / 用户画像 / 实时状态 / 情绪底色 / 情景记忆 / 中期摘要 / 活动状态 / 角色日记 / Author's Note 轮转
+- 探针机制：正式对话前用极简 prompt 预判工具调用，含关键词快速路径，不走 LLM
+- 层 11 Author's Note：性格特质轮转 + 纠偏注入（consistency_check 发现问题时追加）
+- token 超限时按质量从低到高依次裁剪
+
+### 主动触发调度器
+
+- 早安 / 晚安 / 随机日间碎碎念（从有情感词的历史发言中抽取触发素材）
+- 天气联动、每日手账（角色写日记）、记忆自然衰减
+- 生日多段触发：前夜预热 / 零点告白 / 下午关心 / 夜间收尾
+- 未完结话题追问、主动回忆触发
+- 节日感知 / 时间节点感知 / 长假加速发送
+- 情景记忆定期扫描晋升（episodic_sweep，冷却 30 分钟）
+- 请勿打扰（DND）模块（已实现，可接入）
+- 高优先级触发（生日 / 生理期 / 心率告警）用户活跃时也强制发送
+- 冷却状态持久化，重启不丢失
+
+### 现实数据感知
+
+- **Apple Watch**：心率异常提醒（>100 低优先级 / >120 高优先级告警）、睡眠感知与报告（iPhone 捷径推送）
+- **Obsidian 日记**：按日期读取，支持关键词搜索最近 30 天，读后标记已共享
+- **生理期感知**：周期中和临近期 tag 门控，自动注入关怀层
+- **手机传感器**：步数 / 电量 / 位置 / 亮屏次数，当天有数据即注入
+- **桌宠屏幕活动快照**：TTL 5 分钟，tag 命中时注入
+
+### 对话能力
+
+- 图片识别（GLM / Gemini / OpenAI Vision）
+- TTS 语音合成（GPT-SoVITS，情绪联动参考音频切换）
+- 表情包发送（情绪联动，与 TTS 互斥）
+- 工具调用：天气查询、备忘录提醒、网页搜索（DuckDuckGo）、桌面控制
+- 桌面意图解析：角色说"我去把游戏关掉"→ 真的执行窗口最小化
+- 跨通道（QQ / 桌宠）连续性感知，切换时注入接续提示
+
+### 工程质量
+
+- 所有数据路径通过沙盒管理（`core/sandbox`），测试与生产数据隔离
+- 原子写入（`safe_write`，跨平台 `os.replace`）
+- LLM 输出校验 + 最多 3 次重试，失败保留旧数据
+- Post-process 拆分为关键路径（持锁）和慢队列（单 worker，退避重试），避免锁饥饿
+- 慢任务失败写入死信队列（DLQ），调度器定期监控
+- 并发保护：per-uid 锁 + 全局情绪状态锁
+
+---
+
+## 技术栈
+
+Python · FastAPI · NapCat (OneBot 11) · DeepSeek · GPT-SoVITS
+
+---
+
+## 快速开始
+
+**环境要求**
+
+- Python 3.10+
+- [NapCat](https://github.com/NapNeko/NapCatQQ)（QQ 协议端）
+
+**安装**
+
+```bash
+git clone https://github.com/chah69634-arch/qq-st-bot.git
+cd qq-st-bot
+pip install -r requirements.txt
+```
+
+**配置**
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+按 [配置指南.md](配置指南.md) 填写必填项：LLM API Key、QQ 号、管理面板密钥。
+
+在 `characters/` 目录放入角色卡 `.txt` 文件（格式见配置指南第 6 节）。
+
+**运行**
+
+```bash
+# 1. 启动 NapCat，确保 QQ 已登录，WebSocket 服务端监听 3001 端口
+# 2. 启动机器人
+python main.py
+```
+
+管理面板：`http://127.0.0.1:8080`
+
+---
+
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [配置指南.md](配置指南.md) | 所有配置项说明 |
+| [Watch配置指南.md](Watch配置指南.md) | Apple Watch 心率 / 睡眠数据接入（iPhone 捷径） |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 系统架构总览、Pipeline 四步骤、数据目录结构 |
+| [docs/memory.md](docs/memory.md) | 五层记忆子系统设计与并发保护 |
+| [docs/prompt-layers.md](docs/prompt-layers.md) | Prompt 层结构、Tag 门控、token 裁剪 |
+| [docs/tools.md](docs/tools.md) | 工具系统、探针机制、桌面动作执行 |
+| [docs/scheduler.md](docs/scheduler.md) | 调度器触发器完整列表与冷却设计 |
+
+---
+
+## 注意
+
+- 仅供个人学习使用
+- 需自备 LLM API Key（推荐 DeepSeek，国内直连）
+- 角色卡需自行准备，`characters/` 目录有格式示例
+- 本项目不包含任何角色版权素材
+- 本项目以叶瑄为示例角色，所有 AGENTS.md / docs 里的'叶瑄'是 character_name 占位符的具体化。（如果注释没删干净的话。）目前代码已经全部参数化，在config的character.name里更换角色名，fallback为“他”。
+
+---
+
+## License
+
+MIT

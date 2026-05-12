@@ -1,0 +1,163 @@
+# docs/prompt-layers.md — Prompt 层结构
+
+---
+
+## 层总览（实际执行顺序）
+
+> 注意：层编号和实际插入顺序不完全一致（3.5~3.8 在 4 之后插入）。以下是代码实际执行顺序。
+
+| 层标识 | 内容 | 触发条件 | 数据来源 |
+|---|---|---|---|
+| `0_jailbreak` | 破限预设 layer=0 | 文件存在且 enabled | `data/jailbreak_entries.json` |
+| `1_system_prompt` | 角色存在性定义 + `{perception_block}` 槽位 | always | `characters/yexuan.json` |
+| `2_char_desc` | 角色描述 + 性格 + 情境 | always | 角色卡 |
+| `2_jailbreak` | 破限预设 layer=2 | 文件存在且 enabled | `data/jailbreak_entries.json` |
+| `2.5_time` | 当前时间（年月日 时:分 星期X） | always | 实时生成 |
+| `2.7_mood_state` | 叶瑄当前情绪底色（软提示） | current != neutral 时注入 | `core/mood_text.py` → `get_mood_text()`，pending非空时追加过渡句 |
+| `2.6_activity` | 叶瑄此刻的状态 | 对话开头（history 为空）或沉默超10分钟 | `activity_manager.get_prompt_fragment()`，每15-45分钟随机切换，部分活动会从 episodic_memory 按 strength 加权抽一条记忆作为"叶瑄在想什么"注入 |
+| `3_relation` | 与该用户的关系 + 称呼 | always | `user_relation` |
+| `4_group_context` | 群聊最近动态 | 群聊时 | `group_context.get_recent()` |
+| `3.5_period` | 生理期感知（第N天） | tagged（见下） | `user_profile.get_period_info()` |
+| `3.6_watch` | 最近一次睡眠数据 | tagged（见下） | `user_profile` sleep_segments |
+| `3.7_sensor` | 手机传感器（步数/电量/位置/亮屏次数） | 当天有数据即注（无 tag 门控） | `user_profile.phone_sensor_today` |
+| `3.8_activity` | 桌宠屏幕活动快照 | tagged（见下） | `data/activity_snapshot.json`（TTL 5分钟） |
+| `5_profile` | 用户画像（名字/位置/宠物/兴趣/职业） | 有内容即注 | `user_profile.load()` |
+| `5.2_reminders` | 待办备忘录列表 | 有待办即注 | `get_reminders()` |
+| `5.5_lore` | 世界书条目 | LoreEngine 命中时 | `lore_engine.match()` |
+| `6a_growth_fingerprint` | 角色认知前 100 字 | tagged 未命中时（有内容） | 优先读 `叶瑄_{uid}.felt.md`，不存在时降级读 `叶瑄_{uid}.md` |
+| `6a_growth_full` | 角色认知全文 | tagged 命中时（与 fingerprint 互斥） | 优先读 `叶瑄_{uid}.felt.md`，不存在时降级读 `叶瑄_{uid}.md` |
+| `6b_event_search` | 相关往事（event_log 搜索结果） | 搜索结果非空 | `event_log.search()` |
+| `6c_episodic` | 情景记忆片段 | episodic_result 非空 | `episodic_memory.retrieve()` + `format_for_prompt()` |
+| `mid_term` | 过去 12 小时对话压缩视图 | mid_term_context 非空 | `mid_term.format_for_prompt()`（12h 过期，最多 20 条，三时间桶渲染） |
+| `6d_diary_context` | 用户近期日记 | 有内容即注 | `diary_context.load()` |
+| `6e_inner_diary_facts` | 叶瑄昨天的记录（事件层） | 昨日日记文件存在且含事件层 | `data/yexuan_inner/diary/` | 必注入，取前200字 |
+| `6e_inner_diary_feeling` | 叶瑄昨天的心情（感受层） | 昨日日记存在且命中 `emotion.down/indirect/deep` 或 `topic.relation` | 同上 | 取前150字  |
+| `7_mes_example_item` | 对话示例（few-shot） | always（有内容） | 角色卡 mes_example |
+| `9_history` | 短期对话历史（最近 20 轮） | always | `short_term.load()` |
+| `9.5_episodic_top` | 最相关情景记忆1条（attention sweet spot） | episodic_result 非空 | 从已召回结果取第一条，不重复召回 |
+| `10_tool_result` | 本轮工具执行结果 | 有工具调用时 | `tool_dispatcher.execute()` |
+| `11_author_note` | 人设核心提醒 + 输出格式规则 + 纠偏 | always | 硬编码 + `author_note_rotator` + consistency_check |
+| `11_jailbreak` | 破限预设 layer=11 | 文件存在且 enabled | `data/jailbreak_entries.json` |
+| `12_user_message` | 用户当前消息 | always | 用户输入 |
+
+---
+
+## Tag 门控详细说明
+
+### `get_tags()` 的工作方式
+
+文件：`core/tag_rules.py`
+
+对用户消息做简单字符串包含检查（不是正则，注释有误）：
+
+```python
+if any(p in text for p in rule.patterns):
+    tags.add(rule.tag)
+```
+
+### 完整 Tag 规则
+
+| Tag | 触发词 | 解锁的层 |
+|---|---|---|
+| `topic.energy` | 累、困、没精神、熬夜、睡不着、睡眠、疲 | 3.6 watch |
+| `topic.health` | 身体、头疼、发烧、不舒服、生病、医院 | 3.6 watch |
+| `topic.activity` | 运动、跑步、健身、走路、步数 | 3.6 watch + 3.8 activity |
+| `query.body_state` | 今天状态、最近怎么样、身体怎么 | 3.5 period + 3.6 watch |
+| `query.what_doing` | 你看到我在干嘛、你知道我在做什么、我在干嘛、我在做什么 | 3.8 activity |
+| `topic.body` | 肚子、痛、生理期、例假、姨妈 | 3.5 period |
+| `emotion.physical_discomfort` | 难受、不舒服、很疼 | 3.5 period |
+| `topic.relation` | 我们、你还记得、之前、那次、上次 | 6a growth 全文 |
+| `topic.history` | 那时候、以前、当时、记得吗 | 6a growth 全文 |
+| `emotion.deep` | 其实、说真的、一直、从来、没人 | 6a growth 全文 |
+| `meta.identity` | 你是谁、你是什么、你了解我吗 | 6a growth 全文 |
+| `emotion.down` | 难过、想哭、想吐、恶心、痛苦、呃呃、呕呕、想似 | 3.5 period + 3.6 watch + 6a growth全文 + 6d日记 |
+| `emotion.positive` | 好耶、噢噢噢、喵喵喵 | 3.8 activity |
+| `emotion.indirect` | 咪、好累、不想动、没胃口、吃不下、今天又没 | 3.5 period + 3.6 watch + 6d日记 |
+
+### Tag 覆盖率已知盲区
+
+- **孤独/失落**：无专属 tag，`emotion.deep` 靠"没人"兜底，覆盖窄
+- **高兴/庆祝**：完全没有 tag，生日/成功话题不触发任何额外层
+- **间接表达**：如"最近不太好"不命中任何 tag
+
+---
+
+## perception_block 槽位
+
+层1 的 system_prompt 末尾有一个占位符 `{perception_block}`，由 pipeline.build_prompt 填入。
+**只承载 pending_perception**（上轮失败的桌面动作感知）和跨通道接续提示，不含工具结果——
+工具结果走层10的 `tool_result` 参数，唯一出口。
+
+```python
+_perception = ""
+_pending, _pending_paths = pending_perception.read_and_mark()  # 两阶段提交
+if _pending:
+    _perception = _pending.strip()
+# 跨通道切换时追加 "刚才在QQ那边/桌宠这边" 提示
+# post_process 成功后调用 confirm_delivered(_pending_paths) 删除文件
+```
+
+感知内容格式（由 pipeline 拼接时间前缀）：
+[刚刚] 桌面动作 minimize_window 执行失败（重试2次）
+
+```
+
+⚠️ `tool_result` 同时传给了 `perception_block` 和层10的 `tool_result` 参数，工具结果在 prompt 里出现**两次**。见 `docs/known-issues.md`。
+
+---
+
+## 层11 Author's Note 内容构成
+
+Author's Note 放在历史之后、用户消息之前，对模型影响最大，由以下部分拼接：
+
+1. `author_note_rotator.get_current_note()`（轮转的人设提醒）
+2. 硬编码的反问频率规则
+3. 硬编码的情感稳定性规则
+4. 硬编码的动作格式规则
+5. 输出风格指令（`chat` 或 `roleplay`，由 config.yaml `chat.style` 决定）
+6. 强制工具规则（read_diary / get_time 必须调）
+7. 表达规则（禁止复用对话示例原句）
+8. `style_hint`（从 observations.jsonl 读取，深夜/压力状态提示词）
+9. `author_note_extra`（consistency_check 发现问题时的纠偏，用完即清）
+10. 破限预设 layer=11
+
+---
+
+## token 裁剪
+
+### 估算方式
+
+```python
+token_estimate = sum(len(m["content"]) for m in messages)
+# 字符数，不是真实 token 数
+# 汉字 1字符 ≈ 0.5~0.7 token
+```
+
+### 阈值
+
+| 字符数 | 行为 |
+|---|---|
+| > 15000 | warning 日志 |
+| > 20000 | 强制裁剪 |
+
+### 裁剪顺序
+
+依次删以下层（通过 `_layer` 字段 startswith 匹配），按质量从低到高：
+6b_event_search → mid_term → 6d_diary → 6e_inner_diary → 6c_episodic → 5.5_lore
+
+设计原则：
+- `6b_event_search` 是关键词匹配 + 简单评分，质量最低，最先丢
+- `mid_term` / `6d_diary` / `6e_inner_diary` 是被动上下文，丢了不影响相关性
+- `6c_episodic` 经过 LLM 压缩 + strength 校正 + MMR 多样性筛选，是质量最高的记忆层，靠后丢
+- `5.5_lore` 是世界书设定，丢了等于角色失忆，最后丢
+
+---
+
+## 新增层的规范
+
+新增一层时必须：
+
+1. 在 messages.append() 时加 `"_layer": "N_name"` 字段
+2. 如果是可裁剪的非核心层，加入上面的裁剪顺序
+3. 如果是 tagged 层，在 `tag_rules.py` 里确认有对应 tag 规则
+4. 在此文档的层总览表格里补充说明

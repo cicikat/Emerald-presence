@@ -1,0 +1,19 @@
+data/
+logs/
+# 角色卡及作者注（模板文件保留，实际角色文件含隐私内容不提交）
+characters/*.json
+characters/*.txt
+!characters/character_template.json
+!characters/character_author_notes_template.json
+config.yaml
+.claude/
+assets/stickers/*
+!assets/stickers/.gitkeep
+__pycache__/
+*.pyc
+*.log
+.env
+.env.*
+DESIGN.md
+tests/test_record.md
+tests/eval_set.json

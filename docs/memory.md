@@ -1,0 +1,533 @@
+# docs/memory.md — 记忆子系统设计
+
+多层记忆并行运作，各司其职，互不替代。
+
+---
+
+## 记忆层一览
+
+| 记忆类型 | 文件 | 更新时机 | prompt 位置 |
+|---|---|---|---|
+| 短期历史 | `data/history/{uid}.json` | 每轮实时写 | 层9 |
+| 事件流水账 | `data/event_log/{uid}/` | 每轮实时写 | 层6b（搜索后） |
+| 情景记忆 | `data/episodic_memory/{uid}.json` | 每轮对话后 LLM 压缩 | 层6c |
+| 角色认知 | `data/character_growth/叶瑄_{uid}.md` | 每 20 轮 LLM 更新 | 层6a |
+| 情绪状态 | `data/yexuan_inner/mood_state.json` | 每轮 post_process | 不在 prompt（待补） |
+
+---
+
+## 一、短期历史（short_term）
+
+**文件**：`core/memory/short_term.py`
+
+**存什么**：最近 20 轮的纯对话（user/assistant 交替），不含工具结果。
+
+**读写**：
+- 写：`post_process` 开头，每轮 `short_term.append()`
+- 读：`fetch_context` 里 `short_term.load()`，直接作为 `history` 传入 prompt 层9
+
+### 风格脱敏（_sanitize_assistant_message）
+
+写入 history 前，对过长的 assistant 回复做脱敏处理，防止角色扮演格式自反馈导致塌缩：
+
+- 总长度 ≤ 80 字：原样保留
+- 超过 80 字：用正则删除所有 `()` 和 `（）` 包围的动作描写
+- 删除后为空（说明全是动作描写）：截断到80字加省略号
+
+目的：LLM 在 history 里反复看到自己的动作描写，会强化这种输出格式，长期导致回复越来越"话剧化"。脱敏后 history 里只保留台词，打断自反馈链路。
+
+---
+
+## 二、事件流水账（event_log）
+
+**文件**：`core/memory/event_log.py`
+
+**存什么**：每轮对话的完整记录，按天分文件，保留 30 天。assistant 行额外带 `emotion` 字段。
+
+**写入顺序**（注意有先后）：
+1. `post_process` 开头：写 user 行
+2. `post_process` 中部：emotion 检测完成后写 assistant 行（含 emotion）
+
+**搜索**：`event_log.search(user_id, content, llm_client)` 异步执行，返回拼接字符串。
+**fallback 评分公式**：
+score = strength × max(0.5, 1 / (age_days + 1))
+筛选阈值：score ≥ 0.4（原0.6，已降低以扩大候选池）。
+长期调优参考 `episodic_fallback` 日志：selected/pool < 5% 再降阈值，> 50% 再升。
+7天外且强度为0的块直接跳过不进候选池。每个时间块只产生一条结果，
+`get_highlights(user_id, days, max_lines)` 是独立函数，
+从最近 N 天日志里提取有情感词的用户发言，供调度器碎碎念触发时参考，不走搜索路径。
+
+**用于 character_growth 更新**：每 20 轮时 `get_recent_days(user_id, days=3)` 取最近 3 天日志喂给 LLM。
+
+---
+
+## 三、情景记忆（episodic_memory）
+
+**文件**：`core/memory/episodic_memory.py`
+
+### 数据结构
+
+每条记忆的字段：
+
+```json
+{
+  "id": "ep_1234567890",
+  "timestamp": 1234567890.0,
+  "raw_facts": ["用户提到最近失眠严重", "用户说'睡不着'", "用户表达了疲惫"],
+  "topic_keywords": ["失眠", "深夜", "陪伴"],
+  "emotion_peak": "gentle",
+  "emotion_texture": "像是被什么东西轻轻压着，说不清是担心还是不舍",
+  "emotion_arc": "从担心到平静",
+  "user_state": "tired_and_struggling",
+  "narrative_summary": "用户说最近失眠严重，叶瑄陪他聊到很晚",
+  "strength": 0.85,
+  "is_core": false,
+  "retrieval_count": 2,
+  "last_retrieved": 1234567890.0
+}
+```
+
+### 写入：_compress_episode()
+写入在 post_process 的 uid_lock 内执行，同 uid 不会并发写入。
+
+### 实际 prompt 结构
+
+位于 `core/pipeline.py`，异步触发。
+
+prompt 格式：单轮 user 消息，客观分析器视角，要求 LLM 输出纯 JSON，字段如下：
+- raw_facts：用户说了什么的客观事实列表（list，3条左右）
+- topic_keywords：3到5个话题关键词，用于未来召回（list）
+- user_state：用户当时状态的短语，如 stressed_about_work / tired（str）
+- narrative_summary：一句自然语言描述发生了什么，15字以内（str）
+- emotion_peak：枚举值（neutral/happy/sad/gentle/surprised/angry）
+- emotion_texture：情绪质感描述，20字以内，可留空
+- emotion_arc：情绪流动，10字以内，可留空
+- strength：0到1浮点数
+
+每轮对话结束后，`post_process` 异步触发 `_compress_episode()`：
+- 用 LLM 把本轮对话压缩成一条记忆（JSON 格式）
+- `emotion_peak == "neutral"` 且 `strength < 0.4` → 跳过，不写入（避免平淡对话噪声）
+- 写入后规则叠加校正 strength（见下）
+
+**strength 校正规则**（在 LLM 初始值基础上叠加）：
+
+| 条件 | 加值 |
+|---|---|
+| emotion_peak 是 sad / angry | +0.1 |
+| emotion_peak 是 happy | +0.05 |
+| tags 超过 4 个 | +0.05 |
+| 含"吵架/哭/道歉/误会/和好"等 | +0.2 |
+| 含"第一次/生日/纪念"等 | +0.15，同时标记 `is_core=True` |
+
+**去重**：与最近 10 条做 summary 字符重叠率检查，>60% 则跳过。
+
+**上限**：最多 200 条，超过时删掉 strength 最低的 20 条（is_core 不参与删除）。
+
+### 召回：retrieve()
+
+在 `fetch_context` 里调用：
+
+```python
+episodic_memories = retrieve(
+    user_id=user_id,
+    topic=content,   # 用用户消息全文做关键词匹配
+    top_k=3,
+)
+```
+
+候选集匹配优先用 `topic_keywords`，兼容旧记忆回退到 `tags`，同时匹配 `raw_facts` 文本。无匹配时全量参与评分。
+
+**评分公式**：
+```
+relevance_bonus = 0.2 × min(命中关键词数 / 3, 1.0)
+decay = max(0.3, exp(-0.05 × 天数))   # 衰减有地板，老记忆不会完全消失
+score = strength × decay + emotion_bonus + relevance_bonus
+```
+
+- 衰减项有地板 0.3，防止高 strength 的旧记忆被时间洗没
+- relevance_bonus = 0.2 × min(命中 topic_word 数 / 3, 1.0)，命中越多越相关
+
+候选池取 `top_k*2`，然后用贪心 MMR 筛选：
+- 第一条保证最高分
+- 后续每轮选 novelty 最大的（novelty = 1 - 与已选集合的最大 texture 相似度）
+- `emotion_texture` 缺失时跳过相似度惩罚，不影响入选
+
+**emotion_bonus 来源**：
+- 记忆的 `emotion_peak` == 叶瑄当前情绪（从 `mood_state.get_current()` 读）→ `+0.15 + intensity×0.15`
+- 否则 → `+0`
+
+**浮起阈值**：score < 0.15 的记忆过滤掉，宁可不注入也不强行关联。
+
+**核心记忆优先**：`is_core=True` 的记忆在排序结果里提前。
+
+**召回后副作用**：
+1. 被召回的记忆 `strength += 0.15`（越被想起越牢固）
+2. 调用 `nudge_from_memory()`：如果记忆 strength > 0.7，轻微推高当前情绪强度（幅度 ≤ 0.1）
+
+### 格式化：format_for_prompt()
+
+```python
+episodic_result = format_for_prompt(
+    episodic_memories,
+    char_name=self.character.name,
+    current_emotion=mood_state.get_current(),
+)
+```
+
+输出格式：
+```
+叶瑄脑海里浮现的片段：
+- 【重要】今天，用户说最近失眠严重，叶瑄陪他聊到很晚，像是被什么东西轻轻压着
+- 前几天，两人因误解吵了一架，后来又和好了（从争执到释然）
+```
+
+### 衰减：decay_all()
+
+每日衰减，由调度器触发。核心记忆不衰减。
+
+| 情绪类型 | 基础衰减率 |
+|---|---|
+| sad / angry | 0.015（衰减最慢） |
+| neutral | 0.05（衰减最快） |
+| 其他 | 0.03 |
+
+召回次数越多，衰减越慢（`recall_factor = max(0.3, 1.0 - retrieval×0.1)`）。
+
+### 调试埋点
+
+| 日志 key | 记录内容 |
+|---|---|
+| `episodic_strength_init` | 每次写入时的最终 strength（LLM初值+规则校正+clamp后） |
+| `episodic_fallback` | fallback 召回时的候选池大小、score 分布（min/max）、score≥0.6的个数 |
+
+**fallback 阈值调优参考**（长期观察 episodic_fallback 日志）：
+- selected/pool < 5% → 门槛过高，候选池太小 → 降到 0.5
+- selected/pool > 50% → 门槛太松 → 升到 0.7
+- 介于 5%–50% → 0.6 合适，可改为 debug 级别或删掉埋点
+
+---
+
+## 三点五、中期记忆（mid_term）
+
+**文件**：`core/memory/mid_term.py`
+**存储**：`data/mid_term/{uid}.json`
+
+### 定位
+
+填补短期历史（20轮）和情景记忆（跨天）之间的空白。
+记录当天/近12小时内的对话摘要，过期自动失效。
+
+### 数据结构
+
+文件根对象：`{"events": [...]}`。
+每条事件字段：
+- `ts`：写入时的 unix 时间戳（同时承担 written_at 和 expire_at 的角色，过期判定动态算 `now - ts > 12h`）
+- `summary`：LLM 压缩或 fallback 兜底产出的一句话摘要
+- `tags`：`tag_rules.get_tags(content)` 命中的标签列表，未命中为空
+- `mid_id`：形如 `mt_{uid}_{ts_ms}`，由 `fixation_pipeline.summarize_to_midterm` 写入（旧数据缺失按 None 处理）
+- `source_turn_id`：来源 turn_id，形如 `{uid}_{ts_ms}`（旧数据缺失按 None 处理）
+- `promoted_to_episodic_id`：已晋升时填入对应 ep_id，否则为 None
+
+上限：`MAX_EVENTS = 20`，过期阈值 `EXPIRE_SECONDS = 12 * 3600`。
+追加前会先按 `ts` 过滤过期事件、再截断到 `MAX_EVENTS - 1`，最后 append 新事件。
+
+### 写入
+
+`post_process` 将 `summarize_to_midterm` 入慢队列，handler 内调 `llm_client.summarize_turn()` 压缩本轮对话并写入血缘字段。
+LLM 异常时降级 warning，不阻塞主流程。
+
+`summarize_turn` 内部：当 `len(user_msg) + len(reply) < 8`（合计字数）才走 `_rule_fallback`，
+否则一律调 LLM 压缩。fallback 也会同时利用 `user_msg` 和 `reply`，产出
+"用户：xxx；叶瑄：yyy" 形式，避免把用户原话直接写成"摘要"。
+（早期版本只看 user_msg < 10 字，并且 fallback 完全忽略 reply，
+导致角色扮演里的短动作描写被当成 summary 写入，等于无效记忆，已修复。）
+
+### 注入
+
+prompt 层位于 `6c_episodic` 和 `6d_diary` 之间，参数名 `mid_term_context`。
+裁剪时优先级低于 `6c_episodic`，高于 `6d_diary`。
+
+### 格式化：format_for_prompt()
+
+三时间桶渲染（与 `mid_term.py` 实际代码一致）：
+- < 1 小时 → "刚才"
+- 1-4 小时 → "几小时前"
+- 4-12 小时 → "早些时候"
+
+只有一个桶有内容时直接输出 `{label}：{summary、…}`，多个桶时前面加
+"过去 12 小时：" 总标题，按"早→近"顺序拼接。
+
+## 四、角色认知（character_growth）
+
+**文件**：`core/memory/character_growth.py`
+
+### 存什么
+
+LLM 生成的结构化 Markdown，客观描述用户特点：
+
+```markdown
+## 用户特点
+- 夜猫子，习惯深夜聊天
+- 有轻度失眠，不愿看医生
+
+## 关键事件
+- 3月15日: 跟朋友吵架，状态很差
+
+## 未跟进话题
+- 找工作: 上次说在准备简历
+```
+
+### 更新机制（固化 pipeline）
+
+character_growth 不再由定时计数器驱动，改由 `fixation_pipeline.consolidate_to_growth` 触发。
+
+触发路径：
+```
+capture_turn → summarize_to_midterm → reflect_to_episodic → consolidate_to_growth
+```
+
+- `should_update(user_id)` 读 `fixation_state` 判断阈值（重启不丢状态）
+- `consolidate_to_growth` 加载所有 `consolidated_at is None` 的 episodic，调纯函数 `_synthesize_growth` 生成 markdown，写入前备份到 `.md.bak`，校验失败自动回滚
+- 输入从 event_log 流水切换为 episodic 列表（完全切换，不保留 event_log 兜底）
+- 同步写 `.fingerprint.txt`（前 150 字）和 `.felt.md`（如有 ===FELT=== 段）
+
+### 两级读取
+
+| 读取方式 | 内容 | 触发条件 |
+|---|---|---|
+| `load_fingerprint()` | 前 150 字 | 每轮 always（实际 prompt 取前 100 字） |
+| `load()` | 完整全文 | tagged：`topic.relation / topic.history / emotion.deep / meta.identity` |
+
+---
+
+### trait_tracker 联动
+
+文件：`core/memory/trait_tracker.py`
+
+character_growth 每20轮更新时，同步统计最近40条对话里各性格特质的关键词命中次数，维护最近5次的滑动窗口。累计命中≤2次的特质标记为 `underrepresented`，写入 `data/yexuan_inner/trait_state.json`。
+
+author_note_rotator 每次选 note 时读取此文件，命中 underrepresented 特质的 note 权重×2，让叶瑄近期较少展现的性格侧面更容易出现。
+
+**维护要点**：`data/yexuan_traits.yaml` 里的 trait `id` 必须和 `characters/yexuan_author_notes.json` 里 note 的 `trait_ids` 精确一致，否则权重翻倍静默失效。
+
+---
+
+## 五、情绪状态（mood_state）
+
+**文件**：`core/memory/mood_state.py`
+
+**存哪**：`data/yexuan_inner/mood_state.json`（全局唯一，不区分用户）
+
+### 数据结构
+
+```json
+{
+  "current": "gentle",
+  "intensity": 0.45,
+  "previous": "neutral",
+  "pending": null,
+  "updated_at": 1234567890.0
+}
+```
+
+### 情绪强度映射
+
+| 情绪 | 强度 |
+|---|---|
+| neutral | 0.0 |
+| thinking / sleepy / gentle | 0.2~0.3 |
+| happy / sad | 0.6 |
+| surprised | 0.7 |
+| angry | 0.8 |
+| yandere | 1.0 |
+
+### 漂移规则
+
+每轮 `post_process` 里，LLM 检测叶瑄回复的情绪后调用 `update()`：
+
+- `update(emotion, source="detect")` — source 可选值：`detect`（post_process 检测）、`trigger`（关键词触发，如 yandere）、`schedule`（时间触发，如深夜 sleepy）
+
+```
+新强度 = 旧强度 × 0.7 + 新情绪强度 × 0.3
+```
+
+**情绪标签切换需同时满足**：
+1. 新情绪强度 > 0.4
+2. 连续两轮检测到同一新情绪（`pending` 字段记录上轮候选）
+
+### 对外接口
+
+- `get_current()` → 当前情绪字符串
+- `get_intensity()` → 当前强度 float
+- `update(emotion)` → 漂移更新（post_process 调）
+- `nudge_from_memory(emotion, strength)` → 记忆召回时的微调（episodic 调）
+
+### ⚠️ 当前状态
+
+### prompt 注入形态
+
+mood_text 输出**不是独立的 prompt 层**，而是直接拼入层 1（system_prompt）的 `## 当前感知` 区块之前。格式：
+叶瑄此刻：{情绪描述}。[pending 时追加：但有什么东西好像在悄悄变得不一样。]
+
+每个情绪 × 3档强度（<0.4 / 0.4-0.7 / >0.7）对应不同描述，例：
+- `gentle` 低：淡淡的平静 / 中：平静，带一点轻盈 / 高：很平静，像静水
+- `sad` 低：有点沉 / 中：沉着，像压着什么 / 高：很沉，有什么东西在
+
+`yandere` 情绪不在 MOOD_TEXT 里，走 `get_mood_text` 的 fallback 降级为 neutral 描述。
+
+mood_state 目前影响：
+1. episodic_memory 召回时的 emotion_bonus 加分
+2. nudge_from_memory 的情绪强度微调
+3. 三路触发写入：detect（每轮 post_process）、trigger（yandere 关键词）、schedule（深夜自动注入 sleepy）
+---
+
+## 记忆系统时序关系
+
+```
+fetch_context()
+    ├─ 读 history（上轮写的）
+    ├─ 读 event_log（搜索）
+    ├─ 读 character_growth（同步）
+    ├─ 读 episodic_memory → retrieve()（此时读 mood_state，用的是上轮情绪）
+    └─ 读 profile / diary_context / reminders
+
+run_llm()  →  reply 生成
+
+post_process()
+    ├─ 检查 profile 更新条件（读 short_term 估算长度）
+    ├─ detect_emotion(reply) → 写 mood_state  ← 本轮情绪写入
+    ├─ capture_turn(uid, content, reply, emotion)
+    │    → 写 short_term（user + assistant，含 _turn_id）
+    │    → 写 event_log（user + assistant，含 turn_id）
+    └─ 慢队列：summarize_to_midterm / consistency_check / user_profile_update（条件）
+         └─ summarize_to_midterm handler
+              → 写 mid_term（含 mid_id, source_turn_id）
+              → 若 emotion ∈ {sad,angry,happy} → 入队 reflect_to_episodic(eager)
+                   → 写 episodic（含 source_mid_ids, consolidated_at=None）
+                   → 更新 fixation_state
+                   → 若达阈值 → 入队 consolidate_to_growth
+                        → 读 unconsolidated episodic → _synthesize_growth（纯函数）
+                        → 备份 → 写 character_growth.md → 更新 fingerprint
+                        → 标记 episodic.consolidated_at → 重置 fixation_state
+```
+
+**关键时序**：本轮情绪在 post_process 才写入 mood_state，所以本轮情绪只影响**下一轮**的记忆召回。这是设计上的有意滞后，不是 bug。
+
+---
+
+## 三点八、信息固化 pipeline（fixation_pipeline）
+
+**文件**：`core/memory/fixation_pipeline.py`
+
+### 四 job 流向
+
+```
+capture_turn
+    │ turn_id
+    ▼
+summarize_to_midterm
+    │ mid_id  source_turn_id
+    ▼
+reflect_to_episodic  ←─── episodic_sweep（调度器，冷却 30min，aged > 11h）
+    │ ep_id  source_mid_ids  consolidated_at=None
+    ▼
+consolidate_to_growth
+    │ 更新 character_growth.md + fingerprint + felt.md
+    └─ 标记 episodic.consolidated_at，重置 fixation_state
+```
+
+### schema 字段（新增）
+
+**mid_term entry**（旧数据缺字段按 None 处理，不阻塞读路径）：
+| 字段 | 含义 |
+|---|---|
+| `mid_id` | 形如 `mt_{uid}_{ts_ms}` |
+| `source_turn_id` | 来源 turn_id |
+| `promoted_to_episodic_id` | 已晋升时填入 ep_id，否则 None |
+
+**episodic entry**（旧字段保留）：
+| 字段 | 含义 |
+|---|---|
+| `source_mid_ids` | 来源 mid_id 列表 |
+| `consolidated_at` | 已被 consolidate_to_growth 消费时填时间戳，否则 None |
+
+**fixation_state**（`data/fixation_state/{uid}.json`，重启不丢状态）：
+| 字段 | 含义 |
+|---|---|
+| `last_consolidated_at` | 上次固化时间戳 |
+| `episodic_since_last` | 上次固化后新增 episodic 数量 |
+| `high_strength_since_last` | 其中 strength ≥ 0.6 的数量 |
+| `strength_accumulated` | 上次固化后累积 strength 和 |
+| `last_sweep_at` | 上次 sweep 时间戳 |
+
+### consolidate_to_growth 触发阈值（满足任一）
+
+| 条件 | 说明 |
+|---|---|
+| `high_strength_since_last ≥ 5` | 5条高强度记忆 |
+| `strength_accumulated ≥ 4.0` | 累积强度达标 |
+| `距上次固化 ≥ 24h AND episodic_since_last ≥ 3` | 自然老化 |
+
+### 可观测日志
+
+每个 job 完成/失败后追加一行到 `data/logs/fixation.jsonl`（路径走 sandbox）：
+```json
+{"ts": 1748000000, "job": "reflect_to_episodic", "uid": "...", "trigger": "eager", "ep_id": "...", "duration_ms": 1200, "status": "ok"}
+```
+
+
+## 六、叶瑄日记（yexuan_inner_diary）
+
+**触发**：调度器每日 23:00，由 `_check_daily_journal()` 生成
+
+**生成方式**：两次 LLM 调用，合并写入同一个 `.md` 文件
+
+**文件格式**：
+YYYY-MM-DD
+今日事件
+
+HH:MM 发生了什么（客观事实，分析器视角）
+HH:MM 发生了什么
+
+今日感受
+叶瑄第一人称的心理活动和感受……
+
+**注入方式**（prompt 层 6e，读昨天的文件）：
+- 事件层：必注入，取前 200 字
+- 感受层：命中 `emotion.down / emotion.indirect / emotion.deep / topic.relation` 时注入，取前 150 字
+
+**规则纠察**：事件层写入前跑 `check_diary_facts()`，不合规则清空事件层，感受层仍正常写入
+
+## 七、并发保护（locks）
+
+**文件**：`core/memory/locks.py`
+
+per-uid 锁（`uid_lock(uid)`）：保护所有按 uid 分文件的读-改-写操作，
+包括 short_term、event_log、mid_term、user_profile、character_growth、episodic_memory。
+
+全局锁（`global_lock("mood_state")`）：保护跨 uid 共享的 mood_state 文件。
+
+两种锁均为 asyncio.Lock，在单线程事件循环内安全。
+post_process 进入即获取 uid 锁，单用户连发会后台排队，主流程回复不受影响。
+
+## 八、感知暂存（pending_perception）
+
+**文件**：`core/memory/pending_perception.py`
+**存储**：`data/pending_perception/` 时间戳命名 json 文件
+
+### 两阶段提交（含竞态消除）
+
+| 阶段 | 触发 | 操作 |
+|---|---|---|
+| 写入 | pipeline 桌面动作失败时 | 新建文件到根目录，consumed_at=null |
+| 原子抢占 | build_prompt 调 read_and_mark() | os.rename 移到 processing/ 子目录，并发时只有一个 task 成功 |
+| 删除 | post_process 成功后 confirm_delivered() | 删除 processing/ 下的文件 |
+| 兜底清理 | 启动时 cleanup_stale() | 根目录超24h删除；processing/ 下 mtime 超1h删除 |
+
+竞态消除：两个并发 build_prompt 同时看到同一文件，os.rename 是原子操作，
+只有一个 task 能成功移动文件，另一个得到 FileNotFoundError 直接跳过。
+
+### 降级行为
+pipeline 中途失败时不调 confirm_delivered，文件保留。
+下次 build_prompt 时因 consumed_at 已标记不会重读（避免重复注入）。
+cleanup_stale 1小时后兜底删除。

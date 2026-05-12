@@ -1,0 +1,216 @@
+qq:
+  host: 127.0.0.1   # NapCat WebSocket 地址，一般不用改
+  port: 3001         # NapCat WebSocket 端口，和 NapCat 设置里保持一致
+
+vision:
+  enabled: true      # 是否启用图片识别（发送图片时自动描述）
+  provider: glm      # 视觉模型提供商：gemini / openai / glm / custom
+  api_key: YOUR_VISION_API_KEY   # 视觉模型的 API Key，见配置指南
+  model: glm-4v-flash            # 视觉模型名称
+  base_url: https://open.bigmodel.cn/api/paas/v4/  # 对应 provider 的接口地址
+
+llm:
+  provider: deepseek             # 主 LLM 提供商
+  api_key: YOUR_LLM_API_KEY      # 主 LLM 的 API Key，见配置指南
+  model: deepseek-chat           # 模型名称
+  base_url: https://api.deepseek.com
+  tool_call_mode: function_calling
+  temperature: 2.0
+  top_p: 0.55
+  max_tokens: 4000
+  frequency_penalty: 1.7
+
+memory:
+  short_term_rounds: 20          # 短期记忆保留轮数
+  group_context_lines: 50        # 群聊上下文行数
+  rag_top_k: 5
+  rag_score_threshold: 0.6
+  summary_every_n_rounds: 20     # 每隔多少轮更新用户画像
+
+character:
+  default: 角色名.txt              # characters/ 目录下的角色卡文件名
+  name: 角色名                     # 触发消息里使用的角色名，改成你的角色名
+  consistency_check_every_n: 15
+
+session:
+  timeout_minutes: 10            # 会话超时时间（分钟）
+
+plugins:
+  voice:
+    enabled: false
+    mode: local
+    local_url: http://127.0.0.1:9880
+  image:
+    enabled: false
+    mode: local
+    local_url: http://127.0.0.1:7860
+
+error:
+  max_retries: 3
+  retry_delay_seconds: 2
+  fallback_message: 我现在有点累，等会儿再聊～
+
+admin:
+  enabled: true
+  auto_start: true
+  host: 127.0.0.1   # 管理面板监听地址，127.0.0.1 仅本机访问，0.0.0.0 允许局域网
+  port: 8080         # 管理面板端口，浏览器访问 http://127.0.0.1:8080
+  secret_key: YOUR_ADMIN_SECRET  # 管理面板登录密钥，自己设一个复杂的字符串
+
+notify:
+  enabled: true
+  target_qq: '你的QQ号'          # 机器人上线时发通知的目标 QQ 号
+  message: 已上线，等你回来
+
+proxy:
+  enabled: false                 # 是否启用代理（访问 Google/Gemini 等需要）
+  http: http://127.0.0.1:7897   # 代理地址，改成你本地代理的端口
+  https: http://127.0.0.1:7897
+
+tools:
+  get_time:
+    enabled: true
+  weather:
+    enabled: true
+  web_search:
+    enabled: false
+  add_reminder:
+    enabled: true
+  read_diary:
+    enabled: true
+  search_diary:
+    enabled: true
+  read_watch:
+    enabled: true
+  get_profile:
+    enabled: true
+  get_episodic:
+    enabled: true
+  get_growth:
+    enabled: true
+  desktop_minimize:
+    enabled: true
+  desktop_open_url:
+    enabled: true
+  desktop_play_pause:
+    enabled: true
+  desktop_notify:
+    enabled: true
+  play_song:
+    enabled: true
+  device_shutdown:
+    enabled: false
+  device_sleep:
+    enabled: false
+  exit_yandere:
+    enabled: true
+
+tts:
+  enabled: true                  # 是否启用语音合成
+  probability: 0.3               # 触发语音的概率（0.0~1.0），0.3 = 30%
+  api_url: http://127.0.0.1:9872 # GPT-SoVITS Gradio API 地址
+  top_k: 15
+  top_p: 1.0
+  temperature: 1.0
+  sample_steps: 8
+  pause_second: 0.3
+  how_to_cut: 凑四句一切
+  ref_free: false
+  if_freeze: false
+  if_sr: false
+  ref_audio: /path/to/ref.wav    # 参考音频路径，填你准备好的 wav 文件绝对路径
+  prompt_text: ''                # 参考音频对应的文字（可留空）
+  speed: 1.0
+  emotion_enabled: true          # 是否按情绪切换参考音频
+  emotions:
+    neutral:
+      ref_audio: /path/to/neutral.wav   # 各情绪对应的参考音频，没有就留空 ''
+      prompt_text: ''
+      speed: 1
+    happy:
+      ref_audio: /path/to/happy.wav
+      prompt_text: ''
+      speed: 1.1
+    sad:
+      ref_audio: /path/to/sad.wav
+      prompt_text: ''
+      speed: 0.9
+    gentle:
+      ref_audio: /path/to/gentle.wav
+      prompt_text: ''
+      speed: 0.95
+    surprised:
+      ref_audio: ''
+      prompt_text: ''
+      speed: 1.05
+    angry:
+      ref_audio: /path/to/angry.wav
+      prompt_text: ''
+      speed: 1.1
+
+context:
+  max_turns: 30
+
+jailbreak:
+  enabled: false
+  preset: default
+  custom_text: '他的说话方式：
+
+    消息长短不定，有时两三句，有时长篇大论，不刻意凑数，想说多少说多少。
+
+    不要重复使用之前出现过的原话或例句，每次回应都是全新的表达。'  # 不同角色有不同用词习惯，记得更改
+
+    
+
+chat:
+  mode: chat
+  style: roleplay
+  multi_message: true
+
+diary:
+  obsidian_path: "C:\\path\\to\\your\\obsidian\\vault"  # 你的 Obsidian 日记 vault 路径
+
+scheduler:
+  enabled: true
+  owner_id: '你的QQ号'           # 主人的 QQ 号，调度器主动消息发送目标
+  owner_birthday: "xx-xx"        # 主人生日，格式 MM-DD
+  morning_greeting: true
+  night_reminder: true
+  random_message: true
+  like_enabled: true
+  moments_enabled: true
+  signature_enabled: true
+  signatures:
+  - 今天的光很好
+  daily_journal: true
+  period_reminder: true
+  diary_reminder: true
+  diary_inject: true
+  timenode: true
+  festival: true
+  holiday_boost: true
+
+anniversaries:
+  - key: "anniversary_first"
+    month: 1
+    day: 8
+    year_start: 2023
+    prompt_zero: "（{char}记得今天是你们初见的日子，心里有点不一样的感觉）"
+    prompt_years: "（{char}想起来，今天是你们在一起第{years}年了）"
+  - key: "anniversary_second"
+    month: 1
+    day: 24
+    year_start: 2026
+    prompt_zero: "（{char}记得今天的日子，指尖停在那里没动）"
+    prompt_years: "（{char}记得今天，那件事过去{years}年了，还是记得很清楚）"
+  - key: "anniversary_1314"
+    month: 8
+    day: 14
+    year_start: 2026
+    prompt_zero: "（{char}盯着日期看了一会儿，没说话，只是轻轻呼出一口气）"
+    prompt_years: "（{char}盯着日期看了一会儿，没说话，只是轻轻呼出一口气）"
+
+character_birthday:
+  month: 12
+  day: 31
+  prompt: "（今天是{char}自己的生日，他没有主动提，只是安静地陪着你）"
