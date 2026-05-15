@@ -61,21 +61,41 @@ def _strip_third_person_narrative(text: str) -> str:
     return result
 
 
-def _sanitize_assistant_message(content: str) -> str:
+def _sanitize_assistant_message(content: str, uid: str = "") -> str:
     """
     对过长的 assistant 回复做风格脱敏，保留台词，删除括号内动作描写。
 
     规则：
     - 总长度 ≤ 80 字：原样保留
-    - 超过 80 字：删除所有 () 和 （） 包围的内容
+    - 超过 80 字：括号内容 ≤8 字保留，>8 字删除
     - 删除后如果为空（说明全是动作描写），返回截断到80字的原文
     - 继续检测并过滤第三人称叙事腔
     """
     if not content or len(content) <= 80:
         return content
 
-    cleaned = re.sub(r'[（(][^）)]*[）)]', '', content)
+    kept_parens: list[str] = []
+    stripped_parens: list[str] = []
+
+    def _strip_long_parens(match: re.Match) -> str:
+        inner = match.group(0)
+        paren_content = inner[1:-1]
+        if len(paren_content) <= 8:
+            kept_parens.append(inner)
+            return inner
+        stripped_parens.append(inner)
+        return ''
+
+    cleaned = re.sub(r'[（(][^）)]*[）)]', _strip_long_parens, content)
     cleaned = cleaned.strip()
+
+    if kept_parens or stripped_parens:
+        logger.debug(
+            json.dumps(
+                {"ts": time.time(), "uid": uid, "kept_parens": kept_parens, "stripped_parens": stripped_parens},
+                ensure_ascii=False,
+            )
+        )
 
     if not cleaned:
         return content[:80] + "..."
@@ -108,7 +128,7 @@ def load(user_id: str) -> list[dict]:
             # 风格脱敏：防止 history 里的塌缩样本被 ds 自模仿
             for msg in data:
                 if msg.get("role") == "assistant":
-                    msg["content"] = _sanitize_assistant_message(msg.get("content", ""))
+                    msg["content"] = _sanitize_assistant_message(msg.get("content", ""), uid=user_id)
             return data
     except Exception as e:
         log_error("short_term.load", e)

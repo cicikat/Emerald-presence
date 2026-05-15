@@ -88,3 +88,6 @@ python run_test.py
 3. **新增 prompt 层必须加 `_layer` 字段，裁剪逻辑才能识别。**
 4. **tag 规则改动后，用 `python tests/run_eval.py` 验证层激活情况。**
 5. **改 assistant 消息写入或截断逻辑前，必须先看 `_sanitize_assistant_message`，避免绕过脱敏。**
+6. WebSocket 客户端必须绕过系统代理。`websocket-client` 库会自动读取
+   `HTTP_PROXY` / `HTTPS_PROXY` 环境变量，必须在 `run_forever` 调用前
+   临时清除（连接结束后恢复）。`http_proxy_host=""` 这种参数不顶用。
