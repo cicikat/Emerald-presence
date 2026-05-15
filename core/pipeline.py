@@ -470,7 +470,7 @@ class Pipeline:
             action_payload = {"type": action, **params}
             last_result = "未执行"
             for _ in range(2):
-                last_result = _push_desktop_action(action_payload)
+                last_result = await _push_desktop_action(action_payload)
                 if last_result == "ok":
                     break
                 await asyncio.sleep(0.5)
