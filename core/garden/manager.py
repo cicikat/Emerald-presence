@@ -22,6 +22,11 @@ from core.garden.constants import (
     STAGE_THRESHOLDS,
     AUTO_WATER_PROBABILITY,
     HARVEST_EXPIRE_SECONDS,
+    HARVEST_HANDLE_SECONDS,
+    VASE_WILT_SECONDS,
+    HANDLE_ASK_THRESHOLD,
+    HANDLE_SELF_THRESHOLD,
+    HANDLE_GIFT_THRESHOLD,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,6 +57,14 @@ def _save(path: Path, data) -> None:
 
 
 # ── 内部工具函数 ───────────────────────────────────────────────────────────────
+
+def _flower_meta(flower_id: str) -> dict:
+    """Return {name, language} for a flower_id, fallback to defaults."""
+    for flower in FLOWERS:
+        if flower["id"] == flower_id:
+            return {"name": flower["name"], "language": flower["language"]}
+    return {"name": flower_id, "language": ""}
+
 
 def _stage_for_growth(growth: int) -> str:
     """遍历 STAGE_THRESHOLDS，取 growth 能到达的最高 stage。"""
@@ -140,11 +153,14 @@ def water(slot_key: str, *, reason: str) -> dict:
     new_stage = _stage_for_growth(plant["growth"])
     bloomed = new_stage == "bloom" and old_stage != "bloom"
 
+    events = []
     if bloomed:
         plant["bloomed_at"] = time.time()
         storage = _load(_storage_path(), {"harvest": [], "vase": [], "history": []})
         _on_bloom(plant, storage)
         _save(_storage_path(), storage)
+        meta = _flower_meta(plant["flower_id"])
+        events.append({"type": "bloom", "flower_id": plant["flower_id"], "name": meta["name"]})
     else:
         plant["stage"] = new_stage
 
@@ -157,6 +173,7 @@ def water(slot_key: str, *, reason: str) -> dict:
         "stage": plant["stage"],
         "growth": plant["growth"],
         "bloomed": bloomed,
+        "events": events,
         "reason": reason,
     }
 
@@ -192,6 +209,87 @@ def force_water(mood: str | None = None) -> dict:
         return {"ok": False, "reason": "no_slot_for_mood", "mood": mood}
 
     return water(slot_key, reason="force")
+
+
+def daily_check() -> list:
+    """
+    每天扫一次：harvest 过期 / harvest 触发 handle / vase 枯萎。
+    状态变更必执行；返回事件列表给上层 trigger 决定是否让叶瑄说话。
+    """
+    _bootstrap()
+    storage = _load(_storage_path(), {"harvest": [], "vase": [], "history": []})
+    now = time.time()
+    events = []
+
+    # A. harvest 过期（now > expires_at）
+    expired = [
+        item for item in storage.get("harvest", [])
+        if now > item.get("expires_at", float("inf"))
+    ]
+    for item in expired:
+        storage["harvest"].remove(item)
+        item["status"] = "expired"
+        storage.setdefault("history", []).append(item)
+        meta = _flower_meta(item["flower_id"])
+        events.append({"type": "harvest_expired", "flower_id": item["flower_id"], "name": meta["name"]})
+
+    # B. harvest 触发 handle（bloomed_at 超过 HARVEST_HANDLE_SECONDS 且未触发过）
+    harvest_to_remove = []
+    for item in list(storage.get("harvest", [])):
+        if item.get("handle_triggered"):
+            continue
+        if now - item.get("bloomed_at", now) <= HARVEST_HANDLE_SECONDS:
+            continue
+        item["handle_triggered"] = True
+        r = random.random()
+        meta = _flower_meta(item["flower_id"])
+        if r < HANDLE_ASK_THRESHOLD:
+            action = "ask"
+        elif r < HANDLE_SELF_THRESHOLD:
+            if random.random() < 0.5:
+                action = "dry"
+                item["status"] = "dried"
+            else:
+                action = "vase"
+                item["status"] = "vased"
+                storage.setdefault("vase", []).append({
+                    "flower_id": item["flower_id"],
+                    "placed_at": now,
+                    "wilts_at": now + VASE_WILT_SECONDS,
+                })
+                harvest_to_remove.append(item)
+        elif r < HANDLE_GIFT_THRESHOLD:
+            action = "gift"
+            item["gifted_note"] = meta["language"]
+        else:
+            action = "silent"
+        event = {
+            "type": "harvest_handle",
+            "handle_action": action,
+            "flower_id": item["flower_id"],
+            "name": meta["name"],
+        }
+        if action == "gift":
+            event["language"] = meta["language"]
+        events.append(event)
+
+    for item in harvest_to_remove:
+        try:
+            storage["harvest"].remove(item)
+        except ValueError:
+            pass
+
+    # C. vase 枯萎（now > wilts_at）
+    wilted = [v for v in storage.get("vase", []) if now > v.get("wilts_at", float("inf"))]
+    for item in wilted:
+        storage["vase"].remove(item)
+        item["status"] = "wilted"
+        storage.setdefault("history", []).append(item)
+        meta = _flower_meta(item["flower_id"])
+        events.append({"type": "vase_wilted", "flower_id": item["flower_id"], "name": meta["name"]})
+
+    _save(_storage_path(), storage)
+    return events
 
 
 def get_state() -> dict:
