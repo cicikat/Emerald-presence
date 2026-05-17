@@ -17,9 +17,13 @@
 import json
 import time
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from typing import Optional
+from admin.auth import verify_token
 from core.config_loader import get_config
 from core.memory.user_profile import load as _load_profile, save as _save_profile
+from core.memory import realtime_state
 from core.sandbox import get_paths
 
 router = APIRouter()
@@ -141,6 +145,68 @@ async def get_sensor_today():
         return {}
     profile = _load_profile(oid)
     return profile.get("phone_sensor_today", {})
+
+
+# ── Pydantic 模型（仅 /sensor/realtime 使用，不对外暴露）─────────────────────
+
+class _RealtimeInput(BaseModel):
+    keystrokes: int = Field(ge=0)
+    mouse_clicks: int = Field(ge=0)
+    mouse_distance_px: int = Field(ge=0)
+    idle_seconds: int = Field(ge=0)
+
+
+class _RealtimeFocus(BaseModel):
+    app: str
+    title_hint: str
+    switch_count: int = Field(ge=0)
+
+
+class _RealtimeIngest(BaseModel):
+    window_seconds: int = Field(ge=1, le=300)
+    ts: float
+    sensor_version: str
+    input: _RealtimeInput
+    focus: _RealtimeFocus
+
+
+@router.post("/sensor/realtime", summary="接收桌面端实时传感器快照")
+async def receive_realtime_snapshot(
+    payload: _RealtimeIngest,
+    auth=Depends(verify_token),
+):
+    # title_hint server-side 兜底截断
+    if len(payload.focus.title_hint) > 80:
+        payload.focus.title_hint = payload.focus.title_hint[:80]
+
+    realtime_state.update(payload.model_dump())
+    return {"ok": True, "received_at": time.time()}
+
+
+@router.get("/sensor/realtime", summary="读取最新实时状态快照")
+async def get_realtime_snapshot(auth=Depends(verify_token)):
+    snap = realtime_state.get()
+    if snap is None:
+        return {
+            "ts": None,
+            "stale_seconds": None,
+            "presence": "active",
+            "continuous_at_desk_seconds": None,
+            "sensor_version": None,
+            "window_seconds": None,
+            "input": None,
+            "focus": None,
+        }
+    return {
+        "ts":                          snap["ts"],
+        "stale_seconds":               int(time.time() - snap["received_at"]),
+        "presence":                    realtime_state.get_presence(),
+        "continuous_at_desk_seconds":  realtime_state.get_continuous_at_desk_seconds(),
+        "sensor_version":              snap["sensor_version"],
+        "window_seconds":              snap["window_seconds"],
+        "input":                       snap["input"],
+        "focus":                       snap["focus"],
+    }
 
 
 @router.post("/sensor/activity", summary="接收桌宠端活动快照")
