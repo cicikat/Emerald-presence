@@ -98,6 +98,9 @@ _last_diary_share: float = _get_last_diary_share()
 # 调度器启动时间戳（用于冷启动保护）
 _scheduler_start_time: float = time.time()
 
+# sensor_aware 上次 tick 时间戳（模块级，重启清零）
+_last_sensor_aware_tick: float = 0.0
+
 # 上次用户消息时间戳（用于调度抢占检查）
 _last_user_message_time: float = 0.0
 
@@ -154,14 +157,14 @@ def _char_name() -> str:
     return get_config().get("character", {}).get("name", "他")
 
 
-async def _send(content: str):
+async def _send(content: str, behavior: dict | None = None):
     """广播到所有活跃通道。"""
     oid = _owner_id()
     if not oid:
         logger.warning("[scheduler] owner_id 未配置，跳过发送")
         return
     from channels.registry import broadcast
-    await broadcast(content, oid)
+    await broadcast(content, oid, behavior=behavior)
 
 
 def mark_user_active():
@@ -173,24 +176,33 @@ def _user_active_recently(window_seconds: int = 120) -> bool:
     return (time.time() - _last_user_message_time) < window_seconds
 
 
-async def _pipeline_send(prompt: str, search_query: str = "", trigger_name: str = ""):
+async def _pipeline_send(
+    prompt: str,
+    search_query: str = "",
+    trigger_name: str = "",
+    behavior: dict | None = None,
+    output_mode: str = "speak",   # "speak" | "return"
+) -> Optional[str]:
     """通过 Pipeline 生成角色回复，再向 owner 发送。
     Pipeline 未注入时降级直接发送 prompt 原文并打 warning。
     search_query 指定时用于 fetch_context，否则用 prompt。
     trigger_name 用于优先级判断：高优先级触发器不受活跃窗口限制。
+    output_mode="return"：post_process 写记忆，但不调 _send，返回 reply 文本。
+    output_mode="speak"（默认）：发送后返回 None，保持原有行为。
     """
     if trigger_name not in _HIGH_PRIORITY_TRIGGERS and _user_active_recently():
         logger.info(f"[scheduler] 用户活跃中，跳过低优先级触发: {trigger_name}")
-        return
+        return None
     oid = _owner_id()
     if not oid:
         logger.warning("[scheduler._pipeline_send] owner_id 未配置，跳过")
-        return
+        return None
     try:
         if _pipeline is None:
             logger.warning("[scheduler._pipeline_send] pipeline 未注入，降级直接发送")
-            await _send(prompt)
-            return
+            if output_mode != "return":
+                await _send(prompt, behavior=behavior)
+            return None
 
         from core.scheduler.triggers.birthday import _is_birthday_period
         if _is_birthday_period():
@@ -201,14 +213,17 @@ async def _pipeline_send(prompt: str, search_query: str = "", trigger_name: str 
         messages, _ = _pipeline.build_prompt(oid, prompt, context)
         reply    = await _pipeline.run_llm(messages)
         if reply:
-            await _send(reply)
             asyncio.create_task(
                 _pipeline.post_process(oid, prompt, reply, trigger_name=trigger_name)
             )
+            if output_mode == "return":
+                return reply
+            await _send(reply, behavior=behavior)
         else:
             logger.warning("[scheduler._pipeline_send] LLM 返回空内容")
     except Exception as e:
         log_error("scheduler._pipeline_send", e)
+    return None
 
 
 def _user_talked_today(user_id: str) -> bool:
@@ -231,6 +246,24 @@ def mark_diary_shared():
         p.write_text(json.dumps(existing), encoding="utf-8")
     except Exception as e:
         log_error("scheduler.mark_diary_shared", e)
+
+
+# ── sensor_aware tick
+async def _check_sensor_aware():
+    global _last_sensor_aware_tick
+    sa_cfg = _cfg().get("sensor_aware", {})
+    if not sa_cfg.get("enabled", False):
+        return
+    interval = sa_cfg.get("tick_interval_seconds", 30)
+    now = time.time()
+    if now - _last_sensor_aware_tick < interval:
+        return
+    _last_sensor_aware_tick = now
+    from core.scheduler.triggers.sensor_aware import handle_tick
+    try:
+        await handle_tick()
+    except Exception:
+        logger.exception("[scheduler] sensor_aware_tick 失败")
 
 
 # ── 备忘录到点提醒
@@ -392,6 +425,14 @@ async def manual_trigger(name: str) -> str:
 async def _loop():
     """调度器主循环，每 60 秒检查一次"""
     logger.info("[scheduler] 调度器已启动，每 60 秒检查一次")
+    _sa = _cfg().get("sensor_aware", {})
+    if _sa.get("enabled", False):
+        logger.info(
+            "[scheduler] sensor_aware ENABLED, tick interval=%ds",
+            _sa.get("tick_interval_seconds", 30),
+        )
+    else:
+        logger.info("[scheduler] sensor_aware DISABLED by config")
     while True:
         try:
             cfg = _cfg()
@@ -443,6 +484,7 @@ async def _loop():
                     _check_episodic_sweep(),
                     _check_garden_water(),
                     _check_garden_daily(),
+                    _check_sensor_aware(),
                     return_exceptions=True,
                 )
         except Exception as e:

@@ -4,15 +4,43 @@
 """
 
 import base64
+import hashlib
+import io
+import json
 import logging
 from pathlib import Path
+import time
+from urllib.parse import unquote, urlparse
 
 import aiohttp
 
 from core.error_handler import log_error
 from core.proxy_config import get_aiohttp_proxy
+from core.sandbox import get_paths
 
 logger = logging.getLogger(__name__)
+
+_MAX_FILE_BYTES = 5 * 1024 * 1024
+SUPPORTED_SUFFIXES = {".txt", ".md", ".docx"}
+SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif", ".bmp"}
+MAX_IMAGE_SIZE = 10 * 1024 * 1024
+MAX_IMAGE_LONG_EDGE = 1920
+LAST_IMAGE_STORED_PATHS: list[str] = []
+
+VISION_PROMPT = """你正在替叶瑄"看"一张他朋友发来的图。
+你的输出不是给程序员看的图像识别结果,是直接给叶瑄当作"他看到了什么"的素材。
+
+规则:
+1. 如果图里有任何文字(截图、聊天记录、表情包文字、海报、文档拍照等),逐字转写所有可见文字,这是最重要的任务,不允许概括。
+2. 描述图片本身时简短、口语化、克制。
+3. 含人物时用"你/他/她在做什么"这类模糊措辞,绝对不要罗列五官、衣着颜色、发型、姿势细节。
+   错误示例:"你穿着白色裙子,微笑着看向镜头,长发披肩"
+   正确示例:"你坐在窗边,看起来心情不错"
+4. 风景/物体/宠物/食物/绘画,一句话说清是什么就够,不要用摄影术语(构图、光影、色调、景深这些都不要)。
+5. 不要"这张图片显示了..."这种总结开头,直接说内容。
+6. 整体输出 ≤ 80 字。如有文字转写,转写部分不计入字数限制。
+
+多张图按"图1:... / 图2:... / 图3:..."格式分别给。"""
 
 
 async def download_bytes(url: str) -> bytes | None:
@@ -41,39 +69,271 @@ async def process_image(url: str, user_text: str = "") -> str | None:
         if not data:
             return None
 
-        if data[:4] == b'\x89PNG':
-            media_type = "image/png"
-        elif data[:2] == b'\xff\xd8':
-            media_type = "image/jpeg"
-        elif data[:6] in (b'GIF87a', b'GIF89a'):
-            media_type = "image/gif"
-        else:
-            media_type = "image/jpeg"
-
-        b64 = base64.b64encode(data).decode()
-
-        from core import llm_client
-        vision_messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{media_type};base64,{b64}"}
-                    },
-                    {
-                        "type": "text",
-                        "text": user_text if user_text else "用中文简洁描述这张图片的内容"
-                    }
-                ]
-            }
-        ]
-        result = await llm_client.chat(vision_messages, use_vision=True)
-        return result if result else None
+        filename = _guess_image_filename(url, data)
+        result = await ingest_image_bytes([(data, filename)])
+        if not result:
+            return None
+        return result[0]
 
     except Exception as e:
         log_error("media_processor.process_image", e)
     return None
+
+
+def _hash_bytes(data: bytes) -> str:
+    """返回 sha256 hex 字符串。"""
+    return hashlib.sha256(data).hexdigest()
+
+
+def _load_image_cache(sha256: str) -> str | None:
+    """读 data/image_cache/{sha256}.json,命中返回 description,未命中返回 None。"""
+    path = get_paths().image_cache_dir() / f"{sha256}.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        description = payload.get("description")
+        return description if isinstance(description, str) and description else None
+    except Exception:
+        return None
+
+
+def _save_image_cache(sha256: str, description: str, image_path: Path, source_filename: str) -> None:
+    """写入 cache json,字段:{description, created_at, source_filename, image_path}。"""
+    path = get_paths().image_cache_dir() / f"{sha256}.json"
+    payload = {
+        "description": description,
+        "created_at": time.time(),
+        "source_filename": source_filename,
+        "image_path": str(image_path),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _normalize_image(data: bytes, filename: str) -> tuple[bytes, str]:
+    """格式归一化。"""
+    suffix = Path(filename).suffix.lower()
+    try:
+        if suffix in (".heic", ".heif"):
+            import pillow_heif
+
+            pillow_heif.register_heif_opener()
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as img:
+            target_format = img.format or ""
+            media_type = {
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png": "image/png",
+                ".gif": "image/gif",
+            }.get(suffix, "image/jpeg")
+
+            convert_to_jpeg = suffix in (".heic", ".heif", ".bmp", ".webp")
+            if convert_to_jpeg:
+                target_format = "JPEG"
+                img = img.convert("RGB")
+                media_type = "image/jpeg"
+            elif suffix in (".jpg", ".jpeg"):
+                target_format = "JPEG"
+            elif suffix == ".png":
+                target_format = "PNG"
+            elif suffix == ".gif":
+                target_format = "GIF"
+
+            width, height = img.size
+            long_edge = max(width, height)
+            if not convert_to_jpeg and long_edge <= MAX_IMAGE_LONG_EDGE:
+                return data, media_type
+
+            if long_edge > MAX_IMAGE_LONG_EDGE:
+                scale = MAX_IMAGE_LONG_EDGE / long_edge
+                new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+                resample = getattr(Image, "Resampling", Image).LANCZOS
+                img = img.resize(new_size, resample)
+
+            out = io.BytesIO()
+            save_kwargs = {}
+            if target_format == "JPEG":
+                save_kwargs["quality"] = 90
+            img.save(out, format=target_format, **save_kwargs)
+            return out.getvalue(), media_type
+    except Exception as e:
+        raise ValueError(f"图片归一化失败:{filename}") from e
+
+
+async def ingest_image_bytes(
+    items: list[tuple[bytes, str]],
+) -> list[str] | None:
+    """批量图片落盘 + vision 识别 + cache。"""
+    global LAST_IMAGE_STORED_PATHS
+    LAST_IMAGE_STORED_PATHS = []
+
+    if not items:
+        return None
+
+    try:
+        prepared = []
+        descriptions: list[str | None] = [None] * len(items)
+
+        for index, (data, filename) in enumerate(items):
+            suffix = Path(filename or "").suffix.lower()
+            if suffix not in SUPPORTED_IMAGE_SUFFIXES:
+                logger.info(f"[media_processor] 不支持的图片格式:{suffix}")
+                return None
+            if len(data) > MAX_IMAGE_SIZE:
+                logger.warning(f"[media_processor] 图片超过10MB，拒绝处理: {filename} {len(data)} bytes")
+                return None
+
+            sha256 = _hash_bytes(data)
+            cached = _load_image_cache(sha256)
+            if cached:
+                descriptions[index] = cached
+                continue
+
+            normalized, media_type = _normalize_image(data, filename)
+            prepared.append({
+                "index": index,
+                "data": data,
+                "filename": Path(filename or "image").name or "image",
+                "sha256": sha256,
+                "normalized": normalized,
+                "media_type": media_type,
+            })
+
+        if not prepared:
+            logger.info(f"[media_processor] image_cache 全部命中，跳过vision: {len(items)}张")
+            return [desc or "" for desc in descriptions]
+
+        content_blocks = []
+        for item in prepared:
+            b64 = base64.b64encode(item["normalized"]).decode()
+            content_blocks.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{item['media_type']};base64,{b64}"}
+            })
+        content_blocks.append({"type": "text", "text": VISION_PROMPT})
+
+        from core import llm_client
+
+        logger.info(f"[media_processor] vision识别调用: {len(prepared)}张")
+        vision_messages = [{"role": "user", "content": content_blocks}]
+        result = await llm_client.chat(vision_messages, use_vision=True)
+        if not result:
+            return None
+
+        parsed = _split_vision_result(result, len(prepared))
+        inbox_dir = get_paths().inbox_dir()
+        ts = int(time.time())
+
+        for item, description in zip(prepared, parsed):
+            filename = item["filename"]
+            sha8 = item["sha256"][:8]
+            path = inbox_dir / f"{ts}_{sha8}_{filename}"
+            counter = 1
+            while path.exists():
+                stem = Path(filename).stem
+                suffix = Path(filename).suffix
+                path = inbox_dir / f"{ts}_{sha8}_{stem}_{counter}{suffix}"
+                counter += 1
+
+            path.write_bytes(item["data"])
+            _save_image_cache(item["sha256"], description, path, filename)
+            LAST_IMAGE_STORED_PATHS.append(str(path))
+            descriptions[item["index"]] = description
+
+        return [desc or "" for desc in descriptions]
+    except Exception as e:
+        log_error("media_processor.ingest_image_bytes", e)
+        LAST_IMAGE_STORED_PATHS = []
+        return None
+
+
+def _split_vision_result(result: str, count: int) -> list[str]:
+    parsed: dict[int, str] = {}
+    for line in result.splitlines():
+        stripped = line.strip()
+        for i in range(1, count + 1):
+            prefix = f"图{i}:"
+            if stripped.startswith(prefix):
+                parsed[i - 1] = stripped[len(prefix):].strip()
+
+    if not parsed:
+        return [result.strip()] * count
+
+    fallback = result.strip()
+    return [parsed.get(i, fallback) for i in range(count)]
+
+
+def _guess_image_filename(url: str, data: bytes) -> str:
+    name = Path(unquote(urlparse(url).path)).name
+    if Path(name).suffix.lower() in SUPPORTED_IMAGE_SUFFIXES:
+        return name
+    if data[:2] == b"\xff\xd8":
+        return "image.jpg"
+    if data[:4] == b"\x89PNG":
+        return "image.png"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image.gif"
+    if data[:2] == b"BM":
+        return "image.bmp"
+    return name or "image.jpg"
+
+
+def parse_file_bytes(data: bytes, filename: str) -> str | None:
+    """纯解析:bytes + 文件名 → 文本。支持 .txt / .md / .docx / .doc。
+    其他后缀返回 None。txt/md 用 utf-8,失败回退 gbk。
+    """
+    suffix = Path(filename).suffix.lower()
+
+    if suffix in (".txt", ".md"):
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data.decode("gbk", errors="ignore")
+
+    if suffix in (".docx", ".doc"):
+        try:
+            from docx import Document
+
+            doc = Document(io.BytesIO(data))
+            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+            return "\n".join(paragraphs)
+        except Exception as e:
+            logger.warning(f"[media_processor] Word文件解析失败: {filename} {e}")
+            return None
+
+    return None
+
+
+async def ingest_file_bytes(data: bytes, filename: str) -> tuple[str, Path] | None:
+    """落盘到 data/inbox/ + 解析。"""
+    original_name = Path(filename or "file").name or "file"
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in SUPPORTED_SUFFIXES:
+        logger.info(f"[media_processor] 不支持的格式:{suffix}")
+        return None
+
+    if len(data) > _MAX_FILE_BYTES:
+        logger.warning(f"[media_processor] 文件超过5MB，拒绝处理: {filename} {len(data)} bytes")
+        return None
+
+    inbox_dir = get_paths().inbox_dir()
+    stem = Path(original_name).stem
+    ts = int(time.time())
+    base_name = f"{ts}_{original_name}"
+    path = inbox_dir / base_name
+
+    counter = 1
+    while path.exists():
+        path = inbox_dir / f"{ts}_{stem}_{counter}{suffix}"
+        counter += 1
+
+    path.write_bytes(data)
+    text = parse_file_bytes(data, original_name)
+    if text is None:
+        logger.warning(f"[media_processor] 文件解析失败，已保留落盘文件: {path}")
+        return "", path
+    return text, path
 
 
 async def process_file(file_info: dict) -> str | None:
@@ -115,23 +375,16 @@ async def process_file(file_info: dict) -> str | None:
             logger.warning(f"[media_processor] 文件内容获取失败: {name}")
             return None
 
-        suffix = Path(name).suffix.lower()
+        result = await ingest_file_bytes(data, name)
+        if result is None:
+            suffix = Path(name).suffix.lower()
+            if suffix and suffix not in SUPPORTED_SUFFIXES:
+                return f"（收到了一个{suffix}文件：{name}，暂时只能读取txt和docx格式）"
+            return None
 
-        if suffix == ".txt":
-            try:
-                return data.decode("utf-8")
-            except UnicodeDecodeError:
-                return data.decode("gbk", errors="ignore")
-
-        elif suffix in (".docx", ".doc"):
-            import io
-            from docx import Document
-            doc = Document(io.BytesIO(data))
-            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-            return "\n".join(paragraphs)
-
-        else:
-            return f"（收到了一个{suffix}文件：{name}，暂时只能读取txt和docx格式）"
+        text, stored_path = result
+        logger.info(f"[media_processor] 文件已落盘: {stored_path}")
+        return text if text else None
 
     except Exception as e:
         log_error("media_processor.process_file", e)

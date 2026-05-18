@@ -162,12 +162,21 @@ class _RealtimeFocus(BaseModel):
     switch_count: int = Field(ge=0)
 
 
+class _RealtimeScreen(BaseModel):
+    package_name: str = ""
+    app_label: str = ""
+    window_title: str = ""
+    visible_text: list[str] = []
+    clickable_text: list[str] = []
+
+
 class _RealtimeIngest(BaseModel):
     window_seconds: int = Field(ge=1, le=300)
     ts: float
     sensor_version: str
     input: _RealtimeInput
     focus: _RealtimeFocus
+    screen: Optional[_RealtimeScreen] = None
 
 
 @router.post("/sensor/realtime", summary="接收桌面端实时传感器快照")
@@ -179,7 +188,25 @@ async def receive_realtime_snapshot(
     if len(payload.focus.title_hint) > 80:
         payload.focus.title_hint = payload.focus.title_hint[:80]
 
-    realtime_state.update(payload.model_dump())
+    data = payload.model_dump()
+    if payload.screen is not None:
+        data["screen"] = {
+            "package_name": payload.screen.package_name[:120],
+            "app_label": payload.screen.app_label[:80],
+            "window_title": payload.screen.window_title[:120],
+            "visible_text": [
+                str(x).strip()[:80]
+                for x in payload.screen.visible_text
+                if str(x).strip()
+            ][:60],
+            "clickable_text": [
+                str(x).strip()[:80]
+                for x in payload.screen.clickable_text
+                if str(x).strip()
+            ][:40],
+        }
+
+    realtime_state.update(data)
     return {"ok": True, "received_at": time.time()}
 
 
@@ -196,6 +223,7 @@ async def get_realtime_snapshot(auth=Depends(verify_token)):
             "window_seconds": None,
             "input": None,
             "focus": None,
+            "screen": None,
         }
     return {
         "ts":                          snap["ts"],
@@ -206,7 +234,15 @@ async def get_realtime_snapshot(auth=Depends(verify_token)):
         "window_seconds":              snap["window_seconds"],
         "input":                       snap["input"],
         "focus":                       snap["focus"],
+        "screen":                      snap.get("screen"),
     }
+
+
+@router.get("/sensor/behavior/status", summary="读取最近一次 sensor_aware 行为裁决")
+async def get_behavior_status(auth=Depends(verify_token)):
+    from core.scheduler.triggers import sensor_aware
+
+    return sensor_aware.get_last_decision()
 
 
 @router.post("/sensor/activity", summary="接收桌宠端活动快照")

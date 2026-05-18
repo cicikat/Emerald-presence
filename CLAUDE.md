@@ -63,7 +63,7 @@ Scheduler       → core/scheduler/loop.py
 
 **Tool system**: Tools declared in `_TOOL_REGISTRY` in `core/tool_dispatcher.py`. `info`/`desktop` tools fire via pre-pipeline probe; reply-side desktop intent parsing runs after generation. `memory` tools are registered but are not currently exposed to the main generation call.
 
-**Garden system**: `core/garden/manager.py` maintains five mood-mapped flower slots under `data/garden/`. `core/scheduler/triggers/garden_water.py` rolls automatic watering every 30 minutes, and `GET /garden/state` exposes read-only admin state. See `docs/garden.md`.
+**Garden system**: `core/garden/manager.py` maintains five mood-mapped flower slots under `data/garden/`. `garden_water` rolls automatic watering every 30 minutes, `garden_daily` scans harvest/vase state, `water_garden` handles user-prompted watering through the info-tool probe, and `GET /garden/state` exposes admin state. See `docs/garden.md`.
 
 ## Hard Rules
 

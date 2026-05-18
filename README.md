@@ -124,7 +124,7 @@ python main.py
 | [docs/tools.md](docs/tools.md) | 工具系统、探针机制、桌面动作执行 |
 | [docs/scheduler.md](docs/scheduler.md) | 调度器触发器完整列表与冷却设计 |
 | [docs/channels.md](docs/channels.md) | QQ / 桌宠通道、WebSocket、文件降级与跨通道接续 |
-| [docs/garden.md](docs/garden.md) | 情绪花园、自动浇水、管理面板状态接口 |
+| [docs/garden.md](docs/garden.md) | 情绪花园、自动/被动浇水、采后处理、管理面板状态接口 |
 | [docs/known-issues.md](docs/known-issues.md) | 当前技术债与已核对修复项 |
 
 ---

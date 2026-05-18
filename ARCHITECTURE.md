@@ -9,16 +9,23 @@
 ```
 QQ 消息 → main.py → message_queue
 桌宠消息 → admin/routers/chat.py（POST /desktop/chat）
+手机消息 → admin/routers/chat.py（POST /mobile/chat）
+文件上传 → POST /upload/ingest → media_processor → 拼入用户消息
 调度器主动消息 → core/scheduler/loop.py
          ↓（入口共用）
       Pipeline（core/pipeline.py）
          ↓
       LLM（DeepSeek）
          ↓
-      channels.registry 广播到活跃通道（QQ / 桌宠）
+      channels.registry 广播到活跃通道（QQ / 桌宠 / 手机）
 ```
 
-通道细节见 `docs/channels.md`。花园这类不进入对话 pipeline 的伴生状态，见 `docs/garden.md`。
+通道细节见 `docs/channels.md`。手机端当前通过 mobile 轮询通道接收主动消息，不占用桌宠 WebSocket。花园这类不进入对话 pipeline 的伴生状态，见 `docs/garden.md`。
+
+手机端用户输入走 `POST /mobile/chat`，桌宠输入走 `POST /desktop/chat`。这两个 owner 入口共享
+`core/conversation_gate.py` 的 per-user conversation lock，保证同一用户多端输入按顺序完成
+`fetch_context → run_llm → critical post_process`。记忆文件自身仍由 `core/memory/locks.py`
+里的 `uid_lock` 保护。
 
 ---
 
@@ -63,6 +70,7 @@ get_tags()（对消息打话题标签，传给 build_prompt）
   │   ├─ mood_state.update(emotion)    更新情绪状态
   │   └─ yandere 触发检测              关键词 + 关系阈值
   └─ capture_turn()                    写 history + event_log（user/assistant，含 turn_id）
+                                      失败会入 capture_turn_retry 慢队列，重试超限落 DLQ
   │
   │  【慢队列】uid_lock 释放后入 slow_queue，单 worker 异步执行：
   ├─ summarize_to_midterm              LLM 压缩单轮到 mid_term，写血缘字段；emotion 显著时触发 reflect_to_episodic(eager)
@@ -99,6 +107,9 @@ get_tags()（对消息打话题标签，传给 build_prompt）
 ## 数据流向总图
 
 ```
+QQ/客户端/手机/HTTP上传
+    ↓ media_processor（文件落盘 + 解析）→ 拼 user message
+    ↓
 用户消息
     ↓ get_tags()
     ↓ 探针 + 工具执行
@@ -135,15 +146,16 @@ data/
 ├── reminders/{uid}.json          用户备忘录列表（调度器检查到期即发）
 ├── pending_perception/           桌面动作失败感知（时间戳命名，两阶段提交）
 ├── activity_snapshot.json        桌宠推来的活动快照（TTL 5 分钟）
-├── inbox/                        用户投递的原文档
+├── inbox/                        三端统一的文件落盘目录（QQ/客户端/手机/HTTP 上传都进这里）
+├── image_cache/                  图片 sha256 索引（描述文本 + 元数据）
 ├── pet.json                      角色宠物状态（core/pet.py 管理）
 ├── garden/
 │   ├── plants.json               五个情绪花槽状态（stage/growth/last_watered）
-│   └── storage.json              收获/花瓶/历史记录（当前主要写 harvest）
+│   └── storage.json              收获/花瓶/历史记录（harvest/vase/history）
 ├── yexuan_inner/
 │   ├── diary/                    角色日记（每日 23:00 调度器触发）
-│   ├── notes/                    角色读文档后的笔记
-│   ├── notes_index.json          笔记索引（inbox 生成；暂未注入 prompt）
+│   ├── notes/                    角色读文档后的笔记（已废弃，保留磁盘历史）
+│   ├── notes_index.json          笔记索引（inbox 生成；暂未注入 prompt）（已废弃，保留磁盘历史）
 │   ├── mood_state.json           角色当前情绪状态（全局唯一）
 │   ├── activity_pool.yaml        活动状态池（手写配置，固定路径，不走沙盒隔离）
 │   ├── activity_state.json       当前活动状态（activity_manager 管理）
@@ -153,6 +165,7 @@ data/
 │   └── presence.json             每个用户上次说话时间（presence.py 管理）
 ├── agent_actions.json            桌面动作队列（桌宠端轮询）
 ├── channel_queue.json            调度器广播队列（asyncio.Lock 保护）
+├── mobile_queue.json             手机主动消息轮询队列（MobileChannel 写，/mobile/poll 读）
 ├── scheduler_state.json          调度器冷却状态
 ├── fixation_state/{uid}.json     固化 pipeline 状态（episodic_since_last/strength_accumulated 等，重启不丢）
 ├── logs/

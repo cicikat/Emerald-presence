@@ -375,14 +375,19 @@ async def main():
     logger.info("主动行为调度器已启动")
 
     standalone_mode = cfg.get("standalone_mode", False)
+    qq_enabled = cfg.get("qq", {}).get("enabled", True)
+    qq_runtime_enabled = (not standalone_mode) and qq_enabled
 
     # 注册通道
     from channels.registry import register as _reg_channel
     from channels.desktop import DesktopChannel
+    from channels.mobile import MobileChannel
     _desktop_channel = DesktopChannel()
     _reg_channel(_desktop_channel)
+    _mobile_channel = MobileChannel()
+    _reg_channel(_mobile_channel)
 
-    if not standalone_mode:
+    if qq_runtime_enabled:
         from core import tool_dispatcher, qq_adapter, message_queue
         from channels.qq import QQChannel
         oid = str(cfg.get("scheduler", {}).get("owner_id", ""))
@@ -397,9 +402,12 @@ async def main():
         qq_adapter.on_message(on_message_received)
         logger.info("QQ 消息回调已注册")
     else:
-        logger.info("standalone_mode=true，跳过NapCat和QQ消息队列")
-        _desktop_channel.set_active(True)
-        logger.info("standalone_mode: desktop通道已激活")
+        if standalone_mode:
+            logger.info("standalone_mode=true，跳过NapCat和QQ消息队列")
+            _desktop_channel.set_active(True)
+            logger.info("standalone_mode: desktop通道已激活")
+        else:
+            logger.info("qq.enabled=false，跳过NapCat和QQ消息队列")
 
     tasks = []
     admin_cfg = cfg.get("admin", {})
@@ -410,11 +418,14 @@ async def main():
     else:
         logger.info("管理面板未启用（config.admin.enabled 或 auto_start 为 false）")
 
-    if not standalone_mode:
+    if qq_runtime_enabled:
         logger.info(f"正在连接 NapCat: ws://{cfg['qq']['host']}:{cfg['qq']['port']}")
         tasks.append(asyncio.create_task(qq_adapter.connect_and_listen()))
     else:
-        logger.info("standalone_mode=true，不连接NapCat")
+        if standalone_mode:
+            logger.info("standalone_mode=true，不连接NapCat")
+        else:
+            logger.info("qq.enabled=false，不连接NapCat")
     logger.info("Bot 已就绪，等待消息...")
     logger.info("=" * 60)
 

@@ -46,6 +46,9 @@ class DataPaths:
     def channel_queue(self) -> Path:
         return self._p("channel_queue.json")
 
+    def mobile_queue(self) -> Path:
+        return self._p("mobile_queue.json")
+
     def agent_actions(self) -> Path:
         return self._p("agent_actions.json")
 
@@ -106,13 +109,10 @@ class DataPaths:
         p.mkdir(parents=True, exist_ok=True)
         return p
 
-    def notes_dir(self) -> Path:
-        p = self._p("yexuan_inner", "notes")
+    def image_cache_dir(self) -> Path:
+        p = self._p("image_cache")
         p.mkdir(parents=True, exist_ok=True)
         return p
-
-    def notes_index(self) -> Path:
-        return self._p("yexuan_inner", "notes_index.json")
 
     def mood_state(self) -> Path:
         return self._p("yexuan_inner", "mood_state.json")

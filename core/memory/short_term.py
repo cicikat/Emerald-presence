@@ -12,6 +12,7 @@ from pathlib import Path
 
 from core.config_loader import get_config
 from core.error_handler import log_error
+from core.safe_write import safe_write_json
 from core.sandbox import get_paths
 
 logger = logging.getLogger(__name__)
@@ -162,7 +163,7 @@ def get_history(user_id: str, max_turns: int | None = None) -> list[dict]:
     return history[-max_msgs:] if len(history) > max_msgs else history
 
 
-def append(user_id: str, role: str, content: str, turn_id: str | None = None):
+def append(user_id: str, role: str, content: str, turn_id: str | None = None) -> bool:
     """
     追加一条消息到历史记录，并裁剪到最大轮数
 
@@ -175,6 +176,12 @@ def append(user_id: str, role: str, content: str, turn_id: str | None = None):
     max_msgs = max_rounds * 2  # 每轮 = user + assistant
 
     history = load(user_id)
+    if turn_id and any(
+        item.get("_turn_id") == turn_id and item.get("role") == role
+        for item in history
+    ):
+        return True
+
     entry: dict = {"role": role, "content": content, "timestamp": time.time()}
     if turn_id:
         entry["_turn_id"] = turn_id
@@ -184,17 +191,17 @@ def append(user_id: str, role: str, content: str, turn_id: str | None = None):
     if len(history) > max_msgs:
         history = history[-max_msgs:]
 
-    _save(user_id, history)
+    return _save(user_id, history)
 
 
-def _save(user_id: str, history: list[dict]):
+def _save(user_id: str, history: list[dict]) -> bool:
     """把历史记录写回磁盘"""
     path = _history_path(user_id)
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(history, f, ensure_ascii=False, indent=2)
+        return safe_write_json(path, history)
     except Exception as e:
         log_error("short_term._save", e)
+        return False
 
 
 def clear(user_id: str):

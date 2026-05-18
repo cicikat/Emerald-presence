@@ -1,0 +1,165 @@
+"""
+sensor_judge.py — sensor 候选事件裁决器。
+
+不扮演角色，只做客观打分。事件进，判决出，纯函数，不改任何状态。
+
+调用方式：result = await judge(event)
+"""
+import json
+import logging
+from typing import Optional
+
+from core.config_loader import get_config
+from core.llm_client import _get_client
+
+logger = logging.getLogger(__name__)
+
+# ── score → intent_tier 映射 ─────────────────────────────────────────────────
+def _score_to_tier(score: int) -> str:
+    if score < 41:
+        return "drop"
+    if score <= 55:
+        return "weak"
+    if score <= 70:
+        return "medium"
+    if score <= 85:
+        return "strong"
+    return "must"
+
+
+_FAILURE: dict = {"score": 0, "reason": "裁决失败", "intent_tier": "drop"}
+
+
+# ── 字段叙事化辅助 ────────────────────────────────────────────────────────────
+
+def _at_desk_human(secs: int) -> str:
+    if secs < 1800:
+        return "刚坐下没多久"
+    if secs < 3600:
+        return "快一个小时"
+    if secs < 7200:
+        return "一个多小时"
+    if secs < 10800:
+        return "两个多小时"
+    if secs < 14400:
+        return "三个多小时"
+    return "超过四小时"
+
+
+def _fmt_minutes(v) -> str:
+    return "从未" if v is None else str(v)
+
+
+# ── Prompt 模板 ───────────────────────────────────────────────────────────────
+
+_SYSTEM = (
+    "你是一个事件评估器。你的任务是为生活中的一个瞬间打分，"
+    "判断它是否值得一个陪伴者主动开口提及。\n\n"
+    "打分参考：\n"
+    "- 0-20：无价值，纯噪音，提及只会显得在刷存在感\n"
+    "- 21-40：勉强可提，但更像无话找话\n"
+    "- 41-60：中性时刻，可提可不提\n"
+    "- 61-80：有意义的瞬间，适合开口\n"
+    "- 81-100：几乎一定该说点什么\n\n"
+    "重要倾向（以下情况应扣分）：\n"
+    "- 距上次对话或主动开口很近（<10 分钟）\n"
+    "- 同类事件刚刚出现过\n"
+    "- 用户正在深度专注，打扰成本高\n"
+    "- 深夜时段，除非事件本身就跟「该休息」相关\n"
+    "- 事件描述非常普通，缺乏开口契机\n\n"
+    "只输出 JSON，不要 markdown，不要任何其他文字：\n"
+    '{"score": <0-100 整数>, "reason": "<不超过 20 字的中文理由>"}'
+)
+
+_USER_TEMPLATE = """\
+【事件】
+{event_narrative}
+
+【上下文】
+- 距上次有人主动开口：{minutes_since_last_proactive} 分钟
+- 距上次对话：{minutes_since_last_chat} 分钟
+- 现在是本地时间 {local_hour} 点
+- 用户在线状态：{presence}
+- 用户当前应用：{focus_app}
+- 用户当前在做什么：{focus_title_hint}
+- 手机屏幕文本摘要：{screen_text_hint}
+- 手机可点击项摘要：{screen_click_hint}
+- 用户已连续在桌前：{continuous_at_desk_human}
+- 用户键击密度：{keystroke_density}\
+"""
+
+
+# ── 对外接口 ─────────────────────────────────────────────────────────────────
+
+async def judge(event: dict) -> dict:
+    """
+    输入：sensor_events.tick() 的单个事件 dict
+    输出：{"score": int, "reason": str, "intent_tier": str,
+           "_audit_prompt": str|None, "_audit_raw_response": str|None}
+
+    _audit_* 字段仅供审计用，下游业务逻辑不读。
+    异常：任何情况都返回合法 dict，不抛异常，失败时 intent_tier="drop"。
+    """
+    event_type = event.get("type", "UNKNOWN")
+    narrative  = event.get("narrative", "")
+    ctx        = event.get("context", {})
+
+    at_desk_secs = int(ctx.get("continuous_at_desk_seconds") or 0)
+    user_text = _USER_TEMPLATE.format(
+        event_narrative=narrative,
+        minutes_since_last_proactive=_fmt_minutes(ctx.get("minutes_since_last_proactive")),
+        minutes_since_last_chat=_fmt_minutes(ctx.get("minutes_since_last_chat")),
+        local_hour=ctx.get("local_hour", "?"),
+        presence=ctx.get("presence", "unknown"),
+        focus_app=ctx.get("focus_app", ""),
+        focus_title_hint=ctx.get("focus_title_hint", ""),
+        screen_text_hint=ctx.get("screen_text_hint", ""),
+        screen_click_hint=ctx.get("screen_click_hint", ""),
+        continuous_at_desk_human=_at_desk_human(at_desk_secs),
+        keystroke_density=ctx.get("keystroke_density", "未知"),
+    )
+
+    messages = [
+        {"role": "system", "content": _SYSTEM},
+        {"role": "user",   "content": user_text},
+    ]
+
+    audit_prompt = f"[SYSTEM]\n{_SYSTEM}\n\n[USER]\n{user_text}"
+
+    try:
+        cfg    = get_config()["llm"]
+        client = _get_client()
+        # TODO: 待支持模型切换参数后改 deepseek-chat（当前 cfg["model"] 已是 deepseek-chat）
+        response = await client.chat.completions.create(
+            model=cfg["model"],
+            messages=messages,
+            max_tokens=80,
+            temperature=0.1,
+        )
+        raw = (response.choices[0].message.content or "").strip()
+    except Exception as e:
+        logger.warning(f"[sensor_judge] LLM 调用失败 event={event_type}: {e}")
+        return {**dict(_FAILURE), "_audit_prompt": audit_prompt, "_audit_raw_response": None}
+
+    # 解析 JSON（容错 markdown 代码块包裹）
+    try:
+        if raw.startswith("```"):
+            raw = raw.strip("`").lstrip("json").strip()
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        logger.warning(f"[sensor_judge] 非 JSON 响应 event={event_type}: {raw!r}")
+        return {**dict(_FAILURE), "_audit_prompt": audit_prompt, "_audit_raw_response": raw}
+
+    score = data.get("score")
+    if not isinstance(score, int) or not (0 <= score <= 100):
+        logger.warning(
+            f"[sensor_judge] score 非法 event={event_type}: score={score!r}"
+        )
+        return {**dict(_FAILURE), "_audit_prompt": audit_prompt, "_audit_raw_response": raw}
+    return {
+        "score":                score,
+        "reason":               str(data.get("reason", "")),
+        "intent_tier":          _score_to_tier(score),
+        "_audit_prompt":        audit_prompt,
+        "_audit_raw_response":  raw,
+    }

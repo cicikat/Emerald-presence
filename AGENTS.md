@@ -29,7 +29,7 @@ D:\ai\qq-st-bot\
 | 改工具系统（新增工具、探针规则、桌面动作） | `docs/tools.md` |
 | 改调度器（定时触发、主动消息） | `docs/scheduler.md` |
 | 改 QQ / 桌宠通道、广播、WebSocket、跨通道接续 | `docs/channels.md` |
-| 改花园系统（情绪花槽、自动浇水、管理面板状态） | `docs/garden.md` |
+| 改花园系统（情绪花槽、自动/被动浇水、采后处理、管理面板状态） | `docs/garden.md` |
 | 修已知 bug / 查技术债 | `docs/known-issues.md` |
 | 不确定设计意图、准入标准、禁止行为 | `DESIGN.md` |
 | 改并发/锁/数据安全 | `docs/memory.md` → 七、并发保护 |
@@ -53,7 +53,10 @@ D:\ai\qq-st-bot\
 | 角色认知 | `core/memory/character_growth.py` |
 | 调度器主循环 | `core/scheduler/loop.py` |
 | 花园系统 | `core/garden/manager.py` / `core/garden/constants.py` |
+| 花园工具 | `core/tools/garden_tools.py` / `core/tool_dispatcher.py` → `water_garden` |
+| 花园调度器 | `core/scheduler/triggers/garden_water.py` / `core/scheduler/triggers/garden_daily.py` |
 | 花园管理面板接口 | `admin/routers/garden.py` |
+| 媒体文件解析与落盘 | `core/media_processor.py` |
 | 沙盒路径管理 | `core/sandbox.py` ← 所有 data/ 路径必须经过此处 |
 | 从情景记忆提取用户观察（手动维护） | `tools/extract_observations.py` |
 | 角色人设提醒轮换 | `core/author_note_rotator.py` |

@@ -4,9 +4,9 @@
 
 ## 定位
 
-花园是一个独立于对话 prompt 的情绪伴生系统：调度器按当前 `mood_state` 给对应花槽自动浇水，管理面板读取当前花园状态展示。
+花园是一个独立于对话 prompt 的情绪伴生系统：调度器按当前 `mood_state` 给对应花槽自动浇水，用户催浇花时可走工具，被动/主动事件再通过调度器让叶瑄自然提一句。
 
-当前它**不会注入 prompt**，也不会主动发消息；它更像一层可视化的长期情绪痕迹。
+当前花园状态**不会直接注入 prompt**；只有浇水工具结果、开花、采后处理、花瓶枯萎等事件会变成一次普通调度器消息。
 
 ---
 
@@ -17,7 +17,10 @@
 | 花园核心逻辑 | `core/garden/manager.py` |
 | 花种、阶段、概率常量 | `core/garden/constants.py` |
 | 数据路径 | `core/sandbox.py` → `DataPaths.garden()` |
+| 被动浇水工具 | `core/tools/garden_tools.py` |
+| 工具注册 | `core/tool_dispatcher.py` → `water_garden` |
 | 自动浇水触发器 | `core/scheduler/triggers/garden_water.py` |
+| 每日采后扫描触发器 | `core/scheduler/triggers/garden_daily.py` |
 | 调度器注册 | `core/scheduler/loop.py` |
 | 管理面板状态接口 | `admin/routers/garden.py` |
 | 路由挂载 | `admin/admin_server.py` |
@@ -31,7 +34,7 @@
 | 文件 | 内容 |
 |---|---|
 | `plants.json` | 五个花槽当前状态：花种、阶段、growth、播种/浇水/开花时间 |
-| `storage.json` | 收获、花瓶、历史记录；当前只写入 `harvest` |
+| `storage.json` | `harvest` / `vase` / `history`，保存开花后的收获、花瓶和历史记录 |
 
 初次读取或浇水时，`_bootstrap()` 会自动创建五个槽位和空仓库。
 
@@ -58,28 +61,60 @@
 | `budding` | 200 |
 | `bloom` | 300 |
 
-到达 `bloom` 时，当前花会进入 `storage.harvest`，槽位立即重新播种。
+到达 `bloom` 时，当前花进入 `storage.harvest`，槽位立即重新播种；返回结果里会带 `events: [{"type": "bloom", ...}]`。
 
 ---
 
-## 自动浇水
+## 浇水路径
 
-`core/scheduler/loop.py` 每 60 秒调度一次所有触发器，`garden_water` 自身冷却为 30 分钟。
+### 自动浇水
 
-执行流程：
+`garden_water` 冷却 30 分钟；触发后有 30% 概率命中。
 
 ```
 _check_garden_water()
   → _is_ready("garden_water")
   → _mark("garden_water")
   → garden_manager.auto_water_tick()
-      → 30% 概率命中
       → mood_state.get_current()
       → mood 映射到 slot_key
       → water(slot_key, reason="auto")
 ```
 
-管理面板手动触发列表目前没有覆盖 `garden_water`。
+自动浇水本身不发言；只有开花时调用 `_pipeline_send(..., trigger_name="garden_bloom")`。
+
+### 被动浇水工具
+
+`water_garden` 注册为 `info` 类工具，因此会被 pre-pipeline 探针覆盖：
+
+- 触发例句：`你今天去浇花了吗`、`快去浇花`、`花园里的花怎么样了`
+- 关键词：`浇花`、`花园`、`浇水`
+- 实现：`core/tools/garden_tools.py` → `garden_manager.force_water()`
+
+工具按当前心情选择槽位，返回一段状态描述给 LLM，最终由叶瑄自然回复。
+
+---
+
+## 每日采后扫描
+
+`garden_daily` 冷却 24 小时，负责处理 `storage.harvest` 和 `storage.vase`：
+
+| 事件 | 条件 | 状态变化 | 发言策略 |
+|---|---|---|---|
+| `harvest_expired` | `now > expires_at` | 从 `harvest` 移到 `history`，标记 `expired` | 30% sample |
+| `harvest_handle` / `ask` | 开花超过 3 天且未处理 | 标记 `handle_triggered` | 必走 `_pipeline_send`，但仍受用户活跃窗口影响 |
+| `harvest_handle` / `dry` | 随机处理分支 | 标记 `dried` | 30% sample |
+| `harvest_handle` / `vase` | 随机处理分支 | 进入 `vase`，从 `harvest` 移除 | 30% sample |
+| `harvest_handle` / `gift` | 随机处理分支 | 写 `gifted_note` | 必走 `_pipeline_send`，但仍受用户活跃窗口影响 |
+| `harvest_handle` / `silent` | 随机处理分支 | 只标记已处理 | 不发言 |
+| `vase_wilted` | `now > wilts_at` | 从 `vase` 移到 `history`，标记 `wilted` | 30% sample |
+
+处理概率：
+
+- `ask`: 0.00-0.30
+- `dry/vase`: 0.30-0.60
+- `gift`: 0.60-0.80
+- `silent`: 0.80-1.00
 
 ---
 
@@ -99,6 +134,6 @@ _check_garden_water()
 
 ## 当前边界
 
-1. `HARVEST_HANDLE_SECONDS`、`VASE_WILT_SECONDS` 和处理概率常量已定义，但采后处理、花瓶枯萎、赠送逻辑还没有实现。
-2. 写入目前使用普通 `Path.write_text()`，没有接入 `safe_write` 或锁；当前只有调度器一个自动写入口，若未来开放工具/接口浇水，需要先补并发保护。
-3. 花园状态不进 prompt。如果要让叶瑄在对话中自然提起花园，需要新增 prompt 层或工具召回，并明确门控条件。
+1. 写入目前使用普通 `Path.write_text()`，没有接入 `safe_write` 或锁；现在已有 `garden_water`、`garden_daily`、`water_garden` 三条写路径，后续最好补 garden 专用锁。
+2. `garden_bloom`、`garden_handle_*`、`garden_vase_wilted` 等名字在 `_COOLDOWNS` 中可见，但 `_pipeline_send()` 不会自动 check/mark 这些事件名；实际节流主要来自 `garden_water` / `garden_daily` 自身冷却和用户活跃窗口。
+3. `ask` / `gift` / `dry` 分支会标记 `handle_triggered`，其中只有 `vase` 会从 `harvest` 移除；如果设计上“送给用户/做成干花”也应离开 harvest，需要补状态迁移。

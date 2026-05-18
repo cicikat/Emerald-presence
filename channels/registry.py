@@ -25,11 +25,14 @@ def get_active() -> list[BaseChannel]:
     return [c for c in _channels.values() if c.is_active]
 
 
-async def broadcast(content: str, user_id: str) -> None:
+async def broadcast(content: str, user_id: str, behavior: dict | None = None) -> None:
     """广播到所有活跃通道。"""
     active = get_active()
     if not active:
         logger.warning("[channel_registry] 无活跃通道，消息丢弃")
         return
     for channel in active:
-        await channel.send(content, user_id)
+        if behavior is not None and hasattr(channel, "send_with_behavior"):
+            await channel.send_with_behavior(content, user_id, behavior)
+        else:
+            await channel.send(content, user_id)

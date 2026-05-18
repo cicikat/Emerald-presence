@@ -6,10 +6,14 @@
 
 通道层只负责**把已经生成好的回复送到用户能看到的地方**。QQ、桌宠、调度器广播共用同一个 `Pipeline`，区别只在入口和发送方式。
 
+桌宠功能已并入新客户端，"desktop" channel 名义保留，实际承载新客户端。QQ 桌宠本体已废弃。
+
 ```
 QQ 收消息 → main.handle_message → Pipeline → text_output / QQChannel
 桌宠发消息 → POST /desktop/chat → Pipeline → DesktopChannel
 调度器主动消息 → scheduler._pipeline_send → channels.registry.broadcast()
+                                          ├─ DesktopChannel
+                                          └─ MobileChannel
 ```
 
 ---
@@ -18,13 +22,38 @@ QQ 收消息 → main.handle_message → Pipeline → text_output / QQChannel
 
 | 通道 | 文件 | 激活方式 | 发送方式 |
 |---|---|---|---|
-| QQ | `channels/qq.py` | `standalone_mode=false` 时由 `main.py` 注册 | `core/qq_adapter.send_message()` → NapCat |
+| QQ | `channels/qq.py` | `standalone_mode=false` 且 `qq.enabled=true` 时由 `main.py` 注册 | `core/qq_adapter.send_message()` → NapCat |
 | 桌宠 | `channels/desktop.py` | 总是注册；WS 连接或 `set_active(True)` 后活跃 | 优先 WebSocket，失败降级到 `data/channel_queue.json` |
+| 手机 | `channels/mobile.py` | 总是注册；`POST /mobile/activate` 或 `GET /mobile/poll` 后短时活跃 | 写入 `data/mobile_queue.json`，手机端轮询读取 |
 
 `channels/registry.py` 维护通道注册表：
 - `register(channel)`：启动时注册通道。
 - `get_active()`：返回 `is_active=True` 的通道。
 - `broadcast(content, user_id)`：调度器主动消息会广播到所有活跃通道。
+
+---
+
+## 手机端轮询通道
+
+文件：`channels/mobile.py`
+
+接口由管理面板服务提供：
+
+| 接口 | 用途 |
+|---|---|
+| `POST /mobile/activate` | 手机端上线，激活 mobile channel |
+| `POST /mobile/deactivate` | 手机端下线，停用 mobile channel |
+| `POST /mobile/chat` | 手机端发送用户消息，按 `channel="mobile"` 进入 pipeline |
+| `GET /mobile/poll?limit=20&wait=55` | 拉取并清空最多 20 条手机主动消息；`wait` 可选，0-60 秒，用于后台长轮询 |
+| `POST /mobile/push` | 后端工具/调试入口：通过 `MobileChannel.send()` 写入一条主动消息 |
+
+上述接口使用管理面板 Bearer token。手机端当前不连接 `/ws/desktop`，因此不会抢占桌宠 WebSocket。
+
+MobileChannel 的活跃状态有 120 秒 TTL：手机端持续轮询时保持活跃；停止轮询后，调度器广播不会再写入手机队列。
+
+手机和桌宠的 owner 对话入口共享 `core/conversation_gate.py` 的 per-user 锁：
+同一用户的 `/desktop/chat` 与 `/mobile/chat` 不会并行进入 `fetch_context → LLM → post_process`，
+从而避免两端同时输入时读取同一份旧上下文并乱序写入关键记忆。
 
 ---
 
@@ -51,10 +80,36 @@ QQ 收消息 → main.handle_message → Pipeline → text_output / QQChannel
 | 文件 | 用途 | 写入方 | 读取方 |
 |---|---|---|---|
 | `data/channel_queue.json` | 普通消息队列 | `DesktopChannel._write_to_queue()` | 桌宠端轮询 |
+| `data/mobile_queue.json` | 手机主动消息队列 | `MobileChannel._write_to_queue()` | 手机端 `/mobile/poll` |
 | `data/agent_actions.json` | 桌面动作队列 | `tool_dispatcher._push_desktop_action()` | 桌宠端轮询 |
 | `data/pending_perception/` | 动作失败后的下轮感知 | `pipeline._parse_and_execute_intent()` | `pipeline.build_prompt()` |
 
 所有上述路径都通过 `core/sandbox.get_paths()` 获取，测试模式会切到 `data/test_sandbox/{session}/`。
+
+---
+
+## 文件 / 图片上传
+
+三端统一走 `POST /upload/ingest`。接口同时兼容旧单文件字段 `file`，以及新多文件字段 `files`：
+
+| 参数 | 说明 |
+|---|---|
+| `file` | 单文件上传字段，向后兼容旧客户端 |
+| `files` | 多文件上传字段，图片可多传 |
+| `message` | 用户附言（可选，默认空） |
+| `channel` | 来源通道标记（默认 `desktop`） |
+
+- QQ 路径仍由 NapCat 推 `[CQ:file]` 触发，内部走同一个 `media_processor.ingest_file_bytes`
+- QQ 图片路径仍由 NapCat 图片 URL 触发，内部走同一个 `media_processor.ingest_image_bytes`
+- 文档落 `data/inbox/{ts}_{原文件名}`；图片新图落 `data/inbox/{ts}_{sha8}_{原文件名}`
+- 文档支持类型：`.txt` / `.md` / `.docx`
+- 图片支持类型：`.jpg` / `.jpeg` / `.png` / `.gif` / `.webp` / `.heic` / `.heif` / `.bmp`
+- 文档只能单个上传；图片可以通过 `files` 多张上传；文档和图片不能混传
+- 图片按原始 bytes 计算 sha256，描述缓存写入 `data/image_cache/{sha256}.json`；命中缓存时不再落盘同一张图，也不再调用 vision
+- 文档大小上限 5MB，图片大小上限 10MB（单张）；超出返回 413
+- 不支持类型（`.pdf` / `.zip` / `.exe` 等）上传返回 415；QQ 文件路径返回"看不懂"提示
+- 422 表示请求形态或处理失败，如空文件列表、文档多传、文档图片混传、图片识别失败、文件读取失败
+- 空文档可正常处理，由 LLM 自然回应
 
 ---
 
@@ -71,7 +126,8 @@ QQ 收消息 → main.handle_message → Pipeline → text_output / QQChannel
 
 | 模式 | 行为 |
 |---|---|
-| 正常模式 | 注册桌宠通道和 QQ 通道，连接 NapCat，启动管理面板（如配置开启） |
+| 正常模式 | 注册桌宠通道；`qq.enabled=true` 时注册 QQ 通道并连接 NapCat；启动管理面板（如配置开启） |
+| `qq.enabled=false` | 不连接 NapCat，不启动 QQ 消息队列；桌宠、管理面板和调度器照常运行 |
 | `standalone_mode=true` | 不连接 NapCat，不启动 QQ 消息队列；桌宠通道直接设为活跃 |
 
 ---
@@ -79,6 +135,6 @@ QQ 收消息 → main.handle_message → Pipeline → text_output / QQChannel
 ## 维护要点
 
 1. 新增输出通道时，实现 `channels.base.BaseChannel`，在 `main.py` 启动阶段注册。
-2. 不要在业务模块里直接写 `channel_queue.json` 或 `agent_actions.json`，统一走 `DesktopChannel` / `tool_dispatcher`。
+2. 不要在业务模块里直接写 `channel_queue.json`、`mobile_queue.json` 或 `agent_actions.json`，统一走 `DesktopChannel` / `MobileChannel` / `tool_dispatcher`。
 3. 桌面动作优先走 WebSocket ack；只有失败或离线时才降级到文件队列。
 4. 如果改跨通道感知，检查 `Pipeline._last_channel` 和 `perception_block`，避免把工具结果再次注入层 1。

@@ -26,16 +26,6 @@
 
 ---
 
-### F3：inbox 笔记未接入 prompt_builder
-
-**位置**：`admin/routers/inbox.py` / `core/prompt_builder.py`
-
-`/inbox/upload` 会把原文存到 `data/inbox/`，把叶瑄读后的笔记存到 `data/yexuan_inner/notes/`，并维护 `data/yexuan_inner/notes_index.json`。但 prompt_builder 没有读取 notes_index，因此笔记不会进入对话上下文。
-
-**建议**：新增一层 notes recall，按标题/标签/最近投递时间门控注入，避免每轮全量塞入。
-
----
-
 ### F10：trait_tracker 未接入新固化 pipeline
 
 **位置**：`core/memory/character_growth.py` / `core/memory/fixation_pipeline.py`
@@ -86,23 +76,33 @@
 
 ---
 
-### G1：花园采后处理尚未实现
-
-**位置**：`core/garden/manager.py` / `core/garden/constants.py`
-
-花园已实现五槽位、自动浇水、开花后进入 `storage.harvest` 并重新播种；但 `HARVEST_HANDLE_SECONDS`、`VASE_WILT_SECONDS` 和处理概率常量目前只定义未消费。开花后的询问用户、自己处理、送给用户、静默、花瓶枯萎等逻辑还没落地。
-
-**建议**：先设计采后状态机，再补定时 sweep 或管理面板操作，避免 harvest 无限堆积。
-
----
-
 ### G2：花园写入尚未使用 safe_write / 锁
 
 **位置**：`core/garden/manager.py`
 
-`water()` 当前用普通 `Path.write_text()` 写 `plants.json` 和 `storage.json`。现阶段主要写入口是 `garden_water` 调度器，风险较低；但 `force_water()` 已作为公开函数存在，未来接工具或管理面板按钮后可能出现并发写覆盖。
+`water()` / `daily_check()` 当前用普通 `Path.write_text()` 写 `plants.json` 和 `storage.json`。现在已有 `garden_water`、`garden_daily`、`water_garden` 三条写路径；虽然调度器单 worker 下冲突概率不高，但用户触发 `water_garden` 时可能与调度器扫描同一份 storage。
 
-**建议**：开放第二写入口前，接入 `safe_write_json()` 或 garden 专用锁。
+**建议**：接入 `safe_write_json()` 或 garden 专用锁，把 `plants.json` / `storage.json` 的读改写包起来。
+
+---
+
+### G3：花园事件冷却名未真正节流事件发言
+
+**位置**：`core/scheduler/loop.py` / `core/scheduler/triggers/garden_water.py` / `core/scheduler/triggers/garden_daily.py`
+
+`garden_bloom`、`garden_handle_ask`、`garden_handle_gift`、`garden_handle_self`、`garden_harvest_expired`、`garden_vase_wilted` 已加入 `_COOLDOWNS`，但事件发言只是把这些名字传给 `_pipeline_send()`。当前 `_pipeline_send()` 只用 `trigger_name` 判断高低优先级，不会 `_is_ready()` / `_mark()` 该事件名，因此这些冷却不会真正节流事件发言。
+
+**建议**：要么在 garden trigger 发言前显式 `_is_ready(event_name)` + `_mark(event_name)`，要么把这些冷却名从 `_COOLDOWNS` 移出，避免管理面板状态误导。
+
+---
+
+### G4：花园采后部分分支不离开 harvest
+
+**位置**：`core/garden/manager.py` → `daily_check()`
+
+`vase` 分支会把花从 `harvest` 移到 `vase`，但 `dry` / `gift` / `ask` 只标记 `handle_triggered`，仍留在 `harvest`。之后过期扫描仍可能把同一朵花当作 `harvest_expired` 处理。若设计上做成干花或送给用户后应离开收获区，需要补状态迁移。
+
+**建议**：明确 `dry/gift/ask` 的最终容器：移入 `history`、新增 `dried/gifted` 列表，或保留 harvest 但在过期逻辑里跳过非 fresh 状态。
 
 ---
 
@@ -141,7 +141,9 @@
 | E2 跨通道接续提示 | 已实现。`Pipeline.build_prompt(channel=...)` 在通道切换时注入层1感知。 |
 | E3 LLM 输出校验与重试 | reflect/growth/legacy compress 均有格式校验和最多 3 次重试。 |
 | E6 post_process 锁饥饿 | 已拆成关键路径 + slow_queue 慢任务。 |
-| F7 花园状态未推送给 qq-st-bot | 已由 `core/garden`、`GET /garden/state` 和 `garden_water` 调度器接入；当前边界转为 G1/G2。 |
+| F3 inbox 笔记未接入 prompt_builder | 已通过废弃 `/inbox/upload` 解决，文件上传统一改为 `/upload/ingest` 直接进 pipeline，不再产生孤儿笔记。 |
+| F7 花园状态未推送给 qq-st-bot | 已由 `core/garden`、`GET /garden/state`、`garden_water`、`garden_daily` 和 `water_garden` 接入；当前边界转为 G2/G3/G4。 |
+| G1 花园采后处理尚未实现 | 已实现 `garden_daily`：harvest 过期、采后 ask/dry/vase/gift/silent、vase 枯萎均已接入；剩余边界转为 G2/G3/G4。 |
 
 ---
 
@@ -150,3 +152,4 @@
 - `detect_emotion()` 只返回 neutral/happy/sad/gentle/surprised/angry；thinking 由工具探针触发，sleepy 由深夜 schedule 触发，yandere 由关键词触发，因此不是死状态。
 - `short_term._sanitize_assistant_message()` 当前在读取 history 时清洗，不会回写磁盘；这能保护 prompt，但不能清理历史文件本身。
 - `llm_output_validator` 的失败计数在内存中，debug 输出写到 `data/debug/llm_output/`，保留 7 天。
+- `/upload/ingest` 支持文档（`.txt` / `.md` / `.docx`，单文件）和图片（`.jpg` / `.jpeg` / `.png` / `.gif` / `.webp` / `.heic` / `.heif` / `.bmp`，多文件）。QQ 路径仍由 NapCat 触发，走同一组 `ingest_*` 函数。旧 `inbox.py` 曾解析 `.pdf` 但产物未进 pipeline，等同未上线；若后续需要 PDF，可接入 skill 实现。

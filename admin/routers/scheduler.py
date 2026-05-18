@@ -97,3 +97,24 @@ async def manual_trigger(name: str, auth=Depends(verify_token)):
     from core.scheduler import manual_trigger as _trigger
     result = await _trigger(name)
     return {"message": result}
+
+
+# ── sensor_aware 审计 ─────────────────────────────────────────────────────────
+
+@router.get("/scheduler/sensor_aware/audit", summary="获取 sensor_aware 最近决策审计日志")
+async def get_sensor_aware_audit(n: int = 50, auth=Depends(verify_token)):
+    """
+    返回最近 N 条 sensor_aware 完整决策快照（新→旧）。
+    N 最大 50，默认 50。
+
+    每条 entry 包含：tick_at、candidates、picked_event、judge_input_prompt、
+    judge_output_raw、judge_score、judge_reason、tier、candidate_behavior、
+    pipeline_send_prompt、pipeline_send_reply、action_packet、final_stage、
+    cooldown_remaining_seconds。
+    """
+    try:
+        from core.scheduler.triggers.sensor_aware_audit import get_recent
+        entries = get_recent(min(max(n, 1), 50))
+    except Exception:
+        entries = []
+    return {"count": len(entries), "entries": entries}

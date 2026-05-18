@@ -44,6 +44,7 @@ get_tools_schema(categories=["info", "desktop"])
 | `weather` | 用户问天气/温度/下雨 | `core/tools/weather.py` |
 | `web_search` | 确认信息/帮用户找资料 | `core/tools/web_search.py`（DuckDuckGo）|
 | `add_reminder` | "提醒我X点做Y"/"帮我记" | `core/tools/reminder.py` |
+| `water_garden` | 用户催叶瑄浇花/问花园状态并暗示该浇水 | `core/tools/garden_tools.py` |
 
 ### desktop 类（探针覆盖）
 
@@ -76,6 +77,12 @@ get_tools_schema(categories=["info", "desktop"])
 | `core/tools/diary_tool.py` | `read_diary` 工具实现，按日期读，读完调 `mark_diary_shared()` |
 | `core/tools/diary_search.py` | `search_diary` 工具实现，按关键词搜最近30天 |
 | `core/memory/diary_context.py` | 存储层，用户日记上下文单独存 txt，只进 prompt 层6d，不参与检索 |
+
+### 花园工具
+
+`water_garden` 是 info 类工具，会被探针覆盖。它不接收参数，内部读取当前 `mood_state`，再调用 `garden_manager.force_water()` 给对应情绪花槽浇一次水。
+
+触发关键词来自 `_TOOL_REGISTRY`：`浇花`、`花园`、`浇水`。工具结果只作为层10 `tool_result` 给 LLM 参考，不直接拼进最终回复。
 
 ### system 类（不走探针）
 

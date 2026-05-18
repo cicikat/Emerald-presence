@@ -34,8 +34,9 @@ from admin.routers import (
     system, lorebook,
     settings_proxy, settings_llm, settings_misc,
     character, chat,
-    scheduler, watch, agent, sensor, inbox,
+    scheduler, watch, agent, sensor,
     garden, mobile, diary, chat_log,
+    mood, activity,
 )
 
 app.include_router(users.router,          prefix="/users",     tags=["用户"])
@@ -53,8 +54,9 @@ app.include_router(watch.router,          prefix="",           tags=["Watch"])
 app.include_router(jailbreak_entries.router, prefix="",        tags=["破限条目"])
 app.include_router(agent.router,            prefix="",           tags=["Agent"])
 app.include_router(sensor.router, prefix="", tags=["手机传感器"])
-app.include_router(inbox.router,  prefix="", tags=["文档投递"])
-app.include_router(garden.router, prefix="/garden", tags=["花园"])
+app.include_router(garden.router,   prefix="/garden",   tags=["花园"])
+app.include_router(mood.router,     prefix="/mood",     tags=["情绪状态"])
+app.include_router(activity.router, prefix="/activity", tags=["活动状态"])
 app.include_router(diary.router,     prefix="/diary",     tags=["日记"])
 app.include_router(chat_log.router,  prefix="/chat-log",  tags=["聊天日志"])
 app.include_router(mobile.router,    prefix="",           tags=["手机端"])

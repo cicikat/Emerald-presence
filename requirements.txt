@@ -13,3 +13,5 @@ requests
 pydantic
 pydantic-settings
 ddgs
+pillow
+pillow-heif

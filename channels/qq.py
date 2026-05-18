@@ -1,6 +1,6 @@
 """
 channels/qq — QQ通道，通过NapCat发消息。
-standalone_mode=true时不加载此通道。
+qq.enabled=false 或 standalone_mode=true 时不加载此通道。
 """
 
 from channels.base import BaseChannel

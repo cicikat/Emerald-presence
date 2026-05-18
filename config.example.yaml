@@ -1,4 +1,5 @@
 qq:
+  enabled: true      # 是否连接 QQ / NapCat；暂时不用 QQ 时改为 false
   host: 127.0.0.1   # NapCat WebSocket 地址，一般不用改
   port: 3001         # NapCat WebSocket 端口，和 NapCat 设置里保持一致
 
