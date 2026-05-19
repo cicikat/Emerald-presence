@@ -35,43 +35,58 @@ async def _emit(event: dict) -> None:
 
     if etype == "harvest_expired":
         if random.random() < SAMPLE_TALK_PROB:
+            if not _is_ready("garden_harvest_expired"):
+                return
             await _pipeline_send(
                 f"（{char}发现那株{name}放太久枯掉了，悄悄处理掉了）",
                 trigger_name="garden_harvest_expired",
             )
+            _mark("garden_harvest_expired")
         return
 
     if etype == "vase_wilted":
         if random.random() < SAMPLE_TALK_PROB:
+            if not _is_ready("garden_vase_wilted"):
+                return
             await _pipeline_send(
                 f"（花瓶里那株{name}枯掉了，{char}默默把它收了）",
                 trigger_name="garden_vase_wilted",
             )
+            _mark("garden_vase_wilted")
         return
 
     if etype == "harvest_handle":
         action = event.get("handle_action")
         # ask / gift 必发（社交动作，不过 sample）
         if action == "ask":
+            if not _is_ready("garden_handle_ask"):
+                return
             await _pipeline_send(
                 f"（{char}捧着那株{name}，不确定该怎么办，想问问你）",
                 trigger_name="garden_handle_ask",
             )
+            _mark("garden_handle_ask")
             return
         if action == "gift":
+            if not _is_ready("garden_handle_gift"):
+                return
             language = event.get("language", "")
             tail = f"——{language}" if language else ""
             await _pipeline_send(
                 f"（{char}想把那株{name}送给你{tail}）",
                 trigger_name="garden_handle_gift",
             )
+            _mark("garden_handle_gift")
             return
         # dry / vase / silent 走 sample
         if action in ("dry", "vase"):
             if random.random() < SAMPLE_TALK_PROB:
+                if not _is_ready("garden_handle_self"):
+                    return
                 verb = "做成干花" if action == "dry" else "放进了花瓶"
                 await _pipeline_send(
                     f"（{char}把那株{name}{verb}，没有特别说什么）",
                     trigger_name="garden_handle_self",
                 )
+                _mark("garden_handle_self")
         # action == "silent"：什么都不做

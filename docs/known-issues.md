@@ -86,16 +86,6 @@
 
 ---
 
-### G3：花园事件冷却名未真正节流事件发言
-
-**位置**：`core/scheduler/loop.py` / `core/scheduler/triggers/garden_water.py` / `core/scheduler/triggers/garden_daily.py`
-
-`garden_bloom`、`garden_handle_ask`、`garden_handle_gift`、`garden_handle_self`、`garden_harvest_expired`、`garden_vase_wilted` 已加入 `_COOLDOWNS`，但事件发言只是把这些名字传给 `_pipeline_send()`。当前 `_pipeline_send()` 只用 `trigger_name` 判断高低优先级，不会 `_is_ready()` / `_mark()` 该事件名，因此这些冷却不会真正节流事件发言。
-
-**建议**：要么在 garden trigger 发言前显式 `_is_ready(event_name)` + `_mark(event_name)`，要么把这些冷却名从 `_COOLDOWNS` 移出，避免管理面板状态误导。
-
----
-
 ### G4：花园采后部分分支不离开 harvest
 
 **位置**：`core/garden/manager.py` → `daily_check()`
@@ -142,8 +132,9 @@
 | E3 LLM 输出校验与重试 | reflect/growth/legacy compress 均有格式校验和最多 3 次重试。 |
 | E6 post_process 锁饥饿 | 已拆成关键路径 + slow_queue 慢任务。 |
 | F3 inbox 笔记未接入 prompt_builder | 已通过废弃 `/inbox/upload` 解决，文件上传统一改为 `/upload/ingest` 直接进 pipeline，不再产生孤儿笔记。 |
-| F7 花园状态未推送给 qq-st-bot | 已由 `core/garden`、`GET /garden/state`、`garden_water`、`garden_daily` 和 `water_garden` 接入；当前边界转为 G2/G3/G4。 |
-| G1 花园采后处理尚未实现 | 已实现 `garden_daily`：harvest 过期、采后 ask/dry/vase/gift/silent、vase 枯萎均已接入；剩余边界转为 G2/G3/G4。 |
+| F7 花园状态未推送给 qq-st-bot | 已由 `core/garden`、`GET /garden/state`、`garden_water`、`garden_daily` 和 `water_garden` 接入；当前边界转为 G2/G4。 |
+| G1 花园采后处理尚未实现 | 已实现 `garden_daily`：harvest 过期、采后 ask/dry/vase/gift/silent、vase 枯萎均已接入；剩余边界转为 G2/G4。 |
+| G3 花园事件冷却名未真正节流事件发言 | 已修复。`garden_bloom`、`garden_harvest_expired`、`garden_vase_wilted`、`garden_handle_ask`、`garden_handle_gift`、`garden_handle_self` 发言前均显式 `_is_ready()`，发送后 `_mark()`。 |
 
 ---
 

@@ -114,12 +114,12 @@ birthday_midnight / birthday_eve / birthday_afternoon / birthday_night / period_
 | `episodic_sweep` | 30min | 低 | episodic_sweep | mid_term 老化扫描，aged > 11h 且未晋升的条目批量入队 reflect_to_episodic |
 | `garden_water` | 30min | 低 | garden_water | 30% 概率按当前 mood_state 给对应花槽自动浇水 |
 | `garden_daily` | 24h | 低 | garden_daily | 扫描 harvest 过期、采后处理、花瓶枯萎 |
-| `garden_bloom` | 8h | 低 | garden_water | 开花事件发言名；当前由 `_pipeline_send` 使用，不单独 check/mark |
-| `garden_harvest_expired` | 4h | 低 | garden_daily | 收获过期事件发言名；当前不单独 check/mark |
-| `garden_handle_ask` | 4h | 低 | garden_daily | 采后询问用户事件发言名；当前不单独 check/mark |
-| `garden_handle_gift` | 4h | 低 | garden_daily | 采后送给用户事件发言名；当前不单独 check/mark |
-| `garden_handle_self` | 4h | 低 | garden_daily | 采后自己处理事件发言名；当前不单独 check/mark |
-| `garden_vase_wilted` | 4h | 低 | garden_daily | 花瓶枯萎事件发言名；当前不单独 check/mark |
+| `garden_bloom` | 8h | 低 | garden_water | 开花事件发言名；事件发言前单独 check/mark |
+| `garden_harvest_expired` | 4h | 低 | garden_daily | 收获过期事件发言名；事件发言前单独 check/mark |
+| `garden_handle_ask` | 4h | 低 | garden_daily | 采后询问用户事件发言名；事件发言前单独 check/mark |
+| `garden_handle_gift` | 4h | 低 | garden_daily | 采后送给用户事件发言名；事件发言前单独 check/mark |
+| `garden_handle_self` | 4h | 低 | garden_daily | 采后自己处理事件发言名；事件发言前单独 check/mark |
+| `garden_vase_wilted` | 4h | 低 | garden_daily | 花瓶枯萎事件发言名；事件发言前单独 check/mark |
 | `sensor_aware`（tick） | 30s（可配置） | 低 | sensor_aware | sensor 实时状态主动开口，默认关闭 |
 | `hr_high` | 30min | 低 | watch | 心率>100 提醒 |
 | `hr_critical` | 1h | **高** | watch | 心率>120 告警 |

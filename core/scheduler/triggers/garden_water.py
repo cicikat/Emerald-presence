@@ -28,7 +28,10 @@ async def _check_garden_water() -> None:
     # 浇水本身不发言；只在开花（里程碑）时说话
     for event in result.get("events", []):
         if event["type"] == "bloom":
+            if not _is_ready("garden_bloom"):
+                continue
             await _pipeline_send(
                 f"（{_char_name()}发现花园里那株{event['name']}开了，站在那里看了一会儿）",
                 trigger_name="garden_bloom",
             )
+            _mark("garden_bloom")
