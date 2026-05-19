@@ -29,7 +29,7 @@ QQ 收消息 → main.handle_message → Pipeline → text_output / QQChannel
 `channels/registry.py` 维护通道注册表：
 - `register(channel)`：启动时注册通道。
 - `get_active()`：返回 `is_active=True` 的通道。
-- `broadcast(content, user_id)`：调度器主动消息会广播到所有活跃通道。
+- `broadcast(content, user_id, behavior=None)`：调度器主动消息会广播到所有活跃通道；`behavior` 用于传递桌面 action 包，QQ 通道会忽略它。
 
 ---
 
@@ -81,7 +81,7 @@ MobileChannel 的活跃状态有 120 秒 TTL：手机端持续轮询时保持活
 |---|---|---|---|
 | `data/channel_queue.json` | 普通消息队列 | `DesktopChannel._write_to_queue()` | 桌宠端轮询 |
 | `data/mobile_queue.json` | 手机主动消息队列 | `MobileChannel._write_to_queue()` | 手机端 `/mobile/poll` |
-| `data/agent_actions.json` | 桌面动作队列 | `tool_dispatcher._push_desktop_action()` | 桌宠端轮询 |
+| `data/agent_actions.json` | 桌面动作队列 | `tool_dispatcher._push_desktop_action()` / `DesktopChannel.send(..., behavior=...)` | 桌宠端轮询 |
 | `data/pending_perception/` | 动作失败后的下轮感知 | `pipeline._parse_and_execute_intent()` | `pipeline.build_prompt()` |
 
 所有上述路径都通过 `core/sandbox.get_paths()` 获取，测试模式会切到 `data/test_sandbox/{session}/`。

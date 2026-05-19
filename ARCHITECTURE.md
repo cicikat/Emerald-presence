@@ -17,7 +17,7 @@ QQ 消息 → main.py → message_queue
          ↓
       LLM（DeepSeek）
          ↓
-      channels.registry 广播到活跃通道（QQ / 桌宠 / 手机）
+      core.turn_sink 统一写入 + channels.registry 广播到活跃通道（QQ / 桌宠 / 手机）
 ```
 
 通道细节见 `docs/channels.md`。手机端当前通过 mobile 轮询通道接收主动消息，不占用桌宠 WebSocket。花园这类不进入对话 pipeline 的伴生状态，见 `docs/garden.md`。
@@ -62,7 +62,7 @@ get_tags()（对消息打话题标签，传给 build_prompt）
     ▼ 步骤3  run_llm()
   调 llm_client.chat(messages)，含重试
     │
-    ▼ 步骤4  post_process()（asyncio.create_task，不阻塞）
+    ▼ 步骤4  post_process()（owner 入口与调度器主动消息通过 turn_sink 等待关键写入）
   │
   │  【关键路径】uid_lock(uid) 内，按顺序同步完成：
   ├─ detect_emotion()                  asyncio.wait_for(timeout=8s)，超时降级 neutral

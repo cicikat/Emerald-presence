@@ -153,3 +153,4 @@
 - `short_term._sanitize_assistant_message()` 当前在读取 history 时清洗，不会回写磁盘；这能保护 prompt，但不能清理历史文件本身。
 - `llm_output_validator` 的失败计数在内存中，debug 输出写到 `data/debug/llm_output/`，保留 7 天。
 - `/upload/ingest` 支持文档（`.txt` / `.md` / `.docx`，单文件）和图片（`.jpg` / `.jpeg` / `.png` / `.gif` / `.webp` / `.heic` / `.heif` / `.bmp`，多文件）。QQ 路径仍由 NapCat 触发，走同一组 `ingest_*` 函数。旧 `inbox.py` 曾解析 `.pdf` 但产物未进 pipeline，等同未上线；若后续需要 PDF，可接入 skill 实现。
+- event_log 的实际存储格式是 `data/event_log/{uid}/{date}.md`，不是 `.jsonl`；Phase 1 turn_sink 文档曾写错，已按代码现实修正。

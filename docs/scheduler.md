@@ -49,8 +49,14 @@ scheduler.set_pipeline(pipeline)
 context  = await _pipeline.fetch_context(owner_id, prompt)
 messages, _ = _pipeline.build_prompt(owner_id, prompt, context)
 reply    = await _pipeline.run_llm(messages)
-await _send(reply)
-asyncio.create_task(_pipeline.post_process(owner_id, prompt, reply))
+await record_assistant_turn(
+    assistant_text=reply,
+    uid=owner_id,
+    source=TurnSource.TRIGGER,
+    trigger_name=trigger_name,
+    fanout="all",
+    pipeline=_pipeline,
+)
 ```
 
 Pipeline 未注入时降级：直接发送 prompt 原文（不经过 LLM）。
@@ -59,8 +65,8 @@ Pipeline 未注入时降级：直接发送 prompt 原文（不经过 LLM）。
 
 | `output_mode` | 行为 |
 |---|---|
-| `"speak"`（默认）| 生成 reply 后调 `_send` 广播，返回 `None` |
-| `"return"` | 生成 reply 后**不调** `_send`，直接返回 reply 文本；post_process 写记忆照常执行 |
+| `"speak"`（默认）| 生成 reply 后经 `turn_sink` 写入并广播，返回 `None` |
+| `"return"` | 生成 reply 后经 `turn_sink` 写入但不广播，直接返回 reply 文本 |
 
 `sensor_aware` trigger 使用 `output_mode="return"` 拿到 reply 后，自己通过 `desktop_ws.push_message` / `push_action_and_wait` 推送，以便附加 action 包。其余所有 trigger 不传此参数（保持默认 `"speak"` 行为）。
 

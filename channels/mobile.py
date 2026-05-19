@@ -45,8 +45,8 @@ class MobileChannel(BaseChannel):
     def touch(self) -> None:
         self.set_active(True)
 
-    async def send(self, content: str, user_id: str) -> None:
-        await self._write_to_queue(content, user_id)
+    async def send(self, content: str, user_id: str, behavior: dict | None = None) -> None:
+        await self._write_to_queue(content, user_id, behavior=behavior)
 
     async def send_with_behavior(self, content: str, user_id: str, behavior: dict) -> None:
         await self._write_to_queue(content, user_id, behavior=behavior)

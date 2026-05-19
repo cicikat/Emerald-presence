@@ -25,7 +25,7 @@ class QQChannel(BaseChannel):
     def set_active(self, active: bool) -> None:
         self._active = active
 
-    async def send(self, content: str, user_id: str) -> None:
+    async def send(self, content: str, user_id: str, behavior: dict | None = None) -> None:
         try:
             from core import qq_adapter
             await qq_adapter.send_message(user_id, content, is_group=False)

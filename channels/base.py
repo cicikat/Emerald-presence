@@ -10,7 +10,7 @@ class BaseChannel(ABC):
     """输出通道基类。"""
 
     @abstractmethod
-    async def send(self, content: str, user_id: str) -> None:
+    async def send(self, content: str, user_id: str, behavior: dict | None = None) -> None:
         """发送消息到此通道。"""
         pass
 

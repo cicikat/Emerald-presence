@@ -64,7 +64,16 @@ async def run_owner_chat_turn(message: str, channel_name: str) -> dict:
         if channel and hasattr(channel, "set_active"):
             channel.set_active(True)
 
-        post_info = await pipeline.post_process(user_id, message, reply)
+        from core.turn_sink import TurnSource, record_assistant_turn
+        turn_result = await record_assistant_turn(
+            assistant_text=reply,
+            uid=user_id,
+            source=TurnSource.USER_CHAT,
+            user_text=message,
+            fanout="all",
+            bypass_gate=True,
+            pipeline=pipeline,
+        )
 
         from core.memory.user_profile import get_affection_level
         info = get_affection_level(user_id)
@@ -73,9 +82,9 @@ async def run_owner_chat_turn(message: str, channel_name: str) -> dict:
             "reply": reply,
             "affection": info["value"],
             "level": info["label"],
-            "emotion": (post_info or {}).get("emotion", "neutral"),
-            "turn_id": (post_info or {}).get("turn_id", ""),
-            "critical_written": (post_info or {}).get("critical_written", False),
+            "emotion": turn_result.emotion,
+            "turn_id": turn_result.turn_id,
+            "critical_written": turn_result.written_to_memory,
         }
 
 

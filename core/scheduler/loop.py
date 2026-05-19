@@ -213,12 +213,29 @@ async def _pipeline_send(
         messages, _ = _pipeline.build_prompt(oid, prompt, context)
         reply    = await _pipeline.run_llm(messages)
         if reply:
-            asyncio.create_task(
-                _pipeline.post_process(oid, prompt, reply, trigger_name=trigger_name)
+            from core.turn_sink import TurnSource, record_assistant_turn
+            if trigger_name == "sensor_aware":
+                source = TurnSource.SENSOR
+            elif trigger_name in ("hr_high", "hr_critical", "sleep_end"):
+                source = TurnSource.WATCH
+            else:
+                source = TurnSource.TRIGGER
+            turn_result = await record_assistant_turn(
+                assistant_text=reply,
+                uid=oid,
+                source=source,
+                trigger_name=trigger_name or "scheduler",
+                fanout=[] if output_mode == "return" else "all",
+                bypass_gate=(trigger_name == "hr_critical"),
+                pipeline=_pipeline,
             )
             if output_mode == "return":
                 return reply
-            await _send(reply, behavior=behavior)
+            if turn_result.fanout_failures:
+                logger.warning(
+                    "[scheduler._pipeline_send] fanout 部分失败: %s",
+                    turn_result.fanout_failures,
+                )
         else:
             logger.warning("[scheduler._pipeline_send] LLM 返回空内容")
     except Exception as e:

@@ -37,16 +37,23 @@ class DesktopChannel(BaseChannel):
         self._fallback_active = active
         logger.info(f"[desktop_channel] fallback 活跃状态: {active}")
 
-    async def send(self, content: str, user_id: str) -> None:
+    async def send(self, content: str, user_id: str, behavior: dict | None = None) -> None:
         from channels import desktop_ws
         # 路径 1：WS 实时推送
         if desktop_ws.is_connected():
             ok = await desktop_ws.push_message(content)
             if ok:
+                if behavior:
+                    action_ok, err = await desktop_ws.push_action_and_wait(behavior, timeout=5.0)
+                    if not action_ok:
+                        logger.warning(f"[desktop_channel] WS action 失败，降级到文件: {err}")
+                        await self._write_action_to_queue(behavior)
                 return
             logger.warning("[desktop_channel] WS push 失败，降级到文件")
         # 路径 2：文件队列 fallback
         await self._write_to_queue(content)
+        if behavior:
+            await self._write_action_to_queue(behavior)
 
     async def _write_to_queue(self, content: str) -> None:
         try:
@@ -65,3 +72,20 @@ class DesktopChannel(BaseChannel):
                 )
         except Exception as e:
             logger.warning(f"[desktop_channel] 写入队列失败: {e}")
+
+    async def _write_action_to_queue(self, behavior: dict) -> None:
+        try:
+            async with _queue_lock:
+                action_file = get_paths().agent_actions()
+                action_file.parent.mkdir(parents=True, exist_ok=True)
+                queue = []
+                if action_file.exists():
+                    queue = json.loads(action_file.read_text(encoding="utf-8"))
+                    if not isinstance(queue, list):
+                        queue = []
+                queue.append(behavior)
+                action_file.write_text(
+                    json.dumps(queue, ensure_ascii=False), encoding="utf-8"
+                )
+        except Exception as e:
+            logger.warning(f"[desktop_channel] 写入动作队列失败: {e}")
