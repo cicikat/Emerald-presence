@@ -15,6 +15,9 @@ from core.sandbox import get_paths
 from core.scheduler.state_machine import TriggerState, get_state as get_current_state
 
 
+MIGRATED_TRIGGERS: frozenset[str] = frozenset()
+
+
 @dataclass(frozen=True)
 class TriggerProposal:
     trigger_name: str
@@ -79,6 +82,8 @@ def _adapt_legacy_triggers(uid: str) -> list[TriggerProposal]:
 
     proposals: list[TriggerProposal] = []
     for name in loop._COOLDOWNS:
+        if name in MIGRATED_TRIGGERS:
+            continue
         if not loop._is_ready(name):
             continue
         high_priority = name in loop._HIGH_PRIORITY_TRIGGERS

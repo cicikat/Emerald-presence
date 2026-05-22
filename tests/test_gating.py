@@ -87,3 +87,17 @@ def test_collect_and_decide_only_reads_cooldown(monkeypatch):
 
     assert picked.trigger_name == "random_message"
     assert calls == ["random_message", "random_message"]
+
+
+def test_legacy_adapter_skips_migrated_triggers(monkeypatch):
+    from core.scheduler import gating
+    from core.scheduler import loop
+
+    monkeypatch.setattr(loop, "_COOLDOWNS", {"hr_critical": 60, "random_message": 60})
+    monkeypatch.setattr(loop, "_HIGH_PRIORITY_TRIGGERS", frozenset({"hr_critical"}))
+    monkeypatch.setattr(loop, "_is_ready", lambda name: True)
+    monkeypatch.setattr(gating, "MIGRATED_TRIGGERS", frozenset({"hr_critical"}))
+
+    proposals = gating._adapt_legacy_triggers("u1")
+
+    assert [p.trigger_name for p in proposals] == ["random_message"]
