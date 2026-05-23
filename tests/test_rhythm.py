@@ -121,3 +121,15 @@ def test_diary_reminder_propose_keeps_diary_quiet_and_missing_gates(monkeypatch)
 
     monkeypatch.setattr("core.tools.diary_reader.yesterday_missing", lambda: False)
     assert diary.propose_diary_reminder({"now_dt": now, "now_ts": now.timestamp()}) is None
+
+
+def test_silence_ratio_uses_state_machine_last_owner_turn(monkeypatch):
+    from core.scheduler import rhythm
+
+    monkeypatch.setattr(
+        "core.scheduler.state_machine.snapshot",
+        lambda uid: {"last_owner_turn_ts": 1_000.0},
+    )
+
+    assert rhythm.silence_ratio("u1", now_ts=1_000.0) == 0.0
+    assert rhythm.silence_ratio("u1", now_ts=1_000.0 + 30 * 60) == 1.0

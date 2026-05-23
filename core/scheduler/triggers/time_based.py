@@ -186,6 +186,32 @@ async def _check_random_message(force: bool = False):
     logger.info("[scheduler] 随机日间消息已发送")
 
 
+def propose_random_message(ctx: dict | None = None):
+    ctx = ctx or {}
+    cfg = _cfg()
+    if not cfg.get("random_message", True):
+        return None
+    now = _proposal_now(ctx)
+    if not (10 <= now.hour < 18):
+        return None
+    oid = _owner_id()
+    if not oid:
+        return None
+
+    from core.scheduler.gating import TriggerProposal
+    from core.scheduler.rhythm import silence_ratio
+    from core.scheduler.state_machine import TriggerState
+    from core.scheduler.urgency import UrgencyTier, urgency_in_tier
+
+    return TriggerProposal(
+        trigger_name="random_message",
+        urgency=urgency_in_tier(UrgencyTier.FILLER, silence_ratio(oid, _proposal_ts(ctx, now))),
+        topic_source="random",
+        requires_state=[TriggerState.QUIET],
+        bypass_state_machine=False,
+    )
+
+
 async def _check_weather(force: bool = False):
     """天气联动：多场景触发，有氛围感"""
     from core.config_loader import get_config
@@ -520,6 +546,42 @@ async def _check_spontaneous_recall():
         log_error("scheduler._check_spontaneous_recall", e)
 
 
+def propose_spontaneous_recall(ctx: dict | None = None):
+    ctx = ctx or {}
+    now = _proposal_now(ctx)
+    if not (14 <= now.hour <= 22):
+        return None
+    oid = _owner_id()
+    if not oid:
+        return None
+    try:
+        from core.memory.episodic_memory import _load_memories
+
+        memories = ctx.get("episodic_memories")
+        if memories is None:
+            memories = _load_memories(oid)
+        if not memories:
+            return None
+        if not [m for m in memories if m.get("strength", 0) > 0.5]:
+            return None
+    except Exception as e:
+        log_error("scheduler.propose_spontaneous_recall", e)
+        return None
+
+    from core.scheduler.gating import TriggerProposal
+    from core.scheduler.rhythm import silence_ratio
+    from core.scheduler.state_machine import TriggerState
+    from core.scheduler.urgency import UrgencyTier, urgency_in_tier
+
+    return TriggerProposal(
+        trigger_name="spontaneous_recall",
+        urgency=urgency_in_tier(UrgencyTier.FILLER, silence_ratio(oid, _proposal_ts(ctx, now))),
+        topic_source="episodic",
+        requires_state=[TriggerState.QUIET],
+        bypass_state_machine=False,
+    )
+
+
 async def _check_dlq_monitor():
     """每日扫描 DLQ 目录，文件数 > 0 时 log warning。不发送任何消息，纯观测。"""
     if not _is_ready("dlq_monitor"):
@@ -594,6 +656,8 @@ def _register_proposers() -> None:
     register_proposer("daily_journal", propose_daily_journal)
     register_proposer("weather_alert_heavy", propose_weather_alert, trigger_names={"weather_alert"})
     register_proposer("weather_alert_light", propose_weather_alert_light, trigger_names={"weather_alert"})
+    register_proposer("random_message", propose_random_message)
+    register_proposer("spontaneous_recall", propose_spontaneous_recall)
 
 
 _register_proposers()

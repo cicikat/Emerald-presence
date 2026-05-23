@@ -18,6 +18,9 @@ NIGHT_WINDOW_END_HOUR = 2
 # TODO(policy.yaml): move diary quiet floor to scheduler policy.
 DIARY_MIN_QUIET_MINUTES = 12
 
+# TODO(policy.yaml): move filler silence threshold to scheduler policy.
+FILLER_SILENCE_THRESHOLD_SECONDS = 30 * 60
+
 
 def logical_day(now: datetime | None = None, cutoff_hour: int = LOGICAL_DAY_CUTOFF_HOUR) -> date:
     """Return the scheduler's logical day; pre-cutoff early morning belongs to yesterday."""
@@ -72,6 +75,21 @@ def quiet_floor_elapsed(
         return True
     current = time.time() if now_ts is None else float(now_ts)
     return current - last_owner_turn >= min_minutes * 60
+
+
+def silence_ratio(
+    uid: str,
+    now_ts: float | None = None,
+    threshold_seconds: int = FILLER_SILENCE_THRESHOLD_SECONDS,
+) -> float:
+    from core.scheduler.state_machine import snapshot
+
+    state = snapshot(uid)
+    last_owner_turn = float(state.get("last_owner_turn_ts") or 0)
+    if last_owner_turn <= 0:
+        return 1.0
+    current = time.time() if now_ts is None else float(now_ts)
+    return max(0.0, min(1.0, (current - last_owner_turn) / threshold_seconds))
 
 
 def daytime_window_ratio(now: datetime, start_hour: int, end_hour: int) -> float:

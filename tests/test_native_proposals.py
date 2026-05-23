@@ -225,3 +225,21 @@ def test_weather_light_propose_uses_reactive_tier(monkeypatch):
 
     assert proposal.trigger_name == "weather_alert"
     assert 0.30 <= proposal.urgency <= 0.49
+
+
+def test_filler_proposals_use_silence_ratio(monkeypatch):
+    from core.scheduler.triggers import time_based
+
+    now = datetime(2026, 5, 25, 15, 0)
+    monkeypatch.setattr(time_based, "_cfg", lambda: {"random_message": True})
+    monkeypatch.setattr(time_based, "_owner_id", lambda: "u1")
+    monkeypatch.setattr("core.scheduler.rhythm.silence_ratio", lambda uid, now_ts=None: 1.0)
+    monkeypatch.setattr("core.memory.episodic_memory._load_memories", lambda uid: [{"strength": 0.8}])
+
+    random_message = time_based.propose_random_message({"now_dt": now, "now_ts": now.timestamp()})
+    recall = time_based.propose_spontaneous_recall({"now_dt": now, "now_ts": now.timestamp()})
+
+    assert random_message.trigger_name == "random_message"
+    assert recall.trigger_name == "spontaneous_recall"
+    assert 0.10 <= random_message.urgency <= 0.29
+    assert 0.10 <= recall.urgency <= 0.29
