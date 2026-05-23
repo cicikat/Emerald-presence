@@ -197,10 +197,10 @@ async def _check_daily_journal():
         # 存储角色的日记到内心文档
         try:
             from pathlib import Path
-            from datetime import date
             import asyncio
 
             from core.sandbox import get_paths
+            from core.scheduler.rhythm import logical_day
             diary_dir = get_paths().yexuan_inner_diary()
             diary_dir.mkdir(parents=True, exist_ok=True)
 
@@ -254,7 +254,7 @@ async def _check_daily_journal():
                     facts_content = ""  # 清空事件层，感受层仍然正常写入
 
                 if facts_content or feeling_content:
-                    today = date.today().strftime("%Y-%m-%d")
+                    today = logical_day().strftime("%Y-%m-%d")
                     diary_file = diary_dir / f"{today}.md"
                     parts = [f"# {today}\n"]
                     if facts_content:
