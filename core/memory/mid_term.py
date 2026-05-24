@@ -10,7 +10,7 @@ import time
 
 from core.error_handler import log_error
 from core.safe_write import safe_write_json
-from core.sandbox import get_paths
+from core.sandbox import get_paths, safe_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ MAX_EVENTS = 20
 
 
 def _file(uid: str):
-    return get_paths().mid_term() / f"{uid}.json"
+    return get_paths().mid_term() / f"{safe_user_id(uid)}.json"
 
 
 def load(uid: str) -> list[dict]:

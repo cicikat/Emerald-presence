@@ -13,7 +13,7 @@ from pathlib import Path
 from core.config_loader import get_config
 from core.error_handler import log_error
 from core.safe_write import safe_write_json
-from core.sandbox import get_paths
+from core.sandbox import get_paths, safe_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ def _history_path(user_id: str) -> Path:
     """返回该用户的历史文件路径"""
     d = get_paths().history()
     d.mkdir(parents=True, exist_ok=True)
-    return d / f"{user_id}.json"
+    return d / f"{safe_user_id(user_id)}.json"
 
 
 def load(user_id: str) -> list[dict]:

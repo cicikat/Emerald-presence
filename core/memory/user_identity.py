@@ -12,7 +12,7 @@ import yaml
 
 from core.memory.locks import uid_lock
 from core.safe_write import safe_write_text
-from core.sandbox import get_paths
+from core.sandbox import get_paths, safe_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ _REQUIRED_FIELDS = {"text", "confidence", "evidence_count", "last_updated"}
 def _identity_file(user_id: str) -> Path:
     d = get_paths().user_identity_dir()
     d.mkdir(parents=True, exist_ok=True)
-    return d / f"{user_id}.yaml"
+    return d / f"{safe_user_id(user_id)}.yaml"
 
 
 async def load(user_id: str) -> dict:

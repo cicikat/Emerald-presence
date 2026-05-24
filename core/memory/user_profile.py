@@ -11,7 +11,7 @@ from pathlib import Path
 
 from core.config_loader import get_config, _char_name
 from core.error_handler import log_error
-from core.sandbox import get_paths
+from core.sandbox import get_paths, safe_user_id
 
 logger = logging.getLogger(__name__)
 _CHAR = _char_name()
@@ -31,7 +31,7 @@ def _profile_path(user_id: str) -> Path:
     """返回该用户的画像文件路径"""
     d = get_paths().profiles()
     d.mkdir(parents=True, exist_ok=True)
-    return d / f"{user_id}.json"
+    return d / f"{safe_user_id(user_id)}.json"
 
 
 def load(user_id: str) -> dict:

@@ -10,7 +10,7 @@ import math
 import time
 from pathlib import Path
 
-from core.sandbox import get_paths
+from core.sandbox import get_paths, safe_user_id
 from core.safe_write import safe_write_json
 from core.llm_output_validator import record_failure
 
@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 def _mem_file(user_id: str) -> Path:
     r = get_paths().episodic_memory()
     r.mkdir(parents=True, exist_ok=True)
-    return r / f"{user_id}.json"
+    return r / f"{safe_user_id(user_id)}.json"
 
 
 def _index_file(user_id: str) -> Path:
     r = get_paths().memory_index()
     r.mkdir(parents=True, exist_ok=True)
-    return r / f"{user_id}.json"
+    return r / f"{safe_user_id(user_id)}.json"
 
 
 def _load_memories(user_id: str) -> list:

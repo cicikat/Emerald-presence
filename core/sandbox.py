@@ -5,6 +5,7 @@ test 模式：路径前缀 data/test_sandbox/{test_session_id}/
 """
 
 import logging
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
+_SAFE_USER_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _read_config_mode() -> str:
@@ -39,8 +41,24 @@ class DataPaths:
             self.test_session_id = None
             self._base = Path("data")
 
-    def _p(self, *parts: str) -> Path:
-        return self._base.joinpath(*parts)
+    def _p(self, *parts: str | Path) -> Path:
+        clean_parts = []
+        for part in parts:
+            path = Path(part)
+            if path.is_absolute() or path.anchor:
+                raise ValueError(f"unsafe data path part: {part!r}")
+            if any(segment == ".." for segment in path.parts):
+                raise ValueError(f"unsafe data path part: {part!r}")
+            clean_parts.append(path)
+
+        target = self._base.joinpath(*clean_parts)
+        base_resolved = self._base.resolve()
+        target_resolved = target.resolve()
+        try:
+            target_resolved.relative_to(base_resolved)
+        except ValueError as e:
+            raise ValueError(f"data path escapes sandbox: {target}") from e
+        return target
 
     # ── 桌宠端轮询文件（方案A：前缀同步到 config.yaml 的 data_prefix 字段）──────
     def channel_queue(self) -> Path:
@@ -184,6 +202,14 @@ def get_paths() -> DataPaths:
     if _instance is None:
         _instance = DataPaths()
     return _instance
+
+
+def safe_user_id(value: str | int) -> str:
+    """Return a user id safe for use as a filename stem or directory name."""
+    safe = str(value)
+    if not safe or not _SAFE_USER_ID_RE.fullmatch(safe):
+        raise ValueError(f"unsafe user_id: {value!r}")
+    return safe
 
 
 def init_paths(mode: str | None = None, test_session_id: str | None = None) -> DataPaths:

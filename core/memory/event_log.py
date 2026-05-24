@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from core.error_handler import log_error
-from core.sandbox import get_paths
+from core.sandbox import get_paths, safe_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -35,17 +35,17 @@ _MED_INTENSITY_WORDS  = {"想", "记得", "担心", "等你", "在意"}
 
 def _day_file(user_id: str, date: datetime) -> Path:
     """返回指定用户、指定日期的日志文件路径"""
-    return _log_root() / user_id / f"{date.strftime('%Y-%m-%d')}.md"
+    return _log_root() / safe_user_id(user_id) / f"{date.strftime('%Y-%m-%d')}.md"
 
 
 def _full_log_file(user_id: str) -> Path:
     """返回用户的完整导出日志路径"""
-    return _log_root() / user_id / "full_log.md"
+    return _log_root() / safe_user_id(user_id) / "full_log.md"
 
 
 def _ensure_dir(user_id: str):
     """确保用户日志目录存在"""
-    (_log_root() / user_id).mkdir(parents=True, exist_ok=True)
+    (_log_root() / safe_user_id(user_id)).mkdir(parents=True, exist_ok=True)
 
 
 def _calc_intensity(content: str, emotion: str) -> int:
