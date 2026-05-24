@@ -16,9 +16,12 @@ _LAST_BLOOM_EVENTS: list[dict] = []
 
 
 async def _check_garden_water() -> None:
+    from core.scheduler.execution import legacy_tick_should_send
+
     if not _is_ready("garden_water"):
         return
     _mark("garden_water")
+    legacy_send = legacy_tick_should_send()
 
     try:
         result = garden_manager.auto_water_tick()
@@ -33,6 +36,8 @@ async def _check_garden_water() -> None:
     for event in result.get("events", []):
         if event["type"] == "bloom":
             _remember_bloom_event(event)
+            if not legacy_send:
+                continue
             if not _is_ready("garden_bloom"):
                 continue
             await _pipeline_send(

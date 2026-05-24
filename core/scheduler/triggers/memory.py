@@ -22,6 +22,10 @@ _COOLDOWNS_LOCAL = {
 
 async def _check_topic_followup(force: bool = False):
     """未完结话题追问：每天一次，让LLM判断character_growth里有没有超过3天没提的话题"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send(force=force):
+        return
     cfg = _cfg()
     if not cfg.get("topic_followup", True):
         return

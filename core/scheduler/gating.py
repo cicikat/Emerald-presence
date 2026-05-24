@@ -12,7 +12,7 @@ from typing import Optional
 
 from core.safe_write import safe_append_jsonl
 from core.sandbox import get_paths
-from core.scheduler.execution import ExecuteFn
+from core.scheduler.execution import ExecuteFn, is_live_mode
 from core.scheduler.state_machine import TriggerState, get_state as get_current_state
 
 
@@ -97,7 +97,7 @@ async def run_shadow_tick(uid: str) -> Optional[TriggerProposal]:
         and picked.execute is not None
         and picked.trigger_name not in WATCH_EVENT_DRIVEN_TRIGGERS
     ):
-        await picked.execute(dry_run=True)
+        await picked.execute(dry_run=not is_live_mode())
     return picked
 
 

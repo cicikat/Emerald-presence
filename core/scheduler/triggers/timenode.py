@@ -51,6 +51,10 @@ def _get_season(month: int) -> str:
 
 async def _check_timenode(force: bool = False):
     """时间节点感知：特殊日子角色有自己的情绪，14-20点之间触发"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send(force=force):
+        return
     cfg = _cfg()
     if not cfg.get("timenode", True):
         return

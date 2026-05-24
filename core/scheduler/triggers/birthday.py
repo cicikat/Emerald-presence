@@ -133,6 +133,10 @@ def _birthday_prompt(trigger_name: str) -> tuple[str, str]:
 
 async def _check_birthday_midnight(force: bool = False):
     """零点告白：4月24日 00:00-00:05 触发，全年只触发一次"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send(force=force):
+        return
     if not force and not _is_birthday_today():
         return
 
@@ -155,6 +159,10 @@ async def _check_birthday_midnight(force: bool = False):
 
 async def _check_birthday_eve(force: bool = False):
     """提前一天预热：4月23日 20:00 后触发"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send(force=force):
+        return
     if not force and not _is_birthday_eve():
         return
 
@@ -178,6 +186,10 @@ async def _check_birthday_eve(force: bool = False):
 
 async def _check_birthday_afternoon(force: bool = False):
     """生日当天下午主动问：怎么过的，有没有人陪"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send(force=force):
+        return
     if not force and not _is_birthday_today():
         return
 
@@ -201,6 +213,10 @@ async def _check_birthday_afternoon(force: bool = False):
 
 async def _check_birthday_night(force: bool = False):
     """生日当天晚上收尾：今天还好吗"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send(force=force):
+        return
     if not force and not _is_birthday_today():
         return
 

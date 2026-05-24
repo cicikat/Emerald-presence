@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 async def _check_diary_reminder():
     """昨天没写日记时，角色提醒"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send():
+        return
     cfg = _cfg()
     if not cfg.get("enabled", True):
         return
@@ -104,6 +108,10 @@ async def _check_diary_inject():
 
 async def _check_diary_share_reminder():
     """超过3天没看到日记分享时，角色超不经意提一句"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send():
+        return
     cfg = _cfg()
     if not cfg.get("enabled", True):
         return

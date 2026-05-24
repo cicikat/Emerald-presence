@@ -107,6 +107,10 @@ def _get_today_festival(today: date | None = None) -> tuple[str, str] | None:
 
 async def _check_festival(force: bool = False):
     """节日感知：当天14-20点触发一次"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send(force=force):
+        return
     cfg = _cfg()
     if not cfg.get("festival", True):
         return
@@ -144,6 +148,10 @@ async def _check_holiday_boost(force: bool = False):
     长假期间额外碎碎念：五一/国庆假期内
     在random_message基础上额外多发一次，冷却2小时
     """
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send(force=force):
+        return
     cfg = _cfg()
     if not cfg.get("holiday_boost", True):
         return

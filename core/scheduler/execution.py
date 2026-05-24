@@ -11,8 +11,16 @@ from core.safe_write import safe_append_jsonl
 from core.sandbox import get_paths
 
 
-# TODO(policy.yaml): 3.5a keeps execution in dry-run; 3.5b will wire real mode.
+# TODO(policy.yaml): keep as the single rollback switch for scheduler gating execution.
 EXECUTE_MODE = "dry_run"
+
+
+def is_live_mode() -> bool:
+    return EXECUTE_MODE == "live"
+
+
+def legacy_tick_should_send(*, force: bool = False) -> bool:
+    return force or not is_live_mode()
 
 
 @dataclass(frozen=True)

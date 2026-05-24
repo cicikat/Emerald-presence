@@ -296,6 +296,10 @@ async def _check_sensor_aware():
 # ── 备忘录到点提醒
 async def _check_reminders():
     """检查 owner 的备忘录是否有到点条目，有则发送提醒后标记完成"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send():
+        return
     cfg = _cfg()
     if not cfg.get("enabled", True):
         return

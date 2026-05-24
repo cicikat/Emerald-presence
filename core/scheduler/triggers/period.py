@@ -82,6 +82,10 @@ def _make_period_execute(days_elapsed: int):
 
 async def _check_period():
     """读取 last_period_date，在生理期中（0-7天）或临近下次（26-30天）时关心"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send():
+        return
     cfg = _cfg()
     if not cfg.get("enabled", True):
         return

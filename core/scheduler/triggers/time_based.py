@@ -14,6 +14,10 @@ _LAST_WEATHER_DETAIL: dict | None = None
 
 async def _check_morning(force: bool = False):
     """早安触发：7-9点，且用户今天还没说过话。force=True 跳过时间和对话检查"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send(force=force):
+        return
     cfg = _cfg()
     if not cfg.get("morning_greeting", True):
         return
@@ -35,6 +39,10 @@ async def _check_morning(force: bool = False):
 
 async def _check_night(force: bool = False):
     """晚安催睡：23点后。force=True 跳过时间检查"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send(force=force):
+        return
     cfg = _cfg()
     if not cfg.get("night_reminder", True):
         return
@@ -155,6 +163,10 @@ def propose_daily_journal(ctx: dict | None = None):
 
 async def _check_random_message(force: bool = False):
     """随机日间消息：10-18点，每天随机触发一次。force=True 跳过时间和概率检查"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send(force=force):
+        return
     cfg = _cfg()
     if not cfg.get("random_message", True):
         return
@@ -231,12 +243,15 @@ def propose_random_message(ctx: dict | None = None):
 async def _check_weather(force: bool = False):
     """天气联动：多场景触发，有氛围感"""
     from core.config_loader import get_config
+    from core.scheduler.execution import legacy_tick_should_send
+
     if not get_config().get("tools", {}).get("weather", {}).get("enabled", True):
         return
     cfg = _cfg()
     if not cfg.get("enabled", True):
         return
-    if not _is_ready("weather_alert"):
+    legacy_send = legacy_tick_should_send(force=force)
+    if legacy_send and not _is_ready("weather_alert"):
         return
     if not force:
         now = datetime.now()
@@ -264,6 +279,8 @@ async def _check_weather(force: bool = False):
         temp = w["temp_c"]
         prompt = _weather_prompt(w, now, location)
 
+        if not legacy_send:
+            return
         if prompt:
             await _pipeline_send(prompt, trigger_name="weather_alert")
             _mark("weather_alert")
@@ -380,6 +397,10 @@ def _propose_weather_alert(ctx: dict | None = None, required_severity: str = "he
 
 async def _check_daily_journal():
     """每日手账：23点后，读取今天event_log，让角色写一段心理活动发给你"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send():
+        return
     cfg = _cfg()
     if not cfg.get("enabled", True):
         return
@@ -509,6 +530,10 @@ async def check_activity_switch() -> None:
 
 async def _check_spontaneous_recall():
     """主动回忆：低频随机触发，角色突然想起一段往事。"""
+    from core.scheduler.execution import legacy_tick_should_send
+
+    if not legacy_tick_should_send():
+        return
     import random
     if not _is_ready("spontaneous_recall"):
         return

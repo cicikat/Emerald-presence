@@ -17,9 +17,12 @@ _LAST_DAILY_EVENTS: list[dict] = []
 
 
 async def _check_garden_daily() -> None:
+    from core.scheduler.execution import legacy_tick_should_send
+
     if not _is_ready("garden_daily"):
         return
     _mark("garden_daily")
+    legacy_send = legacy_tick_should_send()
 
     try:
         events = garden_manager.daily_check()
@@ -29,6 +32,8 @@ async def _check_garden_daily() -> None:
 
     for event in events:
         _remember_daily_event(event)
+        if not legacy_send:
+            continue
         await _emit(event)
 
 
