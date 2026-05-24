@@ -1,0 +1,348 @@
+"""Recall the most recent followable topic from event_log."""
+
+from __future__ import annotations
+
+import json
+import re
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
+
+from core.error_handler import log_error
+from core.safe_write import safe_write_json
+from core.sandbox import get_paths
+
+
+# TODO(policy.yaml): move the lookback window into scheduler policy.
+RECENT_EVENT_LOG_DAYS = 3
+
+# TODO(policy.yaml): move topic-level refollow suppression into scheduler policy.
+TOPIC_REFOLLOW_WINDOW_SECONDS = 3 * 24 * 3600
+
+_USER_PREFIX = "**用户**："
+_DATE_RE = re.compile(r"^#\s*(\d{4}-\d{2}-\d{2})\s*$")
+_TIME_RE = re.compile(r"^##\s*(\d{2}:\d{2})\s*$")
+_SPEAKER_RE = re.compile(r"^\*\*(.+?)\*\*：(.*)$")
+_PUNCT_RE = re.compile(r"[\s\t\r\n，。！？!?、,.；;：:\"'“”‘’（）()\[\]【】<>《》…—-]+")
+_FILLER_RE = re.compile(r"^(我|她|你|叶瑄|嗯|啊|唔|那个|就是|不是|然后|所以|但是|可是)+")
+
+_FOLLOWABLE_HINTS = (
+    "最近",
+    "今天",
+    "明天",
+    "后天",
+    "之后",
+    "以后",
+    "未来",
+    "后来",
+    "还没",
+    "没定",
+    "进展",
+    "计划",
+    "准备",
+    "打算",
+    "正在",
+    "想",
+    "要",
+    "会",
+    "等",
+    "继续",
+    "实习",
+    "作业",
+    "考试",
+    "项目",
+    "功能",
+    "权限",
+    "部署",
+    "测试",
+    "修",
+    "写",
+    "申请",
+    "面试",
+    "毕业",
+)
+
+_LOW_SIGNAL_PHRASES = (
+    "不许再带动作描写",
+    "只允许输出对话",
+)
+
+
+@dataclass(frozen=True)
+class LastMentionedTopic:
+    topic: str
+    topic_key: str
+    context: str
+    user_text: str
+    assistant_text: str
+    mentioned_at: str
+    age_seconds: float
+    score: float
+
+
+@dataclass(frozen=True)
+class _Turn:
+    date: str
+    time_text: str
+    ts: float
+    order: int
+    user_text: str
+    assistant_text: str
+    raw: str
+
+
+def recall_last_mentioned(
+    user_id: str,
+    *,
+    now: datetime | None = None,
+    days: int = RECENT_EVENT_LOG_DAYS,
+) -> LastMentionedTopic | None:
+    """Return the best last-mentioned event_log topic, currently sorted by time."""
+
+    now_dt = now or datetime.now()
+    text = _read_recent_event_log(user_id, days=days, now=now_dt)
+    if not text.strip():
+        return None
+
+    candidates = [
+        topic
+        for turn in _parse_event_log_turns(text)
+        if (topic := _topic_from_turn(turn, now_dt)) is not None
+    ]
+    ordered = _rank_last_mentioned_candidates(candidates)
+    return ordered[0] if ordered else None
+
+
+def is_recently_followed(
+    topic_key: str,
+    *,
+    now_ts: float | None = None,
+    window_seconds: int = TOPIC_REFOLLOW_WINDOW_SECONDS,
+) -> bool:
+    if not topic_key:
+        return False
+    followed_at = load_followed_topics().get(topic_key)
+    if followed_at is None:
+        return False
+    return (now_ts if now_ts is not None else time.time()) - followed_at < window_seconds
+
+
+def mark_topic_followed(topic_key: str, *, now_ts: float | None = None) -> None:
+    if not topic_key:
+        return
+    ts = float(now_ts if now_ts is not None else time.time())
+    state = _read_scheduler_state()
+    followed = state.get("followed_topics")
+    if not isinstance(followed, dict):
+        followed = {}
+    followed[str(topic_key)] = ts
+    state["followed_topics"] = _prune_followed_topics(followed, now_ts=ts)
+    safe_write_json(get_paths().scheduler_state(), state)
+
+
+def load_followed_topics() -> dict[str, float]:
+    followed = _read_scheduler_state().get("followed_topics", {})
+    if not isinstance(followed, dict):
+        return {}
+    result: dict[str, float] = {}
+    for key, value in followed.items():
+        try:
+            result[str(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def topic_key_for(topic: str) -> str:
+    normalized = _PUNCT_RE.sub("", topic.strip().lower())
+    normalized = _FILLER_RE.sub("", normalized)
+    return normalized[:40]
+
+
+def _rank_last_mentioned_candidates(candidates: list[LastMentionedTopic]) -> list[LastMentionedTopic]:
+    """Isolate topic ordering so future density ranking only changes this function."""
+
+    # TODO(short_term-density): replace timestamp ordering with information density here.
+    return sorted(candidates, key=lambda item: item.mentioned_at, reverse=True)
+
+
+def _read_recent_event_log(user_id: str, *, days: int, now: datetime) -> str:
+    parts: list[str] = []
+    for i in range(days):
+        target_day = now - timedelta(days=i)
+        path = get_paths().event_log() / user_id / f"{target_day.strftime('%Y-%m-%d')}.md"
+        try:
+            if path.exists():
+                text = path.read_text(encoding="utf-8").strip()
+                if text:
+                    parts.append(f"# {target_day.strftime('%Y-%m-%d')}\n{text}")
+        except Exception as e:
+            log_error("scheduler.last_mentioned.read_event_log", e)
+    parts.reverse()
+    return "\n\n".join(parts)
+
+
+def _parse_event_log_turns(text: str) -> list[_Turn]:
+    turns: list[_Turn] = []
+    current_date = ""
+    current_time = ""
+    current_lines: list[str] = []
+    order = 0
+
+    def flush() -> None:
+        nonlocal order, current_lines
+        if not current_lines:
+            return
+        turn = _turn_from_block(current_date, current_time, order, current_lines)
+        order += 1
+        current_lines = []
+        if turn is not None:
+            turns.append(turn)
+
+    for line in text.splitlines():
+        date_match = _DATE_RE.match(line)
+        if date_match:
+            flush()
+            current_date = date_match.group(1)
+            current_time = ""
+            continue
+        time_match = _TIME_RE.match(line)
+        if time_match:
+            flush()
+            current_time = time_match.group(1)
+            current_lines = [line]
+            continue
+        current_lines.append(line)
+    flush()
+    return turns
+
+
+def _turn_from_block(date_text: str, time_text: str, order: int, lines: list[str]) -> _Turn | None:
+    user_parts: list[str] = []
+    assistant_parts: list[str] = []
+    current_role = ""
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped == "---" or stripped.startswith(">") or _TIME_RE.match(stripped):
+            continue
+        speaker_match = _SPEAKER_RE.match(stripped)
+        if speaker_match:
+            speaker, content = speaker_match.groups()
+            if speaker == "用户":
+                current_role = "user"
+                if content.strip():
+                    user_parts.append(content.strip())
+            else:
+                current_role = "assistant"
+                if content.strip():
+                    assistant_parts.append(content.strip())
+            continue
+        if current_role == "user":
+            user_parts.append(stripped)
+        elif current_role == "assistant":
+            assistant_parts.append(stripped)
+
+    user_text = "\n".join(user_parts).strip()
+    if not user_text:
+        return None
+
+    ts = _timestamp_for(date_text, time_text, order)
+    return _Turn(
+        date=date_text,
+        time_text=time_text,
+        ts=ts,
+        order=order,
+        user_text=user_text,
+        assistant_text="\n".join(assistant_parts).strip(),
+        raw="\n".join(lines).strip(),
+    )
+
+
+def _topic_from_turn(turn: _Turn, now: datetime) -> LastMentionedTopic | None:
+    user_text = _clean_text(turn.user_text)
+    if not _is_followable_user_text(user_text):
+        return None
+    topic = _extract_topic(user_text)
+    topic_key = topic_key_for(topic)
+    if not topic_key:
+        return None
+    age_seconds = max(0.0, now.timestamp() - turn.ts) if turn.ts > 0 else 0.0
+    freshness = 1.0 - min(age_seconds / max(RECENT_EVENT_LOG_DAYS * 24 * 3600, 1), 1.0)
+    specificity = min(len(topic_key) / 18, 1.0)
+    score = round(max(0.0, min(1.0, 0.45 + freshness * 0.35 + specificity * 0.2)), 3)
+    return LastMentionedTopic(
+        topic=topic,
+        topic_key=topic_key,
+        context=_format_context(turn),
+        user_text=user_text,
+        assistant_text=_clean_text(turn.assistant_text),
+        mentioned_at=f"{turn.date} {turn.time_text}".strip(),
+        age_seconds=age_seconds,
+        score=score,
+    )
+
+
+def _is_followable_user_text(text: str) -> bool:
+    if len(text.strip()) < 6:
+        return False
+    if any(phrase in text for phrase in _LOW_SIGNAL_PHRASES):
+        return False
+    if any(hint in text for hint in _FOLLOWABLE_HINTS):
+        return True
+    return len(text) >= 14 and ("我" in text or "..." in text or "……" in text)
+
+
+def _extract_topic(text: str) -> str:
+    first_clause = re.split(r"[。！？!?；;\n]", text, maxsplit=1)[0].strip()
+    first_clause = re.sub(r"^我(未来|最近|今天|明天|后天|之后|以后)?(不是)?(想|要|准备|打算|计划|正在)?", "", first_clause)
+    first_clause = first_clause.strip(" ，。！？!?、：:；;…")
+    if not first_clause:
+        first_clause = text.strip()
+    return first_clause[:30]
+
+
+def _format_context(turn: _Turn) -> str:
+    parts = [f"{turn.date} {turn.time_text}".strip(), f"用户：{_clean_text(turn.user_text)}"]
+    assistant = _clean_text(turn.assistant_text)
+    if assistant:
+        parts.append(f"叶瑄：{assistant}")
+    return "\n".join(part for part in parts if part)
+
+
+def _clean_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _timestamp_for(date_text: str, time_text: str, order: int) -> float:
+    try:
+        return datetime.strptime(f"{date_text} {time_text}", "%Y-%m-%d %H:%M").timestamp() + order * 0.001
+    except ValueError:
+        return float(order)
+
+
+def _read_scheduler_state() -> dict:
+    path = get_paths().scheduler_state()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as e:
+        log_error("scheduler.last_mentioned.read_state", e)
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _prune_followed_topics(followed: dict, *, now_ts: float | None = None) -> dict[str, float]:
+    now = now_ts if now_ts is not None else time.time()
+    max_age = TOPIC_REFOLLOW_WINDOW_SECONDS * 4
+    result: dict[str, float] = {}
+    for key, value in followed.items():
+        try:
+            ts = float(value)
+        except (TypeError, ValueError):
+            continue
+        if now - ts <= max_age:
+            result[str(key)] = ts
+    return result
