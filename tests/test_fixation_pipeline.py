@@ -52,6 +52,32 @@ def patch_llm_client(fake_llm):
         yield fake_llm
 
 
+def _episode_for_cap(
+    eid: str,
+    strength: float = 0.5,
+    is_core: bool = False,
+    summary: str | None = None,
+) -> dict:
+    episode = {
+        "id": eid,
+        "timestamp": time.time(),
+        "raw_facts": [f"fact {eid}"],
+        "topic_keywords": [f"topic-{eid}"],
+        "emotion_peak": "gentle",
+        "emotion_texture": "",
+        "emotion_arc": "",
+        "user_state": "",
+        "narrative_summary": summary or f"old cap record {eid}",
+        "strength": strength,
+        "retrieval_count": 0,
+        "last_retrieved": None,
+        "tags": [],
+    }
+    if is_core:
+        episode["is_core"] = True
+    return episode
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # fixation_state 读写
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -115,6 +141,60 @@ def test_should_consolidate_false(sandbox):
     state = {"high_strength_since_last": 0, "strength_accumulated": 1.0,
              "last_consolidated_at": time.time(), "episodic_since_last": 1}
     assert _should_consolidate(state) is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# episodic_memory 自动上限裁剪
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_write_episode_auto_cap_preserves_core_and_trims_normal(sandbox):
+    from core.memory.episodic_memory import _load_memories, _save_memories, write_episode
+
+    uid = "u_ep_cap"
+    memories = [_episode_for_cap("weak_normal", 0.0)]
+    memories += [_episode_for_cap(f"normal_{i}", 0.2 + i / 1000) for i in range(198)]
+    memories.append(_episode_for_cap("core_low_strength", 0.0, is_core=True))
+    _save_memories(uid, memories)
+
+    write_episode(
+        uid,
+        _episode_for_cap("fresh_episode", 0.7, summary="一次全新的独立事件"),
+    )
+
+    ids = {m["id"] for m in _load_memories(uid)}
+    assert "core_low_strength" in ids
+    assert "weak_normal" not in ids
+    assert "fresh_episode" in ids
+
+
+def test_write_episode_auto_cap_keeps_core_even_when_over_cap(sandbox):
+    from core.memory.episodic_memory import _load_memories, _save_memories, write_episode
+
+    uid = "u_ep_all_core"
+    memories = [_episode_for_cap(f"core_{i}", 0.1, is_core=True) for i in range(200)]
+    _save_memories(uid, memories)
+
+    write_episode(
+        uid,
+        _episode_for_cap("fresh_episode", 0.7, summary="一次全新的独立事件"),
+    )
+
+    loaded = _load_memories(uid)
+    ids = {m["id"] for m in loaded}
+    assert len(loaded) == 201
+    assert all(f"core_{i}" in ids for i in range(200))
+    assert "fresh_episode" in ids
+
+
+def test_write_episode_normal_write_under_cap_unchanged(sandbox):
+    from core.memory.episodic_memory import _load_memories, write_episode
+
+    uid = "u_ep_normal"
+    write_episode(uid, _episode_for_cap("first_episode", 0.7))
+
+    loaded = _load_memories(uid)
+    assert len(loaded) == 1
+    assert loaded[0]["id"] == "first_episode"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

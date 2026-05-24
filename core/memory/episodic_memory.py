@@ -132,12 +132,19 @@ def write_episode(user_id: str, episode: dict) -> None:
             logger.info(f"[episodic] 重复记忆跳过: {new_summary}")
             return
 
-    # 上限控制：超过200条时删掉strength最低的20条
+    # 上限控制：超过200条时只从非核心记忆里删掉 strength 最低的20条。
+    # 核心记忆宁可让总数暂时超过上限，也不能因自动 cap 被删除。
     MAX_MEMORIES = 200
     if len(memories) >= MAX_MEMORIES:
-        memories.sort(key=lambda m: m.get("strength", 0))
-        memories[:] = memories[20:]
-        logger.info(f"[episodic] 记忆库裁剪至{len(memories)}条")
+        core_count = sum(1 for m in memories if m.get("is_core"))
+        normal = [m for m in memories if not m.get("is_core")]
+        normal.sort(key=lambda m: m.get("strength", 0))
+        remove_count = min(20, len(normal))
+        remove_ids = {id(m) for m in normal[:remove_count]}
+        memories[:] = [m for m in memories if id(m) not in remove_ids]
+        logger.info(
+            f"[episodic] 记忆库裁剪至{len(memories)}条，保留核心{core_count}条"
+        )
 
     # 双轨strength修正：LLM给初始值，规则叠加校正
     s = episode.get("strength", 0.5)
