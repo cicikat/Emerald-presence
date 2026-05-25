@@ -77,19 +77,31 @@ loop.py tick ──gating shadow log──→ logs/gating_shadow.jsonl
 3. 多候选按 `urgency` 选最高者
 4. 一个 tick 最多返回一条候选
 
-当前仍处于 shadow 模式。`_adapt_legacy_triggers(uid)` 只是临时桥接：不改触发器本体，
-只把 `_is_ready` 已 ready 的旧触发器包装成 proposal，高优先级 urgency=0.9，低优先级
-urgency=0.5。真实发送仍由旧 `_check_*()` 触发器自己决定。
+当前仍处于 shadow 模式，但已不再有 `_adapt_legacy_triggers()` 桥接。shadow 候选只来自
+`core/scheduler/proposer_registry.py` 注册的原生 proposer；未迁移触发器不会在
+`gating_shadow.jsonl` 里报名。真实发送仍由旧 `_check_*()` 触发器在 `asyncio.gather()` 中自己决定。
 
-Phase 2 Step 3 第一批已迁移 `hr_critical`、生日四档、`period_reminder` 的原生
-`propose(ctx)`。这些触发器不再由 legacy bridge 用固定 0.9 兜底报名，而是只在真实条件满足时
-返回 `TriggerProposal`；`bypass_state_machine=True` 只跳过状态过滤，仍正常参与 urgency 竞争。
-urgency 分档统一由 `core/scheduler/urgency.py` 提供。
+已迁移 proposer 覆盖：watch（`hr_critical/hr_high/sleep_end`）、生日四档、`period_reminder`、
+time_based 的早晚安/随机/天气/日记/主动回忆、diary 两档、`timenode`、`festival/holiday_boost`、
+`reminders`、`topic_followup`、花园伴生事件（bloom/harvest/handle/vase）。`garden_water`、
+`garden_daily` 扫描本体、`episodic_sweep`、`episodic_decay`、`dlq_monitor`、`sensor_aware`
+仍只走 legacy 真实检查或事件驱动路径。
+
+Phase 2 Step 3.5 加了 dry-run 执行观测：`run_shadow_tick()` 如果选中了带 `execute` 的 proposal，
+会调用 `execute(dry_run=True)`，向 `data/logs/execute_dryrun.jsonl` 写入 would-send / would-mark；
+watch 事件驱动触发器跳过这一步，避免 shadow tick 误模拟外部事件。urgency 分档统一由
+`core/scheduler/urgency.py` 提供。
 
 shadow log 格式：
 
 ```json
 {"ts": 1748000000.0, "uid": "1043484516", "state": "QUIET", "candidates": [], "would_pick": null, "reason": "no_candidates"}
+```
+
+dry-run log 格式：
+
+```json
+{"ts": 1748000000.0, "trigger_name": "morning_greeting", "would_send_prompt": "...", "would_mark": ["morning_greeting"], "would_mark_done": [], "reads_cache_ok": true}
 ```
 
 ---

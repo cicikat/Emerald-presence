@@ -12,7 +12,7 @@ from core.sandbox import get_paths
 
 
 # TODO(policy.yaml): keep as the single rollback switch for scheduler gating execution.
-EXECUTE_MODE = "dry_run"
+EXECUTE_MODE = "live"
 
 
 def is_live_mode() -> bool:

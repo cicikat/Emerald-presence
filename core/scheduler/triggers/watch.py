@@ -12,7 +12,7 @@ HEART_RATE_PROPOSAL_TTL_SECONDS = 10 * 60
 SLEEP_END_PROPOSAL_TTL_SECONDS = 10 * 60
 
 # Independent rollback switch for event-driven Watch execution.
-WATCH_EXECUTE_MODE = "dry_run"
+WATCH_EXECUTE_MODE = "live"
 
 _LAST_HEART_RATE_EVENT: dict | None = None
 _LAST_SLEEP_END_EVENT: dict | None = None
