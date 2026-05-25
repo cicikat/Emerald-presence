@@ -8,6 +8,12 @@ from core.sandbox import get_paths, safe_user_id
 
 logger = logging.getLogger(__name__)
 
+DREAM_ARTIFACT_SENTINEL = {
+    "never_retrieve": True,
+    "not_memory_source": True,
+    "reality_boundary": "dream_only",
+}
+
 
 class DreamStatus(str, Enum):
     REALITY_CHAT = "REALITY_CHAT"
@@ -24,6 +30,13 @@ def default_state(user_id: str | int) -> dict[str, Any]:
         "user_id": safe_user_id(user_id),
         "status": DreamStatus.REALITY_CHAT.value,
     }
+
+
+def apply_dream_artifact_sentinel(record: dict[str, Any]) -> dict[str, Any]:
+    """Attach the required boundary fields for tmp/archive/summary dream artifacts."""
+    if not isinstance(record, dict):
+        raise TypeError("dream artifact record must be a dict")
+    return {**record, **DREAM_ARTIFACT_SENTINEL}
 
 
 def read_state(user_id: str | int) -> dict[str, Any]:
