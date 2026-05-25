@@ -148,6 +148,18 @@ class DataPaths:
     def mid_term(self) -> Path:
         return self._p("mid_term")
 
+    def dreams_tmp_dir(self) -> Path:
+        return self._p("dreams", "tmp")
+
+    def dreams_archive_dir(self) -> Path:
+        return self._p("dreams", "archive")
+
+    def dreams_summaries_dir(self) -> Path:
+        return self._p("dreams", "summaries")
+
+    def dream_state_path(self, user_id: str | int) -> Path:
+        return self._p("dreams", "state", safe_user_id(user_id), "dream_state.json")
+
     def garden(self) -> Path:
         return self._p("garden")
 
