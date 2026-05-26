@@ -42,8 +42,10 @@ async def run_owner_chat_turn(message: str, channel_name: str) -> dict:
     if not user_id:
         raise HTTPException(status_code=503, detail="owner_id 未配置")
     try:
+        from core.scheduler.loop import mark_user_active
         from core.scheduler.state_machine import notify_owner_turn
 
+        mark_user_active()
         notify_owner_turn(user_id)
     except Exception:
         logger.exception("[owner_chat] trigger state notify_owner_turn 失败")
@@ -304,8 +306,10 @@ async def desktop_trigger(body: dict):
     if not user_id:
         raise HTTPException(status_code=503, detail="owner_id 未配置")
     try:
+        from core.scheduler.loop import mark_user_active
         from core.scheduler.state_machine import notify_owner_turn
 
+        mark_user_active()
         notify_owner_turn(user_id)
     except Exception:
         logger.exception("[desktop_trigger] trigger state notify_owner_turn 失败")

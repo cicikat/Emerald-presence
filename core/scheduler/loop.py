@@ -190,7 +190,7 @@ async def _pipeline_send(
     search_query 指定时用于 fetch_context，否则用 prompt。
     trigger_name 用于优先级判断：高优先级触发器不受活跃窗口限制。
     output_mode="return"：post_process 写记忆，但不调 _send，返回 reply 文本。
-    output_mode="speak"（默认）：发送后返回 None，保持原有行为。
+    output_mode="speak"（默认）：发送后返回 reply 文本；被策略拦截或失败时返回 None。
     """
     if trigger_name not in _HIGH_PRIORITY_TRIGGERS and _user_active_recently():
         logger.info(f"[scheduler] 用户活跃中，跳过低优先级触发: {trigger_name}")
@@ -204,6 +204,7 @@ async def _pipeline_send(
             logger.warning("[scheduler._pipeline_send] pipeline 未注入，降级直接发送")
             if output_mode != "return":
                 await _send(prompt, behavior=behavior)
+                return prompt
             return None
 
         from core.scheduler.triggers.birthday import _is_birthday_period
@@ -240,6 +241,7 @@ async def _pipeline_send(
                     "[scheduler._pipeline_send] fanout 部分失败: %s",
                     turn_result.fanout_failures,
                 )
+            return reply
         else:
             logger.warning("[scheduler._pipeline_send] LLM 返回空内容")
     except Exception as e:

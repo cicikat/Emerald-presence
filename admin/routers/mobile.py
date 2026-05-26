@@ -47,8 +47,10 @@ async def mobile_chat(body: dict = Body(...), auth=Depends(verify_token)):
     if mobile is not None:
         mobile.set_active(True)
 
+    from core.scheduler.loop import mark_user_active
     from admin.routers.chat import run_owner_chat_turn
 
+    mark_user_active()
     return await run_owner_chat_turn(message, "mobile")
 
 

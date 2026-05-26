@@ -72,7 +72,18 @@ async def execute_prompt(
 
     from core.scheduler import loop
 
-    await loop._pipeline_send(prompt, search_query=search_query, trigger_name=trigger_name)
+    sent_text = await loop._pipeline_send(prompt, search_query=search_query, trigger_name=trigger_name)
+    if not sent_text:
+        return ExecuteResult(
+            trigger_name=result.trigger_name,
+            would_send_prompt=result.would_send_prompt,
+            would_mark=result.would_mark,
+            would_mark_done=result.would_mark_done,
+            topic_key=result.topic_key,
+            reads_cache_ok=result.reads_cache_ok,
+            dry_run=False,
+            sent=False,
+        )
     if after_send is not None:
         maybe = after_send()
         if inspect.isawaitable(maybe):

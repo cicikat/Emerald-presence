@@ -182,6 +182,7 @@ async def test_sleep_end_execute_false_preserves_cross_marks(monkeypatch):
 
     async def fake_send(prompt, search_query="", trigger_name="", **kwargs):
         sent.append((prompt, trigger_name))
+        return "reply"
 
     monkeypatch.setattr(loop, "_pipeline_send", fake_send)
     monkeypatch.setattr(loop, "_mark", lambda name: marks.append(name))
@@ -250,6 +251,7 @@ async def test_watch_live_uses_execute_and_skips_legacy_send(monkeypatch):
 
     async def execute_send(prompt, search_query="", trigger_name="", **kwargs):
         execute_sent.append((prompt, trigger_name))
+        return "reply"
 
     monkeypatch.setattr(watch, "WATCH_EXECUTE_MODE", "live")
     monkeypatch.setattr(watch, "datetime", FakeDatetime)
@@ -278,6 +280,7 @@ async def test_watch_live_sleep_end_marks_morning_and_blocks_tick_greeting(monke
 
     async def execute_send(prompt, search_query="", trigger_name="", **kwargs):
         sent.append((prompt, trigger_name))
+        return "reply"
 
     loop._last_trigger.clear()
     monkeypatch.setattr(watch, "WATCH_EXECUTE_MODE", "live")
@@ -377,7 +380,7 @@ async def test_topic_followup_execute_live_writes_followed_topics(monkeypatch, s
     )
 
     async def fake_send(prompt, search_query="", trigger_name="", **kwargs):
-        return None
+        return "reply"
 
     monkeypatch.setattr(execution, "EXECUTE_MODE", "live")
     monkeypatch.setattr(loop, "_pipeline_send", fake_send)
@@ -466,7 +469,7 @@ async def test_reminder_execute_live_marks_done(monkeypatch, sandbox):
     done = []
 
     async def fake_send(prompt, search_query="", trigger_name="", **kwargs):
-        return None
+        return "reply"
 
     monkeypatch.setattr(loop, "_pipeline_send", fake_send)
     monkeypatch.setattr("core.scheduler.loop._owner_id", lambda: "u1")
@@ -489,7 +492,7 @@ async def test_diary_share_execute_live_marks_last_share(monkeypatch, sandbox):
     from core.scheduler.triggers import diary
 
     async def fake_send(prompt, search_query="", trigger_name="", **kwargs):
-        return None
+        return "reply"
 
     monkeypatch.setattr(loop, "_pipeline_send", fake_send)
     monkeypatch.setattr(loop, "_owner_id", lambda: "u1")
@@ -573,6 +576,7 @@ async def test_weather_live_old_tick_refreshes_cache_without_sending(monkeypatch
 
     async def fake_send(prompt, search_query="", trigger_name="", **kwargs):
         sent.append((prompt, trigger_name))
+        return "reply"
 
     async def fake_fetch(location):
         return dict(detail)
