@@ -159,6 +159,9 @@ class DataPaths:
     def dream_state_path(self, user_id: str | int) -> Path:
         return self._p("dreams", "state", safe_user_id(user_id), "dream_state.json")
 
+    def dream_settings_path(self, user_id: str | int) -> Path:
+        return self._p("dreams", "settings", safe_user_id(user_id) + ".json")
+
     def garden(self) -> Path:
         return self._p("garden")
 

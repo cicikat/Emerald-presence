@@ -1,0 +1,120 @@
+"""
+Dream context snapshot — frozen once at dream entry.
+
+Constraints (BY CONSTRUCTION):
+- Assembled once, written into dream_state["context_snapshot"].
+- Dream turns read from the snapshot only; they never call fetch_context,
+  retrieve, user_identity.load, or mood_state.get.
+- amnesia / keep_impression control what goes into the snapshot,
+  NOT whether live memory access is allowed (it never is).
+"""
+
+import logging
+import time
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+async def build_snapshot(user_id: str, entry_reason: str = "") -> dict[str, Any]:
+    """
+    Assemble and return the frozen dream context snapshot.
+
+    Called once at dream entry. The caller writes the result into
+    dream_state["context_snapshot"] and never refreshes it during the dream.
+    """
+    from core.dream.dream_settings import load as _load_settings
+
+    settings = _load_settings(user_id)
+    amnesia: bool = settings.get("amnesia", False)
+    keep_impression: bool = settings.get("keep_impression", True)
+
+    snapshot: dict[str, Any] = {
+        "created_at": time.time(),
+        "user_id": user_id,
+        "yexuan_awareness": "lucid_shared",
+        "boundary": "dream_only",
+        "entry_reason": entry_reason,
+    }
+
+    # relationship state — always included
+    try:
+        from core import user_relation
+        snapshot["relationship_state"] = user_relation.get_relation(user_id)
+    except Exception as e:
+        logger.warning(f"[dream_context] relationship_state failed: {e}")
+        snapshot["relationship_state"] = {}
+
+    # recent reality context — always included as a short summary
+    try:
+        from core.memory import short_term
+        history = short_term.load_for_prompt(user_id)
+        snapshot["recent_reality_context"] = _summarize_recent(history)
+    except Exception as e:
+        logger.warning(f"[dream_context] recent_reality_context failed: {e}")
+        snapshot["recent_reality_context"] = ""
+
+    if not amnesia:
+        # episodic memory
+        try:
+            from core.memory.episodic_memory import retrieve, format_for_prompt
+            from core.memory.mood_state import get_current as _get_mood
+            episodes = retrieve(user_id=user_id, topic="", top_k=3)
+            snapshot["episodic_summary"] = format_for_prompt(
+                episodes,
+                char_name="叶瑄",
+                current_emotion=_get_mood(),
+            )
+        except Exception as e:
+            logger.warning(f"[dream_context] episodic failed: {e}")
+            snapshot["episodic_summary"] = ""
+
+        # mid-term context
+        try:
+            from core.memory import mid_term
+            snapshot["mid_term_context"] = mid_term.format_for_prompt(user_id)
+        except Exception as e:
+            logger.warning(f"[dream_context] mid_term failed: {e}")
+            snapshot["mid_term_context"] = ""
+    else:
+        snapshot["episodic_summary"] = ""
+        snapshot["mid_term_context"] = ""
+
+    if keep_impression:
+        try:
+            from core.memory import user_profile
+            profile = user_profile.load(user_id)
+            snapshot["profile_impression"] = _extract_impression(profile)
+        except Exception as e:
+            logger.warning(f"[dream_context] profile_impression failed: {e}")
+            snapshot["profile_impression"] = ""
+    else:
+        snapshot["profile_impression"] = ""
+
+    return snapshot
+
+
+def _summarize_recent(history: list[dict]) -> str:
+    """Condense last few history turns into a short context string."""
+    tail = history[-6:] if len(history) > 6 else history
+    lines = []
+    for h in tail:
+        role = "用户" if h.get("role") == "user" else "叶瑄"
+        content = (h.get("content") or "")[:60]
+        lines.append(f"{role}：{content}")
+    return "\n".join(lines)
+
+
+def _extract_impression(profile: dict) -> str:
+    """Extract a brief impression string from user profile."""
+    if not profile:
+        return ""
+    parts = []
+    if traits := profile.get("traits"):
+        if isinstance(traits, list):
+            parts.append("用户特征：" + "、".join(str(t) for t in traits[:5]))
+    if state := profile.get("current_state"):
+        parts.append(f"当前状态：{state}")
+    if nickname := profile.get("nickname"):
+        parts.append(f"称呼：{nickname}")
+    return "；".join(parts)
