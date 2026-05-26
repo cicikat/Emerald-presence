@@ -136,8 +136,7 @@ class DataPaths:
         return self._p("yexuan_inner", "mood_state.json")
 
     def activity_pool(self) -> Path:
-        # activity_pool.yaml 是手写配置，不走沙盒，固定路径
-        return Path(__file__).parent.parent / "data" / "yexuan_inner" / "activity_pool.yaml"
+        return self._p("yexuan_inner", "activity_pool.yaml")
 
     def activity_state(self) -> Path:
         return self._p("yexuan_inner", "activity_state.json")
@@ -189,6 +188,9 @@ class DataPaths:
 
     def execute_dryrun_log(self) -> Path:
         return self._p("logs", "execute_dryrun.jsonl")
+
+    def debug_llm_output_dir(self) -> Path:
+        return self._p("debug", "llm_output")
 
     def user_identity_dir(self) -> Path:
         return self._p("user_identity")

@@ -1,11 +1,11 @@
 import logging
 import time
 from datetime import datetime, timedelta
-from pathlib import Path
+
+from core.sandbox import get_paths
 
 logger = logging.getLogger(__name__)
 
-_DEBUG_DIR = Path("data/debug/llm_output")
 _KEEP_DAYS = 7
 
 
@@ -46,9 +46,10 @@ class FailureCounter:
 
     def _save_debug(self, raw_output: str, uid: str) -> None:
         try:
-            _DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+            debug_dir = get_paths().debug_llm_output_dir()
+            debug_dir.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            out_file = _DEBUG_DIR / f"{timestamp}_{uid}.txt"
+            out_file = debug_dir / f"{timestamp}_{uid}.txt"
             out_file.write_text(raw_output, encoding="utf-8")
             self._cleanup_old_files()
         except Exception as e:
@@ -57,7 +58,7 @@ class FailureCounter:
     def _cleanup_old_files(self) -> None:
         cutoff = datetime.now() - timedelta(days=_KEEP_DAYS)
         try:
-            for f in _DEBUG_DIR.iterdir():
+            for f in get_paths().debug_llm_output_dir().iterdir():
                 if f.is_file() and datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
                     f.unlink()
         except Exception as e:
