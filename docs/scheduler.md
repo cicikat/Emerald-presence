@@ -90,7 +90,9 @@ time_based 的早晚安/随机/天气/日记/主动回忆、diary 两档、`time
 Phase 2 Step 3.5 加了 dry-run 执行观测：`run_shadow_tick()` 如果选中了带 `execute` 的 proposal，
 会调用 `execute(dry_run=True)`，向 `data/logs/execute_dryrun.jsonl` 写入 would-send / would-mark；
 watch 事件驱动触发器跳过这一步，避免 shadow tick 误模拟外部事件。urgency 分档统一由
-`core/scheduler/urgency.py` 提供。
+`core/scheduler/urgency.py` 提供。R1 后，同一个日志也记录 live execute 被 `_pipeline_send()` 拦下的
+`blocked=true` 条目，用于观察 active window 真实拦截分布；该日志只做可观测性，不改变发送、
+mark 或重试行为。
 
 shadow log 格式：
 
@@ -103,6 +105,36 @@ dry-run log 格式：
 ```json
 {"ts": 1748000000.0, "trigger_name": "morning_greeting", "would_send_prompt": "...", "would_mark": ["morning_greeting"], "would_mark_done": [], "reads_cache_ok": true}
 ```
+
+blocked log 格式：
+
+```json
+{"ts": 1748000000.0, "trigger_name": "reminders", "reason": "sent_false", "would_mark": [], "would_mark_done": ["abc"], "sent": false, "blocked": true}
+```
+
+---
+
+## Policy 表（scaffold）
+
+`core/scheduler/policy.py` 目前是 **documentation-by-code / assertions**：用 `TriggerPolicy`
+静态表记录每个 trigger 的语义归类、active-window 行为、defer 上限、drop/mark 边界和 cross-mark
+约束。
+
+当前状态：
+
+- `POLICY_TABLE` 已记录 25 条配置，但没有接入 live 决策。
+- `policy.py` 不被运行时模块 import，不参与 `_pipeline_send()`、gating 或 execute 的实际分支。
+- 文件里的断言函数用于后续测试或接入层显式调用；现在不会自动改变调度器行为。
+- 因此不要把该表描述成已上线的 defer/drop 引擎。真实 active-window 拦截仍发生在
+  `loop._pipeline_send()`。
+
+两条当前定性需要保留：
+
+- `sleep_end`：`priority="normal"` + `active_window_behavior="drop"`，`mark_on_drop=False`。
+  `cross_marks=["morning_greeting"]` 只表达“实际 sent 后才联动 mark”；drop 不 cross-mark，
+  避免睡醒关心被拦后又压掉早安。
+- `hr_high`：语义上是 defer，但 Watch proposal 受 `HEART_RATE_PROPOSAL_TTL_SECONDS=10min`
+  限制，`max_defer_age_secs` 只能记为 10 分钟；超过 TTL 后 proposal 返回 `None`，等同过期 drop。
 
 ---
 
@@ -139,8 +171,8 @@ Pipeline 未注入时降级：直接发送 prompt 原文（不经过 LLM）。
 
 | `output_mode` | 行为 |
 |---|---|
-| `"speak"`（默认）| 生成 reply 后经 `turn_sink` 写入并广播，返回 `None` |
-| `"return"` | 生成 reply 后经 `turn_sink` 写入但不广播，直接返回 reply 文本 |
+| `"speak"`（默认）| 生成 reply 后经 `turn_sink` 写入并广播，返回 reply 文本；被 active window 拦截、owner_id 缺失、LLM 空回复或异常时返回 `None` |
+| `"return"` | 生成 reply 后经 `turn_sink` 写入但不广播，直接返回 reply 文本；失败时返回 `None` |
 
 `sensor_aware` trigger 使用 `output_mode="return", record_turn=False` 拿到 reply 后，再显式调用
 `record_assistant_turn(source=SENSOR, fanout=["desktop", "mobile"], payload={"behavior": action})`，
@@ -148,15 +180,28 @@ Pipeline 未注入时降级：直接发送 prompt 原文（不经过 LLM）。
 
 ---
 
-## 优先级机制
+## Active Window 与优先级
 
-### 高优先级触发器（用户活跃时也强制发送）
+当前 active window 的真实实现仍在 `loop._pipeline_send()`，窗口长度为硬编码 120 秒。
+`mark_user_active()` 会记录最近 owner 输入时间；目前 QQ owner 消息、桌宠 owner chat 和手机
+owner chat 都会更新该时间戳。
 
-birthday_midnight / birthday_eve / birthday_afternoon / birthday_night / period_reminder / hr_critical
+发送边界：
 
-### 低优先级（用户 120 秒内活跃则跳过）
+- 高优先级白名单用户活跃时也发送：`birthday_midnight` / `birthday_eve` /
+  `birthday_afternoon` / `birthday_night` / `period_reminder` / `hr_critical`。
+- 白名单未扩大；`hr_high`、`sleep_end`、`reminders`、普通日程问候、花园事件等仍会被 active
+  window 拦截。
+- 普通主动消息在 `before_send` / `_pipeline_send` 阶段被拦时，`_pipeline_send()` 返回 `None`。
+- execute live 路径里，`execute_prompt()` 收到 `None` 后只写 `execute_dryrun.jsonl` 的
+  `blocked=true` 观测，不调用 `after_send`，不执行 `_mark()`，也不 `mark_done()`。
+- legacy reminder 旧路径已经对齐：只有 `_pipeline_send()` 实际返回 sent 文本后才
+  `mark_done()` 和写发送 log；active window 拦截时备忘录留在队列，下次 tick 再捞。
 
-其余所有触发器。`mark_user_active()` 由 main.py 每次收到用户消息时调用。
+当前已收口的“未发送不 mark”语义覆盖 execute live 路径和 legacy reminder 旧路径：被 active
+window 拦截、LLM 空回复或发送前异常时，不调用 execute 的 `after_send` / `_mark()`，也不会把
+备忘录标记完成。其他 legacy trigger 若仍在 `_pipeline_send()` 后无条件 `_mark()`，需逐个按 sent
+结果继续收口；reminder 旧路径已完成。
 
 ---
 
@@ -198,7 +243,7 @@ birthday_midnight / birthday_eve / birthday_afternoon / birthday_night / period_
 | `hr_high` | 30min | 低 | watch | 心率>100 提醒 |
 | `hr_critical` | 1h | **高** | watch | 心率>120 告警 |
 | `sleep_end` | 2h | 低 | watch | 睡眠结束感知；`admin/routers/watch.py` 合并睡眠片段后回到 `watch.on_watch_event("sleep_end", ...)` |
-| `sleep_report` | 20h | 低 | watch | 睡眠报告 |
+| ~~`sleep_report`~~ | 20h | 低 | watch | 睡眠报告（未实现，已移除冷却位） |
 | reminders（备忘录） | 无冷却 | 低 | loop.py内联 | 到点即发，发完标记完成 |
 
 ---

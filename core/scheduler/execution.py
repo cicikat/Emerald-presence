@@ -74,7 +74,7 @@ async def execute_prompt(
 
     sent_text = await loop._pipeline_send(prompt, search_query=search_query, trigger_name=trigger_name)
     if not sent_text:
-        return ExecuteResult(
+        blocked = ExecuteResult(
             trigger_name=result.trigger_name,
             would_send_prompt=result.would_send_prompt,
             would_mark=result.would_mark,
@@ -84,6 +84,8 @@ async def execute_prompt(
             dry_run=False,
             sent=False,
         )
+        write_execute_blocked(blocked)
+        return blocked
     if after_send is not None:
         maybe = after_send()
         if inspect.isawaitable(maybe):
@@ -113,5 +115,21 @@ def write_execute_dryrun(result: ExecuteResult) -> None:
             "would_mark_done": result.would_mark_done,
             "topic_key": result.topic_key,
             "reads_cache_ok": result.reads_cache_ok,
+        },
+    )
+
+
+def write_execute_blocked(result: ExecuteResult) -> None:
+    """记录"本该发但 pipeline 返回空"的事实；不改任何发送/mark/重试行为。"""
+    safe_append_jsonl(
+        get_paths().execute_dryrun_log(),
+        {
+            "ts": time.time(),
+            "trigger_name": result.trigger_name,
+            "reason": "sent_false",
+            "would_mark": result.would_mark,
+            "would_mark_done": result.would_mark_done,
+            "sent": False,
+            "blocked": True,
         },
     )

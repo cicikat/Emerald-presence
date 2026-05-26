@@ -213,6 +213,7 @@ async def test_watch_dry_run_keeps_legacy_send_and_logs_execute(monkeypatch, san
 
     async def legacy_send(prompt, search_query="", trigger_name="", **kwargs):
         sent.append((prompt, trigger_name))
+        return prompt
 
     monkeypatch.setattr(watch, "WATCH_EXECUTE_MODE", "dry_run")
     monkeypatch.setattr(watch, "datetime", FakeDatetime)

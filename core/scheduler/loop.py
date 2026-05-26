@@ -37,7 +37,6 @@ _COOLDOWNS: dict[str, int] = {
     "diary_inject":          6 * 3600,   # 日记注入：6小时
     "daily_journal":         1 * 3600,   # 每日手账：1小时冷却（深夜触发）
     "diary_share_reminder":  8 * 3600,   # 日记分享提醒：8小时
-    "sleep_report":         20 * 3600,   # 睡眠报告：20小时
     "activity_remind":      20 * 3600,   # 运动提醒：20小时
     "topic_followup":       24 * 3600,   # 未完结话题追问：24小时
     "birthday_midnight": 365 * 24 * 3600,
@@ -314,12 +313,13 @@ async def _check_reminders():
         from core.tools.reminder import get_due_reminders, mark_done
         due = get_due_reminders(oid)
         for item in due:
-            await _pipeline_send(
+            sent = await _pipeline_send(
                 f"备忘录提醒时间到了：{item['content']}，用{_char_name()}的方式提醒她",
                 trigger_name="reminders",
             )
-            mark_done(oid, item["id"])
-            logger.info(f"[scheduler] 备忘录提醒已发送: {item['content']}")
+            if sent:
+                mark_done(oid, item["id"])
+                logger.info(f"[scheduler] 备忘录提醒已发送: {item['content']}")
     except Exception as e:
         log_error("scheduler._check_reminders", e)
 

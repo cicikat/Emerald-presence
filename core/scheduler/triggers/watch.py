@@ -242,8 +242,9 @@ async def on_watch_event(event_type: str, data: dict):
                 if _watch_live_mode():
                     await _execute_watch_event(proposal, dry_run=False)
                 else:
-                    await _pipeline_send(f"（深夜，{_char_name()}看到你的心率{hr}）", trigger_name="hr_critical")
-                    _mark("hr_critical")
+                    sent = await _pipeline_send(f"（深夜，{_char_name()}看到你的心率{hr}）", trigger_name="hr_critical")
+                    if sent:
+                        _mark("hr_critical")
                     await _execute_watch_event(proposal, dry_run=True)
             elif hr > HR_HIGH_THRESHOLD and _is_ready("hr_high"):
                 trigger_name = "hr_high"
@@ -251,8 +252,9 @@ async def on_watch_event(event_type: str, data: dict):
                 if _watch_live_mode():
                     await _execute_watch_event(proposal, dry_run=False)
                 else:
-                    await _pipeline_send(f"（深夜，{_char_name()}注意到你的心率{hr}）", trigger_name="hr_high")
-                    _mark("hr_high")
+                    sent = await _pipeline_send(f"（深夜，{_char_name()}注意到你的心率{hr}）", trigger_name="hr_high")
+                    if sent:
+                        _mark("hr_high")
                     await _execute_watch_event(proposal, dry_run=True)
         else:
             if hr > HR_CRITICAL_THRESHOLD and _is_ready("hr_critical"):
@@ -261,8 +263,9 @@ async def on_watch_event(event_type: str, data: dict):
                 if _watch_live_mode():
                     await _execute_watch_event(proposal, dry_run=False)
                 else:
-                    await _pipeline_send(f"（{_char_name()}看到你的心率{hr}，皱了皱眉）", trigger_name="hr_critical")
-                    _mark("hr_critical")
+                    sent = await _pipeline_send(f"（{_char_name()}看到你的心率{hr}，皱了皱眉）", trigger_name="hr_critical")
+                    if sent:
+                        _mark("hr_critical")
                     await _execute_watch_event(proposal, dry_run=True)
             elif hr > HR_HIGH_THRESHOLD and _is_ready("hr_high"):
                 trigger_name = "hr_high"
@@ -270,8 +273,9 @@ async def on_watch_event(event_type: str, data: dict):
                 if _watch_live_mode():
                     await _execute_watch_event(proposal, dry_run=False)
                 else:
-                    await _pipeline_send(f"（{_char_name()}看到你的心率有点高，{hr}）", trigger_name="hr_high")
-                    _mark("hr_high")
+                    sent = await _pipeline_send(f"（{_char_name()}看到你的心率有点高，{hr}）", trigger_name="hr_high")
+                    if sent:
+                        _mark("hr_high")
                     await _execute_watch_event(proposal, dry_run=True)
         if trigger_name:
             logger.info(f"[scheduler] Watch {trigger_name} 已触发 hr={hr}")
@@ -291,8 +295,9 @@ async def on_watch_event(event_type: str, data: dict):
             hours = int(duration // 60)
             minutes = int(duration % 60)
             prompt = f"（{_char_name()}看到你醒了，睡了{hours}小时{minutes}分钟）"
-        _mark("sleep_end")
-        _mark("morning_greeting")
-        await _pipeline_send(prompt, trigger_name="sleep_end")
+        sent = await _pipeline_send(prompt, trigger_name="sleep_end")
+        if sent:
+            _mark("sleep_end")
+            _mark("morning_greeting")
         await _execute_watch_event(proposal, dry_run=True)
         logger.info("[scheduler] 睡醒关心已触发")

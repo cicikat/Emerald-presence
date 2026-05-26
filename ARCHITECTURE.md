@@ -15,6 +15,7 @@ QQ 消息 → main.py → message_queue
          ├─ state_machine：观测 owner turn / sensor tick，维护 CHATTING / QUIET / RESTLESS
          ├─ gating shadow：并行记录“若由 gating 决策本 tick 会选谁”
          ├─ proposer dry-run：记录 would-send / would-mark，不真实发送
+         ├─ policy.py：策略表 scaffold / 语义断言，尚未接入 live 决策
          ├─ EXECUTE_MODE：当前为 live（见 core/scheduler/execution.py）
          └─ legacy 真实触发器路径：仍按原 _is_ready/_mark 真实发送
          ↓（入口共用）
@@ -190,7 +191,7 @@ data/
 │   ├── fixation.jsonl            固化 pipeline 每 job 追加一行（ts/job/uid/status/duration_ms）
 │   ├── trigger_state.jsonl       触发状态机每次状态切换追加一行
 │   ├── gating_shadow.jsonl       gating 并行观测期每 tick 的候选与 would_pick
-│   └── execute_dryrun.jsonl      proposer shadow 执行观测（would_send_prompt / would_mark）
+│   └── execute_dryrun.jsonl      proposer shadow 执行观测（would_send_prompt / would_mark）和 live blocked 观测
 ├── dead_letter_queue/            慢任务 DLQ（handler 3次失败后落盘，含 task/error/failed_at）
 ├── debug/
 │   └── llm_output/              LLM异常输出存档（带时间戳，7天自动清理）
