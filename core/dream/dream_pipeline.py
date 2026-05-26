@@ -155,14 +155,19 @@ async def dream_turn(
 
 async def force_exit_dream(uid: str) -> None:
     """
-    Hard exit — unconditional, immediate, penetrates all state.
-    Must be called BEFORE any LLM invocation.
-    Cannot be disabled by config or role behavior (invariant D).
+    Hard exit chokepoint — unconditional, immediate, penetrates all state.
+
+    - Called pre-LLM for /stop keyword
+    - Called from /dream/exit endpoint (no conversation_lock — runs concurrently)
+    - Idempotent: safe to call from any state including REALITY_AFTERGLOW
+    - Cannot be disabled by config or role behavior (invariant D)
     """
     from core.dream.dream_state import read_state, write_state, DreamStatus
 
     state = read_state(uid)
     dream_id = state.get("dream_id", "")
+
+    # Unconditionally transition to DREAM_CLOSING, write immediately
     state["status"] = DreamStatus.DREAM_CLOSING.value
     write_state(uid, state)
 
