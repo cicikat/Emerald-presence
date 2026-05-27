@@ -35,10 +35,12 @@
 | `7_mes_example_item` | 对话示例（few-shot） | always（有内容） | 角色卡 mes_example |
 | `9_history` | 短期对话历史（近场保留 + 远场加权择优） | always | `short_term.load_for_prompt()` |
 | `9.5_episodic_top` | 最相关情景记忆1条（attention sweet spot） | episodic_result 非空 | 从已召回结果取第一条，不重复召回 |
-| `10_tool_result` | 本轮工具执行结果 | 有工具调用时 | `tool_dispatcher.execute()` |
+| `10_tool_result` | 本轮工具执行结果 | 有工具调用时 | `tool_dispatcher.execute()` 裸输出经 `core/tools/tool_result.py` 截断+定界框定后注入（`safe_summary`） |
 | `11_author_note` | 人设核心提醒 + 输出格式规则 + 纠偏 | always | 硬编码 + `author_note_rotator` + consistency_check |
 | `11_jailbreak` | 破限预设 layer=11 | 文件存在且 enabled | `data/jailbreak_entries.json` |
 | `12_user_message` | 用户当前消息 | always | 用户输入 |
+
+> 层 10 注入安全：工具裸输出经 `ToolResult.safe_summary`（截断上限 2000 字符）包裹后，以定界标记 `<<<TOOL_DATA_START>>>` / `<<<TOOL_DATA_END>>>` 加反注入指令框定，防止外部工具/搜索结果中的不可信文本被模型当作指令执行。原始数据仅落 debug 日志，永不进 prompt/memory。
 
 ---
 

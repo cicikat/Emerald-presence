@@ -188,6 +188,37 @@ tools:
 
 ---
 
+## ToolResult v0 契约
+
+文件：`core/tools/tool_result.py`
+
+所有工具裸输出在进入 prompt 之前必须经过此收口。
+
+### 数据类
+
+```python
+@dataclass
+class ToolResult:
+    raw_data: str          # 原始未过滤；仅供 debug 日志，永不进 prompt/memory
+    safe_summary: str      # 唯一允许进 prompt 的字段（截断后）
+    memory_candidate: str | None = None  # v0 预留，未接线
+    meta: dict = field(default_factory=dict)   # 预留 tool_name / trust_level 等
+```
+
+**不变量**：`raw_data` 永不进 prompt 或 memory。将来任何 tool→memory 路径只能消费 `safe_summary` 或 `memory_candidate`。
+
+### 适配器与截断
+
+- `to_tool_result(x) -> ToolResult`：幂等适配器，已是 `ToolResult` 则原样返回；`str` 则包装；其他先 `str()` 再包装。旧工具返回裸字符串自动适配，无需改动工具实现。
+- `sanitize_for_prompt(s)`：截断到 `TOOL_RESULT_CHAR_CAP = 2000` 字符，超长追加 `…（工具结果已截断）`。
+- `frame_tool_result(safe_summary)`：用定界标记 `<<<TOOL_DATA_START>>>` / `<<<TOOL_DATA_END>>>` 加反注入指令包裹，产出注入 layer 10 的最终文本。
+
+### 安全收口位置
+
+唯一注入点：`core/prompt_builder.py` layer 10（`10_tool_result`）。所有 4 个 `tool_dispatcher.execute()` 调用方均经 `build_prompt(tool_result=)` 参数汇聚于此，无其他注入路径。
+
+---
+
 ## 新增工具的规范
 
 1. 在 `core/tools/` 下创建独立实现文件

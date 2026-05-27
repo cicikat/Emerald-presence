@@ -630,14 +630,17 @@ def build(
     # 格式说明：让模型以角色语气自然转述结果，不要暴露"工具"概念
     # ─────────────────────────────────────────────────────────────────────────
     if tool_result:
+        from core.tools.tool_result import to_tool_result, frame_tool_result
+        _tr = to_tool_result(tool_result)
+        logger.debug(
+            "[tool_result_raw] raw_len=%d safe_len=%d",
+            len(_tr.raw_data),
+            len(_tr.safe_summary),
+        )
         _layers.append("10_tool_result")
         messages.append({
             "role": "system",
-            "content": (
-                f"【本轮工具执行结果】\n"
-                f"{tool_result}\n"
-                f"请用你的角色语气自然地告诉用户，不要出现\"工具\"二字。"
-            ),
+            "content": frame_tool_result(_tr.safe_summary),
             "_layer": "10_tool_result",
         })
 
