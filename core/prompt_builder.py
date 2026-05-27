@@ -128,6 +128,7 @@ def build(
     episodic_fallback_result: str = "",
     mid_term_context: str = "",
     tags: set[str] | None = None,
+    dream_impression_text: str = "",
 ) -> tuple[list[dict], dict]:
     """
     组装完整的 prompt 消息列表
@@ -591,6 +592,18 @@ def build(
         pass
 
     # ─────────────────────────────────────────────────────────────────────────
+    # 层 6g：梦境印象回流（ambient，非事实框定，最先裁剪）
+    # 来自 impression_loader；仅当有未过期印象时注入。
+    # ─────────────────────────────────────────────────────────────────────────
+    if dream_impression_text:
+        _layers.append("6g_dream_impression")
+        messages.append({
+            "role": "system",
+            "content": dream_impression_text,
+            "_layer": "6g_dream_impression",
+        })
+
+    # ─────────────────────────────────────────────────────────────────────────
     # 层 7：对话示例（few-shot，来自角色卡的 mes_example 字段）
     # mes_example 格式："{{user}}: xxx\n{{char}}: xxx\n<START>..."
     # ─────────────────────────────────────────────────────────────────────────
@@ -755,7 +768,7 @@ def build(
         _prompt_logger.warning(f"[prompt] token估算超硬上限: {token_estimate}，触发层裁剪")
         # 强制裁剪：按优先级删层，先删6b/6c/6d，再删5.5/6e
         # 按质量从低到高排序：先丢质量最低的（关键词匹配），最后才丢质量最高的（LLM压缩+MMR筛选）和世界设定
-        _DROPPABLE = ["6b_event_search", "mid_term", "6d_diary", "6e_inner_diary", "6c_episodic", "5.5_lore"]
+        _DROPPABLE = ["6g_dream_impression", "6b_event_search", "mid_term", "6d_diary", "6e_inner_diary", "6c_episodic", "5.5_lore"]
         for drop in _DROPPABLE:
             if token_estimate <= 18000:
                 break
