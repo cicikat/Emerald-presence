@@ -259,6 +259,13 @@ async def _generate_summary_bg(uid: str, dream_id: str, exit_type: str) -> None:
     except Exception as e:
         logger.error(f"[dream_pipeline] summary failed uid={uid}: {e}")
 
+    # Distill impression after summary (failure is warning-only per C7)
+    try:
+        from core.dream.distill_impression import distill_impression
+        await distill_impression(uid, dream_id, exit_type)
+    except Exception as e:
+        logger.warning(f"[dream_pipeline] distill_impression failed uid={uid}: {e}")
+
 
 def _ensure_dream_id(uid: str, state: dict) -> str:
     from core.dream.dream_state import write_state
