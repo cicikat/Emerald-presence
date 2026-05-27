@@ -32,6 +32,7 @@
 | `6d_diary_context` | 用户近期日记 | 有内容且命中 `emotion.down` / `emotion.indirect` | `diary_context.load()` |
 | `6e_inner_diary_facts` | 叶瑄昨天的记录（事件层，取前200字） | 昨日日记文件存在且含事件层 | `data/yexuan_inner/diary/` |
 | `6e_inner_diary_feeling` | 叶瑄昨天的心情（感受层，取前150字） | 昨日日记存在且命中 `emotion.down/indirect/deep` 或 `topic.relation` | `data/yexuan_inner/diary/` |
+| `6g_dream_impression` | 梦境印象回流（ambient，≤3条，非事实框定，叶瑄自述"我好像在梦里……"） | 有未过期印象时注入 | `core/dream/impression_loader.load_impression_text()` → `data/dreams/impressions/{uid}.json` |
 | `7_mes_example_item` | 对话示例（few-shot） | always（有内容） | 角色卡 mes_example |
 | `9_history` | 短期对话历史（近场保留 + 远场加权择优） | always | `short_term.load_for_prompt()` |
 | `9.5_episodic_top` | 最相关情景记忆1条（attention sweet spot） | episodic_result 非空 | 从已召回结果取第一条，不重复召回 |
@@ -155,10 +156,11 @@ token_estimate = sum(len(m["content"]) for m in messages)
 ### 裁剪顺序
 
 依次删以下层（通过 `_layer` 字段 startswith 匹配），按质量从低到高：
-6b_event_search → mid_term → 6d_diary → 6e_inner_diary → 6c_episodic → 5.5_lore
+6g_dream_impression → 6b_event_search → mid_term → 6d_diary → 6e_inner_diary → 6c_episodic → 5.5_lore
 
 设计原则：
-- `6b_event_search` 是关键词匹配 + 简单评分，质量最低，最先丢
+- `6g_dream_impression` 是模糊梦境印象，ambient 注入、低权重、非事实，最先丢（最不关键）
+- `6b_event_search` 是关键词匹配 + 简单评分，质量较低，次先丢
 - `mid_term` / `6d_diary` / `6e_inner_diary` 是被动上下文，丢了不影响相关性
 - `6c_episodic` 经过 LLM 压缩 + strength 校正 + MMR 多样性筛选，是质量最高的记忆层，靠后丢
 - `5.5_lore` 是世界书设定，丢了等于角色失忆，最后丢
