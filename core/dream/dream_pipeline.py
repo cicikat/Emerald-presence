@@ -10,6 +10,8 @@ Isolation contract (BY CONSTRUCTION):
 - Only reads the frozen context_snapshot; never calls fetch_context / retrieve /
   user_identity.load / mood_state.get during a dream turn
 - Only writes to current_dream.jsonl via dream_log
+- body_state is dream-local: tracker runs after LLM, result stored for next turn;
+  ★ never writes reality mood_state (invariant)
 """
 
 import asyncio
@@ -19,12 +21,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Pre-LLM hard-exit keyword (never enters RP, never reaches LLM)
 HARD_EXIT_KEYWORD = "/stop"
-
-# Marker that LLM emits when it accepts a soft-exit request
 _SOFT_EXIT_ACCEPT_MARKER = "[[EXIT_DREAM_ACCEPT]]"
-
 
 
 async def dream_turn(
@@ -37,9 +35,9 @@ async def dream_turn(
     Returns:
       {
         "reply":         str,
-        "exit_accepted": bool,   # True if LLM soft-accepted waking up
-        "force_exited":  bool,   # True if hard exit was triggered pre-LLM
-        "error":         str,    # set only when not in dream state
+        "exit_accepted": bool,
+        "force_exited":  bool,
+        "error":         str,
       }
     """
     from core.dream.dream_state import read_state, write_state, DreamStatus
@@ -70,13 +68,13 @@ async def dream_turn(
     context_snapshot = state.get("context_snapshot", {})
 
     from core.dream.dream_log import append_turn, read_current
-
     dream_history = read_current(uid)
 
-    # Load dream lorebook if enabled
-    lore_entries: list[str] = []
+    # Load settings (lorebook + boundary_level)
     from core.dream.dream_settings import load as _load_settings
     settings = _load_settings(uid)
+
+    lore_entries: list[str] = []
     if settings.get("enable_dream_lorebook", True):
         try:
             from core.pipeline_registry import get as _get_pipeline
@@ -86,13 +84,9 @@ async def dream_turn(
         except Exception as e:
             logger.debug(f"[dream_pipeline] lorebook match skipped: {e}")
 
-    # Load jailbreak from character
     jailbreak_text = _load_jailbreak_text()
 
-    # Build dream prompt (independent assembler, no reality sanitizer)
-    from core.dream.dream_prompt import build_dream_prompt
     from core.pipeline_registry import get as _get_pipeline2
-
     _pl2 = _get_pipeline2()
     if _pl2 is None:
         return {
@@ -103,7 +97,17 @@ async def dream_turn(
         }
     character = _pl2.character
 
-    # If user is requesting a soft exit, append the accept-marker instruction
+    # ── Body state: build D5/D7 projection for THIS turn's prompt ────────────
+    from core.dream.body_state import BodyState
+    from core.dream.body_projection import project_body_for_yexuan, BoundaryLevel
+
+    current_body = BodyState.from_dict(local_state.get("body_state"))
+    current_yexuan_tension = float(local_state.get("emotional_tension") or 0.0)
+    boundary_level = settings.get("boundary_level", BoundaryLevel.body_perceptible.value)
+
+    projection = project_body_for_yexuan(current_body, boundary_level, current_yexuan_tension)
+
+    # If user is requesting a soft exit, append accept-marker instruction
     is_exit_request = _looks_like_exit_request(user_msg)
     user_msg_for_llm = user_msg
     if is_exit_request:
@@ -113,6 +117,7 @@ async def dream_turn(
             f"其他情况不追加]"
         )
 
+    from core.dream.dream_prompt import build_dream_prompt
     messages = build_dream_prompt(
         character=character,
         user_id=uid,
@@ -122,6 +127,8 @@ async def dream_turn(
         local_state=local_state,
         lore_entries=lore_entries,
         jailbreak_text=jailbreak_text,
+        body_projection_text=projection["d5_text"],
+        yexuan_tension=current_yexuan_tension,
     )
 
     # Call LLM — zero reality side-effects
@@ -134,13 +141,28 @@ async def dream_turn(
         reply = reply.replace(_SOFT_EXIT_ACCEPT_MARKER, "").strip()
         exit_accepted = True
 
+    # ── Body tracker: update body_state + yexuan_tension AFTER reply ─────────
+    # Runs post-LLM so 叶瑄 never sees raw numbers (by construction).
+    from core.dream.body_tracker import analyze_turn as _analyze_body
+    new_body = _analyze_body(user_msg, reply, current_body)
+    new_projection = project_body_for_yexuan(new_body, boundary_level, current_yexuan_tension)
+
     # ── Write to dream log (never to any reality store) ──────────────────────
     append_turn(uid, dream_id, "user", user_msg)
     append_turn(uid, dream_id, "assistant", reply)
 
+    # ── Persist updated dream-local state ────────────────────────────────────
+    from core.dream.dream_state import patch_local_state
+    state = read_state(uid)
+    state = patch_local_state(
+        state,
+        emotional_tension=new_projection["yexuan_tension"],
+        body_state=new_body.to_dict(),
+    )
+    write_state(uid, state)
+
     # Transition to DREAM_CLOSING if soft exit was accepted
     if exit_accepted:
-        from core.dream.dream_state import write_state, DreamStatus
         state = read_state(uid)
         state["status"] = DreamStatus.DREAM_CLOSING.value
         write_state(uid, state)
@@ -158,8 +180,8 @@ async def force_exit_dream(uid: str) -> None:
     Hard exit chokepoint — unconditional, immediate, penetrates all state.
 
     - Called pre-LLM for /stop keyword
-    - Called from /dream/exit endpoint (no conversation_lock — runs concurrently)
-    - Idempotent: safe to call from any state including REALITY_AFTERGLOW
+    - Called from /dream/exit endpoint (no conversation_lock)
+    - Idempotent: safe to call from any state
     - Cannot be disabled by config or role behavior (invariant D)
     """
     from core.dream.dream_state import read_state, write_state, DreamStatus
@@ -167,7 +189,6 @@ async def force_exit_dream(uid: str) -> None:
     state = read_state(uid)
     dream_id = state.get("dream_id", "")
 
-    # Unconditionally transition to DREAM_CLOSING, write immediately
     state["status"] = DreamStatus.DREAM_CLOSING.value
     write_state(uid, state)
 
@@ -186,7 +207,6 @@ async def enter_dream(uid: str, entry_reason: str = "") -> dict[str, Any]:
     from core.dream.dream_context import build_snapshot
 
     state = read_state(uid)
-    # Allow re-entry only from reality states
     allowed = {
         DreamStatus.REALITY_CHAT.value,
         DreamStatus.DREAM_ENTRANCE_AVAILABLE.value,
@@ -201,9 +221,11 @@ async def enter_dream(uid: str, entry_reason: str = "") -> dict[str, Any]:
     state["status"] = DreamStatus.DREAM_ACTIVE.value
     state["dream_id"] = dream_id
     state["context_snapshot"] = snapshot
+    # Clear all volatile local fields at dream start
     state.pop("emotional_tension", None)
     state.pop("scene_state", None)
     state.pop("symbolic_anchors", None)
+    state.pop("body_state", None)
     write_state(uid, state)
 
     logger.info(f"[dream_pipeline] entered dream uid={uid} dream_id={dream_id}")
@@ -218,11 +240,10 @@ async def _do_close_dream(uid: str, dream_id: str, exit_type: str) -> None:
     if dream_id:
         archive_current(uid, dream_id)
 
-    # summary runs in background — does not block the response path
     asyncio.create_task(_generate_summary_bg(uid, dream_id, exit_type))
 
     state = read_state(uid)
-    state = clear_local_state(state)
+    state = clear_local_state(state)  # clears body_state + emotional_tension + scene etc.
     state["status"] = DreamStatus.REALITY_AFTERGLOW.value
     state["last_dream_id"] = dream_id
     state["last_exit_type"] = exit_type
@@ -240,7 +261,6 @@ async def _generate_summary_bg(uid: str, dream_id: str, exit_type: str) -> None:
 
 
 def _ensure_dream_id(uid: str, state: dict) -> str:
-    """Assign a new dream_id if absent, persist it immediately."""
     from core.dream.dream_state import write_state
     dream_id = f"dream_{uid}_{int(time.time())}"
     state["dream_id"] = dream_id

@@ -96,7 +96,14 @@ async def dream_settings_update(body: dict):
     from core.dream.dream_settings import load as _load, save as _save
 
     current = _load(uid)
-    allowed_keys = {"enable_dream_lorebook", "amnesia", "keep_impression"}
+    allowed_keys = {
+        "enable_dream_lorebook",
+        "memory_access",
+        "boundary_level",
+        # Legacy keys kept for migration compatibility — prefer memory_access
+        "amnesia",
+        "keep_impression",
+    }
     updated = {k: v for k, v in body.items() if k in allowed_keys}
     if not updated:
         raise HTTPException(status_code=422, detail=f"可设置字段：{sorted(allowed_keys)}")

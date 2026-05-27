@@ -92,6 +92,8 @@ def get_local_state(state: dict[str, Any]) -> dict[str, Any]:
         "emotional_tension": float(state.get("emotional_tension", 0.0)),
         "scene_state": state.get("scene_state"),
         "symbolic_anchors": list(state.get("symbolic_anchors", [])),
+        # her cyber body state (dream-local, cleared at close)
+        "body_state": state.get("body_state") or {},
     }
 
 
@@ -100,6 +102,7 @@ def patch_local_state(
     emotional_tension: float | None = None,
     scene_state: str | None = None,
     symbolic_anchors: list[str] | None = None,
+    body_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a new state dict with updated dream-local volatile fields."""
     updated = dict(state)
@@ -109,12 +112,18 @@ def patch_local_state(
         updated["scene_state"] = scene_state
     if symbolic_anchors is not None:
         updated["symbolic_anchors"] = list(symbolic_anchors)
+    if body_state is not None:
+        updated["body_state"] = body_state
     return updated
 
 
 def clear_local_state(state: dict[str, Any]) -> dict[str, Any]:
     """Strip all dream-local volatile fields (call at dream close)."""
     out = dict(state)
-    for key in ("emotional_tension", "scene_state", "symbolic_anchors", "context_snapshot", "dream_id"):
+    for key in (
+        "emotional_tension", "scene_state", "symbolic_anchors",
+        "body_state",  # her cyber body — dream-local, cleared at close
+        "context_snapshot", "dream_id",
+    ):
         out.pop(key, None)
     return out
