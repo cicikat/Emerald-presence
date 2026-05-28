@@ -637,3 +637,35 @@ def test_6g_earliest_in_droppable(sandbox):
     assert droppable_list[0] == "6g_dream_impression", (
         f"6g_dream_impression must be first in _DROPPABLE, got {droppable_list[0]!r}"
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# C3: Reality pipeline must never import impression_store / impressions/ directly
+# ──────────────────────────────────────────────────────────────────────────────
+
+def test_reality_pipeline_has_no_impression_imports():
+    """
+    Structural contract: core/pipeline.py and core/memory/fixation_pipeline.py
+    must NOT contain direct references to impression_store, dreams_impressions,
+    or the impressions/ data path.
+
+    The only permitted interface is impression_loader (read-only ambient layer).
+    If this test goes red, someone wired the reality pipeline directly to the
+    impression store — a structural isolation violation (I1 承重墙).
+    """
+    import pathlib
+
+    _BANNED = ["dreams_impressions", "impression_store", "impressions/"]
+
+    _TARGETS = [
+        pathlib.Path("core/pipeline.py"),
+        pathlib.Path("core/memory/fixation_pipeline.py"),
+    ]
+
+    for target in _TARGETS:
+        src = target.read_text(encoding="utf-8")
+        for banned in _BANNED:
+            assert banned not in src, (
+                f"Banned string {banned!r} found in {target} — "
+                f"reality pipeline must not import impression store directly (I1)"
+            )
