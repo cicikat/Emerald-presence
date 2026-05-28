@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 _MAX_INJECT = 3
 
 _NON_REALITY_FRAME = "（模糊的梦境印象，非现实发生的事）"
+_CONFABULATION_GUARD = "不要在现实里复述或编造梦的具体场景，只带那点情绪余味。"
 
 
 def load_impression_text(uid: str) -> str:
@@ -29,7 +30,7 @@ def load_impression_text(uid: str) -> str:
         if not active:
             return ""
 
-        lines: list[str] = [_NON_REALITY_FRAME]
+        lines: list[str] = [_NON_REALITY_FRAME, _CONFABULATION_GUARD]
         for imp in active[:_MAX_INJECT]:
             text = (imp.get("impression_text") or "").strip()
             if text:

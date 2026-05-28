@@ -238,6 +238,11 @@ def test_6g_framing_and_weight_bounds(sandbox):
         f"6g text missing non-reality frame: {text!r}"
     )
 
+    # Must carry the confabulation guard (C1)
+    assert "复述" in text or "编造" in text or "情绪余味" in text, (
+        f"6g text missing confabulation guard: {text!r}"
+    )
+
     # Entries must have impression_text starting with 叶瑄 self-narration cue
     entries = load_impressions(_UID)
     for e in entries:
