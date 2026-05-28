@@ -125,6 +125,7 @@ def clear_local_state(state: dict[str, Any]) -> dict[str, Any]:
         "body_state",  # her cyber body — dream-local, cleared at close
         "context_snapshot", "dream_id",
         "frozen_world",  # re-frozen from settings at next enter_dream
+        "lucid_mode",  # session-local, cleared at dream close
     ):
         out.pop(key, None)
     return out

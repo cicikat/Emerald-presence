@@ -106,6 +106,8 @@ async def dream_turn(
     current_yexuan_tension = float(local_state.get("emotional_tension") or 0.0)
     boundary_level = settings.get("boundary_level", BoundaryLevel.body_perceptible.value)
 
+    lucid_mode = settings.get("lucid_mode", "lucid_shared")
+
     if boundary_level == BoundaryLevel.threshold_break.value:
         from core.dream.body_state import apply_threshold_break as _apply_tb
         current_body = _apply_tb(current_body)
@@ -135,6 +137,7 @@ async def dream_turn(
         body_projection_text=projection["d5_text"],
         yexuan_tension=current_yexuan_tension,
         world_id=state.get("frozen_world", "reality_derived"),
+        lucid_mode=lucid_mode,
     )
 
     # Call LLM — zero reality side-effects
@@ -224,15 +227,17 @@ async def enter_dream(uid: str, entry_reason: str = "") -> dict[str, Any]:
     dream_id = f"dream_{uid}_{int(time.time())}"
     snapshot = await build_snapshot(uid, entry_reason=entry_reason)
 
-    # Freeze world_layer from settings — immutable for the whole dream session
+    # Freeze world_layer and lucid_mode from settings for this dream session
     from core.dream.dream_settings import load as _load_settings_enter
     _settings_enter = _load_settings_enter(uid)
     frozen_world = _settings_enter.get("world_layer", "reality_derived")
+    lucid_mode_entry = _settings_enter.get("lucid_mode", "lucid_shared")
 
     state["status"] = DreamStatus.DREAM_ACTIVE.value
     state["dream_id"] = dream_id
     state["context_snapshot"] = snapshot
     state["frozen_world"] = frozen_world
+    state["lucid_mode"] = lucid_mode_entry
     # Clear all volatile local fields at dream start
     state.pop("emotional_tension", None)
     state.pop("scene_state", None)
