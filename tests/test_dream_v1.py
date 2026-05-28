@@ -103,93 +103,109 @@ def test_identity_stable_in_world(world_id):
 
 def test_world_sentinel_not_in_distill_output(sandbox):
     """
-    Vampire-world sentinel in dream archive → distilled impression must not contain it.
-    Proves depth defense: strip_vocab removes world vocab before impression is stored.
+    Vampire-world sentinel in LLM distill output → stripped before impression stored.
+
+    Positive-control self-check (reverse arm):
+      Same LLM output with world_id=reality_derived (empty vocab) → sentinel SURVIVES.
+      Proves the sentinel was genuinely present before stripping, not absent by accident.
+
+    Strip arm: world_id=vampire → sentinel GONE.
     """
     SENTINEL = "吸血鬼_sentinel_v1"
 
-    # Write a fake dream archive containing the vampire sentinel
     archive_dir = sandbox.dreams_archive_dir()
     archive_dir.mkdir(parents=True, exist_ok=True)
-    dream_id = f"dream_{_UID}_vampire_test"
-    archive_path = archive_dir / f"dream_{dream_id}.jsonl"
-    archive_path.write_text(
-        json.dumps({"role": "user", "content": f"月光下你的眼神变了，{SENTINEL}靠近了"})
-        + "\n"
-        + json.dumps({"role": "assistant", "content": f"（停住脚步）{SENTINEL}……我没事。"})
-        + "\n",
-        encoding="utf-8",
-    )
 
-    # Plant frozen_world=vampire in dream state
-    from core.dream.dream_state import write_state, DreamStatus
-    write_state(_UID, {
-        "user_id": _UID,
-        "status": DreamStatus.REALITY_AFTERGLOW.value,
-        "frozen_world": "vampire",
-    })
-
-    # LLM distill returns impression that includes the sentinel (worst-case: LLM leaks it)
     llm_result = json.dumps({
         "impression_text": f"我好像在梦里有种{SENTINEL}的感觉",
         "emotional_tags": ["紧张", SENTINEL],
         "weight": 0.3,
     }, ensure_ascii=False)
 
-    async def run():
-        with patch("core.llm_client.chat", AsyncMock(return_value=llm_result)):
-            from core.dream.distill_impression import distill_impression
-            await distill_impression(_UID, dream_id, "soft")
-
-    asyncio.run(run())
-
-    # Read the impression store — sentinel must be stripped
+    from core.dream.dream_state import write_state, DreamStatus
     from core.dream.impression_store import load_impressions
-    entries = load_impressions(_UID)
-    assert len(entries) == 1, "Expected exactly 1 impression entry"
-    imp_json = json.dumps(entries[0], ensure_ascii=False)
-    assert SENTINEL not in imp_json, (
+
+    def _run_distill(uid: str, world_id: str) -> str:
+        dream_id = f"dream_{uid}_vampire_ds"
+        (archive_dir / f"dream_{dream_id}.jsonl").write_text(
+            json.dumps({"role": "user", "content": f"月光下{SENTINEL}靠近了"}) + "\n",
+            encoding="utf-8",
+        )
+        write_state(uid, {
+            "user_id": uid,
+            "status": DreamStatus.REALITY_AFTERGLOW.value,
+            "frozen_world": world_id,
+        })
+        async def run():
+            with patch("core.llm_client.chat", AsyncMock(return_value=llm_result)):
+                from core.dream.distill_impression import distill_impression
+                await distill_impression(uid, dream_id, "soft")
+        asyncio.run(run())
+        entries = load_impressions(uid)
+        assert len(entries) == 1, f"[world={world_id}] Expected 1 entry, got {len(entries)}"
+        return json.dumps(entries[0], ensure_ascii=False)
+
+    # ── Reverse self-check: reality_derived (empty vocab) → sentinel MUST survive ─
+    UID_NO_STRIP = f"{_UID}_vampire_no_strip"
+    imp_json_no_strip = _run_distill(UID_NO_STRIP, "reality_derived")
+    assert SENTINEL in imp_json_no_strip, (
+        f"Reverse self-check failed: sentinel {SENTINEL!r} not in no-strip entry — "
+        "chain is not writing the sentinel at all (fixture error)"
+    )
+
+    # ── Strip arm: vampire vocab → sentinel MUST be gone ─────────────────────────
+    UID_STRIP = f"{_UID}_vampire_strip"
+    imp_json_strip = _run_distill(UID_STRIP, "vampire")
+    assert SENTINEL not in imp_json_strip, (
         f"Vampire sentinel {SENTINEL!r} survived distill — depth defense failed"
     )
 
 
 def test_world_sentinel_not_in_afterglow_output(sandbox):
     """
-    Vampire-world sentinel in dream summary → afterglow output injected into
-    reality prompt must not contain it. Covers 6f depth defense.
+    Vampire-world sentinel in dream summary → stripped before injecting into reality 6f.
+
+    Positive-control self-check (reverse arm):
+      Same summary with world_id=reality_derived (empty vocab) → sentinel IS in output.
+      Proves strip_vocab is actually removing something that was genuinely there.
+
+    Uses _format_afterglow directly (pure formatter) for the comparison.
     """
     SENTINEL = "吸血鬼_afterglow_v1"
 
-    summaries_dir = sandbox.dreams_summaries_dir()
-    summaries_dir.mkdir(parents=True, exist_ok=True)
+    def _make_summary(world_id: str) -> dict:
+        return {
+            "dream_id": f"dream_{_UID}_afterglow_test",
+            "uid": _UID,
+            "created_at": time.time(),
+            "exit_type": "soft",
+            "world_id": world_id,
+            "title": f"{SENTINEL}梦",
+            "summary": f"梦里有{SENTINEL}的感知",
+            "emotional_tags": [SENTINEL, "沉静"],
+            "high_weight_lines": [],
+            "symbolic_fragments": [f"{SENTINEL}意象"],
+            "summary_weight": 0.6,
+            "afterglow": "gentle_residue",
+            "reality_boundary": "dream_only",
+            "never_retrieve": True,
+            "not_memory_source": True,
+        }
 
-    # Write a summary with the sentinel in it and world_id=vampire
-    summary = {
-        "dream_id": f"dream_{_UID}_afterglow_test",
-        "uid": _UID,
-        "created_at": time.time(),
-        "exit_type": "soft",
-        "world_id": "vampire",
-        "title": f"{SENTINEL}梦",
-        "summary": f"梦里有{SENTINEL}的感知",
-        "emotional_tags": [SENTINEL, "沉静"],
-        "high_weight_lines": [],
-        "symbolic_fragments": [f"{SENTINEL}意象"],
-        "summary_weight": 0.6,
-        "afterglow": "gentle_residue",
-        "reality_boundary": "dream_only",
-        "never_retrieve": True,
-        "not_memory_source": True,
-    }
-    (summaries_dir / f"dream_{_UID}_afterglow_test.summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False), encoding="utf-8"
+    from core.dream.dream_afterglow import _format_afterglow
+
+    # ── Reverse self-check: reality_derived (empty vocab) → sentinel MUST survive ─
+    text_no_strip = _format_afterglow(_make_summary("reality_derived"))
+    assert text_no_strip, "Expected non-empty afterglow text"
+    assert SENTINEL in text_no_strip, (
+        f"Reverse self-check failed: sentinel {SENTINEL!r} not in no-strip output — "
+        "sentinel was never there to begin with (fixture error)"
     )
 
-    from core.dream.dream_afterglow import load_afterglow
-    text = load_afterglow(_UID)
-
-    assert text, "Expected non-empty afterglow text"
-    assert SENTINEL not in text, (
+    # ── Strip arm: vampire vocab → sentinel MUST be gone ─────────────────────────
+    text_stripped = _format_afterglow(_make_summary("vampire"))
+    assert text_stripped, "Expected non-empty afterglow text"
+    assert SENTINEL not in text_stripped, (
         f"Vampire sentinel {SENTINEL!r} survived afterglow formatting — depth defense failed"
     )
 
@@ -199,22 +215,14 @@ def test_world_sentinel_not_in_afterglow_output(sandbox):
     ("cat", "猫化_sentinel_v1"),
 ])
 def test_world_sentinel_not_in_distill_for_world(sandbox, world_id, sentinel):
-    """ABO / cat world sentinels are stripped by depth defense."""
+    """
+    ABO / cat world sentinels stripped by distill depth defense.
+
+    Positive-control self-check: same LLM output with world_id=reality_derived
+    (empty vocab) → sentinel SURVIVES, proving it was genuinely there before strip.
+    """
     archive_dir = sandbox.dreams_archive_dir()
     archive_dir.mkdir(parents=True, exist_ok=True)
-    dream_id = f"dream_{_UID}_{world_id}_ds"
-    archive_path = archive_dir / f"dream_{dream_id}.jsonl"
-    archive_path.write_text(
-        json.dumps({"role": "user", "content": f"世界里有{sentinel}"}) + "\n",
-        encoding="utf-8",
-    )
-
-    from core.dream.dream_state import write_state, DreamStatus
-    write_state(_UID, {
-        "user_id": _UID,
-        "status": DreamStatus.REALITY_AFTERGLOW.value,
-        "frozen_world": world_id,
-    })
 
     llm_result = json.dumps({
         "impression_text": f"我好像在梦里有种{sentinel}的感觉",
@@ -222,18 +230,39 @@ def test_world_sentinel_not_in_distill_for_world(sandbox, world_id, sentinel):
         "weight": 0.3,
     }, ensure_ascii=False)
 
-    async def run():
-        with patch("core.llm_client.chat", AsyncMock(return_value=llm_result)):
-            from core.dream.distill_impression import distill_impression
-            await distill_impression(_UID, dream_id, "soft")
-
-    asyncio.run(run())
-
+    from core.dream.dream_state import write_state, DreamStatus
     from core.dream.impression_store import load_impressions
-    entries = load_impressions(_UID)
-    assert len(entries) == 1
-    imp_json = json.dumps(entries[0], ensure_ascii=False)
-    assert sentinel not in imp_json, (
+
+    def _run(uid: str, wid: str) -> str:
+        dream_id = f"dream_{uid}_{wid}_ds"
+        (archive_dir / f"dream_{dream_id}.jsonl").write_text(
+            json.dumps({"role": "user", "content": f"世界里有{sentinel}"}) + "\n",
+            encoding="utf-8",
+        )
+        write_state(uid, {
+            "user_id": uid,
+            "status": DreamStatus.REALITY_AFTERGLOW.value,
+            "frozen_world": wid,
+        })
+        async def run():
+            with patch("core.llm_client.chat", AsyncMock(return_value=llm_result)):
+                from core.dream.distill_impression import distill_impression
+                await distill_impression(uid, dream_id, "soft")
+        asyncio.run(run())
+        entries = load_impressions(uid)
+        assert len(entries) == 1, f"[world={wid}] Expected 1 entry"
+        return json.dumps(entries[0], ensure_ascii=False)
+
+    # ── Reverse self-check: no vocab → sentinel MUST survive ─────────────────────
+    imp_no_strip = _run(f"{_UID}_{world_id}_no_strip", "reality_derived")
+    assert sentinel in imp_no_strip, (
+        f"Reverse self-check failed: sentinel {sentinel!r} missing in no-strip entry "
+        f"for world={world_id} — sentinel was never written (fixture error)"
+    )
+
+    # ── Strip arm: world vocab → sentinel MUST be gone ───────────────────────────
+    imp_strip = _run(f"{_UID}_{world_id}_strip", world_id)
+    assert sentinel not in imp_strip, (
         f"[world={world_id}] sentinel {sentinel!r} survived distill depth defense"
     )
 
