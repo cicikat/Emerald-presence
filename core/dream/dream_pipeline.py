@@ -106,6 +106,10 @@ async def dream_turn(
     current_yexuan_tension = float(local_state.get("emotional_tension") or 0.0)
     boundary_level = settings.get("boundary_level", BoundaryLevel.body_perceptible.value)
 
+    if boundary_level == BoundaryLevel.threshold_break.value:
+        from core.dream.body_state import apply_threshold_break as _apply_tb
+        current_body = _apply_tb(current_body)
+
     projection = project_body_for_yexuan(current_body, boundary_level, current_yexuan_tension)
 
     # If user is requesting a soft exit, append accept-marker instruction

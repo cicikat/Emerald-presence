@@ -86,7 +86,8 @@ def _render_d5(body: BodyState, level: BoundaryLevel) -> str:
     elif level == BoundaryLevel.body_perceptible:
         return _render_body_perceptible(body)
     elif level in (BoundaryLevel.numbers_visible, BoundaryLevel.threshold_break):
-        # threshold_break seam: falls back to numbers_visible in v0
+        # threshold_break: cap release is applied in dream_pipeline via apply_threshold_break;
+        # D5 rendering is the same numeric format as numbers_visible
         return _render_numbers_visible(body)
     return ""
 

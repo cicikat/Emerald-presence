@@ -21,10 +21,10 @@ from typing import Any
 _DEFAULT_HEAT_CAP: float = 80.0
 _DEFAULT_SENSITIVITY_CAP: float = 80.0
 _DEFAULT_TENSION_CAP: float = 90.0
+_THRESHOLD_BREAK_CAP: float = 100.0
 
-# Seam: reserved 4th axis and threshold_break hook (default off, not implemented)
+# Seam: reserved 4th axis (not implemented)
 # _AXIS_4_DEFAULT: float = 0.0
-# _THRESHOLD_BREAK_ENABLED: bool = False
 
 
 class BodyState:
@@ -98,3 +98,15 @@ class BodyState:
             and self.sensitivity == other.sensitivity
             and self.tension == other.tension
         )
+
+
+def apply_threshold_break(body: BodyState) -> BodyState:
+    """Release all suppression caps to 100.0 (threshold_break hook, v2)."""
+    return BodyState(
+        heat=body.heat,
+        sensitivity=body.sensitivity,
+        tension=body.tension,
+        heat_cap=_THRESHOLD_BREAK_CAP,
+        sensitivity_cap=_THRESHOLD_BREAK_CAP,
+        tension_cap=_THRESHOLD_BREAK_CAP,
+    )
