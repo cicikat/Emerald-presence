@@ -85,14 +85,21 @@ async def _distill(uid: str, dream_id: str, exit_type: str) -> None:
         logger.info(f"[distill_impression] empty result uid={uid}, no impression written")
         return
 
-    # Depth-defense second layer: strip world vocab (承重墙仍是 store 隔离)
+    # Depth-defense second layer: strip world vocab from all text fields
+    # (承重墙仍是 store 隔离; vocab strip 是纵深防御，非替代)
+    _strip_fn = lambda t: t  # noqa: E731
     try:
         from core.dream.dream_state import read_state as _read_ds
         _world_id = _read_ds(uid).get("frozen_world", "reality_derived")
         from core.dream.world_loader import strip_vocab as _strip_vocab
-        impression_text = _strip_vocab(impression_text, _world_id)
+        _strip_fn = lambda t: _strip_vocab(t, _world_id)  # noqa: E731
     except Exception:
         pass  # depth defense failure is non-fatal
+
+    impression_text = _strip_fn(impression_text)
+    raw_tags = _ensure_list(data.get("emotional_tags"))
+    stripped_tags = [_strip_fn(str(t)).strip() for t in raw_tags]
+    stripped_tags = [t for t in stripped_tags if t]  # drop empty after strip
 
     weight = float(data.get("weight") or _WEIGHT_MIN)
     weight = max(_WEIGHT_MIN, min(_WEIGHT_MAX, weight))
@@ -104,7 +111,7 @@ async def _distill(uid: str, dream_id: str, exit_type: str) -> None:
         "last_decay_ts": now,
         "impression_text": impression_text,
         "weight": round(weight, 4),
-        "emotional_tags": _ensure_list(data.get("emotional_tags")),
+        "emotional_tags": stripped_tags,
         "exit_type": exit_type,
         "decay_after": now + _DECAY_DAYS * 86400,
         "marked": True,
