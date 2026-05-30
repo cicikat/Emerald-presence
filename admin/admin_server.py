@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _STATIC_DIR = Path(__file__).parent / "static"
 
 # ── 鉴权：从独立模块导入，避免与 routers 的循环导入 ──────────────────────────
-from admin.auth import verify_token, security  # noqa: F401 (re-exported for legacy imports)
+from admin.auth import verify_token, security, get_admin_secret  # noqa: F401 (re-exported for legacy imports)
 
 # ── FastAPI 应用 ──────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -63,12 +63,16 @@ app.include_router(mobile.router,    prefix="",           tags=["手机端"])
 app.include_router(dream.router,     prefix="",           tags=["梦境"])
 
 # ── 桌宠端 WebSocket 端点 ─────────────────────────────────────────────────────
-from fastapi import WebSocket as _WebSocket
+from fastapi import WebSocket as _WebSocket, Query as _Query
 from channels.desktop_ws import handle_connection as _ws_desktop_handler
 
 
 @app.websocket("/ws/desktop")
-async def ws_desktop_endpoint(websocket: _WebSocket):
+async def ws_desktop_endpoint(websocket: _WebSocket, token: str = _Query("")):
+    secret = get_admin_secret()
+    if not secret or token != secret:
+        await websocket.close(code=1008)
+        return
     await _ws_desktop_handler(websocket)
 
 
@@ -88,6 +92,9 @@ async def root():
 async def start_admin_server():
     """在当前事件循环中启动 uvicorn（由 main.py 以 asyncio.create_task 调用）"""
     import uvicorn
+    from admin.log_filter import install_access_log_sanitizer
+
+    install_access_log_sanitizer()
 
     cfg = get_config().get("admin", {})
     host = cfg.get("host", "127.0.0.1")

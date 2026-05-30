@@ -79,7 +79,7 @@ def _save_sensor_to_profile(data: dict):
 
 
 @router.post("/sensor/push", summary="接收手机传感器数据")
-async def receive_sensor_data(body: dict):
+async def receive_sensor_data(body: dict, auth=Depends(verify_token)):
     """
     手机APP每30分钟推送一次传感器数据。
 
@@ -132,13 +132,13 @@ async def receive_sensor_data(body: dict):
 
 
 @router.get("/sensor/status", summary="获取最近一次手机传感器快照")
-async def get_sensor_status():
+async def get_sensor_status(auth=Depends(verify_token)):
     """返回最近一次推送的传感器数据快照"""
     return _last_sensor_data
 
 
 @router.get("/sensor/today", summary="获取今日传感器聚合摘要")
-async def get_sensor_today():
+async def get_sensor_today(auth=Depends(verify_token)):
     """返回今日聚合摘要，角色的context读这个"""
     oid = str(get_config().get("scheduler", {}).get("owner_id", ""))
     if not oid:

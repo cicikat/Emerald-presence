@@ -217,10 +217,10 @@ def _check_reality_not_in_dream(uid: str) -> None:
         pass  # read failure → allow through (safe default)
 
 
-@router.post("/desktop/chat", summary="桌宠对话（无鉴权，走正常 pipeline）")
-async def desktop_chat(body: dict):
+@router.post("/desktop/chat", summary="桌宠对话（Bearer 鉴权）")
+async def desktop_chat(body: dict, _auth=Depends(verify_token)):
     """
-    桌宠端对话入口，不需要 token 鉴权。
+    桌宠端对话入口，需 Bearer token 鉴权（Authorization: Bearer <YEXUAN_ADMIN_SECRET>）。
     user_id 从配置的 scheduler.owner_id 读取，正常走 pipeline，不注入第四面墙提示。
     """
     message = (body.get("message") or "").strip()
