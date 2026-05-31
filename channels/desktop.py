@@ -37,11 +37,11 @@ class DesktopChannel(BaseChannel):
         self._fallback_active = active
         logger.info(f"[desktop_channel] fallback 活跃状态: {active}")
 
-    async def send(self, content: str, user_id: str, behavior: dict | None = None) -> None:
+    async def send(self, content: str, user_id: str, behavior: dict | None = None, msg_id: str | None = None) -> None:
         from channels import desktop_ws
         # 路径 1：WS 实时推送
         if desktop_ws.is_connected():
-            ok = await desktop_ws.push_message(content)
+            ok = await desktop_ws.push_message(content, msg_id=msg_id)
             if ok:
                 if behavior:
                     action_ok, err = await desktop_ws.push_action_and_wait(behavior, timeout=5.0)

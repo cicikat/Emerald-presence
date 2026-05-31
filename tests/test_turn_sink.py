@@ -277,3 +277,141 @@ async def test_fanout_exclude_does_not_affect_named_fanout():
     # fanout 指定的是具体 channel 名称（非 "all"），exclude 不过滤
     assert "desktop" in result.fanout_targets
     assert desktop.sent == [("回复内容", "owner", None)]
+
+
+# ── Narrative segments fanout tests ──────────────────────────────────────────
+#
+# All three tests use the *real* DesktopChannel so that push_message is called
+# through the actual channel.send() path.  push_message and push_segments are
+# monkeypatched at the desktop_ws module level to capture calls.
+
+async def _setup_real_desktop(monkeypatch):
+    """Register real DesktopChannel and fake out both WS push functions.
+    Returns (push_msg_calls, push_seg_calls)."""
+    from channels import registry
+    from channels.desktop import DesktopChannel
+
+    await _reset_channels()
+    registry.register(DesktopChannel())
+
+    push_msg_calls: list[dict] = []
+    push_seg_calls: list[dict] = []
+
+    async def fake_push_message(content, msg_id=None):
+        push_msg_calls.append({"content": content, "msg_id": msg_id})
+        return True
+
+    async def fake_push_segments(content, segments, msg_id=None):
+        push_seg_calls.append({"content": content, "segments": segments, "msg_id": msg_id})
+        return True
+
+    monkeypatch.setattr("channels.desktop_ws.is_connected", lambda: True)
+    monkeypatch.setattr("channels.desktop_ws.push_message", fake_push_message)
+    monkeypatch.setattr("channels.desktop_ws.push_segments", fake_push_segments)
+
+    return push_msg_calls, push_seg_calls
+
+
+async def test_message_segments_fanout_with_say(monkeypatch):
+    """message_segments envelope 正确发出，包含 say segment，msg_id 与 channel_message 共享。"""
+    from core.turn_sink import record_assistant_turn
+
+    push_msg_calls, push_seg_calls = await _setup_real_desktop(monkeypatch)
+
+    await record_assistant_turn(
+        assistant_text="她说：<say>你好</say>",
+        uid="uid_seg",
+        source="user_chat",
+        user_text="hello",
+        fanout="all",
+        pipeline=_FakePipeline(),
+    )
+
+    # push_segments called exactly once
+    assert len(push_seg_calls) == 1
+    seg = push_seg_calls[0]
+
+    # channel_message called exactly once
+    assert len(push_msg_calls) == 1
+
+    # msg_id is shared between channel_message and message_segments
+    assert seg["msg_id"] is not None
+    assert push_msg_calls[0]["msg_id"] == seg["msg_id"]
+
+    # content has no tag markup
+    assert "<say>" not in seg["content"]
+    assert "</say>" not in seg["content"]
+    assert "你好" in seg["content"]
+
+    # segments contain a say entry with correct text
+    say_segs = [s for s in seg["segments"] if s["type"] == "say"]
+    assert len(say_segs) == 1
+    assert say_segs[0]["text"] == "你好"
+
+
+async def test_message_segments_exception_does_not_block_main_flow(monkeypatch):
+    """push_segments 抛异常时，主流程不中断，channel_message 仍已发出，TurnResult 有效。"""
+    from channels import registry
+    from channels.desktop import DesktopChannel
+    from core.turn_sink import record_assistant_turn
+
+    await _reset_channels()
+    registry.register(DesktopChannel())
+
+    push_msg_calls: list[str] = []
+
+    async def fake_push_message(content, msg_id=None):
+        push_msg_calls.append(content)
+        return True
+
+    async def failing_push_segments(*args, **kwargs):
+        raise RuntimeError("segments fanout boom")
+
+    monkeypatch.setattr("channels.desktop_ws.is_connected", lambda: True)
+    monkeypatch.setattr("channels.desktop_ws.push_message", fake_push_message)
+    monkeypatch.setattr("channels.desktop_ws.push_segments", failing_push_segments)
+
+    # Must not raise
+    result = await record_assistant_turn(
+        assistant_text="普通回复",
+        uid="uid_exc",
+        source="user_chat",
+        user_text="test",
+        fanout="all",
+        pipeline=_FakePipeline(),
+    )
+
+    # Original channel_message was delivered
+    assert push_msg_calls == ["普通回复"]
+    # TurnResult reflects successful write and fanout
+    assert result.written_to_memory is True
+    assert "desktop" in result.fanout_targets
+    assert result.fanout_failures == {}
+
+
+async def test_message_segments_plain_text(monkeypatch):
+    """无标签普通文本仍发送 message_segments，segments 为单个 narration，content 等于原文。"""
+    from core.turn_sink import record_assistant_turn
+
+    _, push_seg_calls = await _setup_real_desktop(monkeypatch)
+
+    raw = "普通的一句话，没有任何标签。"
+    await record_assistant_turn(
+        assistant_text=raw,
+        uid="uid_plain",
+        source="user_chat",
+        user_text="hi",
+        fanout="all",
+        pipeline=_FakePipeline(),
+    )
+
+    assert len(push_seg_calls) == 1
+    seg = push_seg_calls[0]
+
+    # content equals original text (no tags to strip)
+    assert seg["content"] == raw
+
+    # single narration segment
+    assert len(seg["segments"]) == 1
+    assert seg["segments"][0]["type"] == "narration"
+    assert seg["segments"][0]["text"] == raw

@@ -88,6 +88,7 @@ async def _fanout(
     fanout: FanoutPolicy,
     behavior: Optional[dict],
     exclude_origin_channel: Optional[str] = None,
+    ws_msg_id: Optional[str] = None,
 ) -> tuple[list[str], dict[str, str]]:
     from channels import registry
 
@@ -112,7 +113,13 @@ async def _fanout(
         name = getattr(channel, "name", channel.__class__.__name__)
         sent_targets.append(name)
         try:
-            await channel.send(assistant_text, uid, behavior=behavior)
+            # Pass ws_msg_id only to the desktop channel so channel_message and
+            # message_segments can share the same correlation id.  Other channels
+            # (mobile, QQ) don't have this concept and are not changed.
+            if ws_msg_id is not None and name == "desktop":
+                await channel.send(assistant_text, uid, behavior=behavior, msg_id=ws_msg_id)
+            else:
+                await channel.send(assistant_text, uid, behavior=behavior)
         except Exception as exc:
             failures[name] = str(exc)
             logger.warning("[turn_sink] fanout failed channel=%s: %s", name, exc)
@@ -152,6 +159,18 @@ async def record_assistant_turn(
     capture_trigger = "" if source == TurnSource.USER_CHAT else (trigger_name or "")
     behavior = payload.get("behavior") if payload else None
 
+    # Pre-generate a shared msg_id so that the desktop channel_message and the
+    # parallel message_segments envelope can be correlated by the client.
+    # Only generated when the desktop WS is actually connected; otherwise None
+    # and both paths fall back to their own internal id generation.
+    _ws_msg_id: Optional[str] = None
+    try:
+        from channels import desktop_ws as _dws_pre
+        if _dws_pre.is_connected():
+            _ws_msg_id = _dws_pre._new_msg_id()
+    except Exception:
+        pass
+
     post_info: dict | None = None
     async with _maybe_conversation_gate(uid, bypass_gate):
         if await_critical_post_process:
@@ -177,7 +196,21 @@ async def record_assistant_turn(
         fanout=fanout,
         behavior=behavior,
         exclude_origin_channel=exclude_origin_channel,
+        ws_msg_id=_ws_msg_id,
     )
+
+    # Narrative segments: push a parallel message_segments envelope to the
+    # desktop WS client only.  This is fire-and-forget and exception-safe;
+    # the original channel_message with full text has already been sent above.
+    # mobile / QQ / event_log / post_process are intentionally not touched.
+    try:
+        from channels import desktop_ws as _dws
+        if _dws.is_connected():
+            from core.narrative_parser import parse_narrative_segments
+            _parsed = parse_narrative_segments(assistant_text)
+            await _dws.push_segments(_parsed["content"], _parsed["segments"], msg_id=_ws_msg_id)
+    except Exception:
+        logger.debug("[turn_sink] message_segments fanout failed", exc_info=True)
 
     return TurnResult(
         turn_id=(post_info or {}).get("turn_id", ""),
