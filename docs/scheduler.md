@@ -8,6 +8,10 @@
 
 ```
 core/scheduler/loop.py       ← 主循环 + 工具函数 + 冷却管理
+core/scheduler/gating.py     ← proposal 收集、状态/冷却过滤、每 tick 选一
+core/scheduler/execution.py  ← proposal dry-run/live 执行收口，成功后才 mark
+core/scheduler/proposer_registry.py ← 原生 proposer 注册表
+core/scheduler/rhythm.py     ← presence、逻辑日、时间窗比例等节律 helper
 core/scheduler/triggers/     ← 各触发器独立文件
     time_based.py            早安 / 晚安 / 随机消息 / 天气 / 日记 / 记忆衰减
     diary.py                 日记相关触发
@@ -20,6 +24,7 @@ core/scheduler/triggers/     ← 各触发器独立文件
     garden_water.py          花园自动浇水
     garden_daily.py          花园 harvest/vase 每日扫描
     watch.py                 Apple Watch 心率 / 睡眠事件
+    reminders.py             到点备忘录 proposer
     sensor_aware.py          sensor 实时状态 → 主动开口（默认关闭）
     dnd.py                   请勿打扰状态（已实现，未接入）
 ```
@@ -28,18 +33,22 @@ core/scheduler/triggers/     ← 各触发器独立文件
 
 ## 主循环
 
-每 60 秒检查一次，所有触发器通过 `asyncio.gather` 并发执行，`return_exceptions=True` 保证单个触发器报错不影响其他。
+每 60 秒检查一次。每个 tick 先跑 `core/scheduler/gating.py::run_shadow_tick()` 收集原生
+proposal、记录 `data/logs/gating_shadow.jsonl`，再根据 `core/scheduler/execution.py`
+的 `EXECUTE_MODE` 决定是否执行 winner。当前常量为 `EXECUTE_MODE = "live"`：除 Watch
+事件驱动例外外，winner 会经 `execute_prompt(dry_run=False)` 真正发送，成功后才 `_mark()`。
 
-Phase 2 Step 2 已接入 gating 并行观测：每个 tick 先由 `core/scheduler/gating.py`
-按当前状态机状态和冷却读一遍候选，向 `data/logs/gating_shadow.jsonl` 写入
-“如果由 gating 决策会选谁”。这一步不调用 `_pipeline_send`，不 `_mark`，不改变旧触发器真实发送路径。
+随后 `loop.py` 仍用 `asyncio.gather(..., return_exceptions=True)` 跑 legacy `_check_*`。
+已迁移触发器会通过 `legacy_tick_should_send()` 在 live 模式下让路；维护型扫描
+（如 `garden_water`、`garden_daily`、`episodic_sweep`、`log_maintenance`）仍需执行状态变更。
 
 ```
 owner turn ──notify_owner_turn──→ state_machine
 sensor tick ─feed_sensor_tick───→ state_machine
                                   ↓
-loop.py tick ──gating shadow log──→ logs/gating_shadow.jsonl
-        └────旧触发器 asyncio.gather──→ 原真实发送路径
+loop.py tick ──gating log──→ logs/gating_shadow.jsonl
+        │      └─ winner execute_prompt() ──live──→ _pipeline_send() → 成功后 mark
+        └────legacy/maintenance asyncio.gather──→ 未迁移检查或状态扫描
 ```
 
 ---
@@ -60,8 +69,9 @@ loop.py tick ──gating shadow log──→ logs/gating_shadow.jsonl
 - `admin/routers/chat.py` 的 owner 对话入口调用 `notify_owner_turn(uid)`
 - `loop.py` 在 `sensor_aware` tick 后读取现有审计结果里的候选数，调用 `feed_sensor_tick(uid, count)`
 
-状态持久化在 `data/scheduler_state.json` 的 `trigger_state` 段，不覆盖原有 `triggers` /
-`last_diary_share`。每次状态切换追加到 `data/logs/trigger_state.jsonl`。
+状态持久化在 `data/runtime/scheduler_user_state.json` 的 `trigger_state` 段，不覆盖同文件里的
+`last_diary_share` / `followed_topics` 等运行态。每次状态切换追加到
+`data/logs/trigger_state.jsonl`。冷却时间单独保存在 `data/scheduler_cooldowns.json`。
 
 `CHATTING → QUIET` 的滞后按会话 owner turn 数和 `mood_state.get_intensity()` 动态计算；
 `QUIET ↔ RESTLESS` 按 sensor 事件率和持续时间确认，避免短暂鼠标/键盘动作造成状态抖动。
@@ -77,9 +87,10 @@ loop.py tick ──gating shadow log──→ logs/gating_shadow.jsonl
 3. 多候选按 `urgency` 选最高者
 4. 一个 tick 最多返回一条候选
 
-当前仍处于 shadow 模式，但已不再有 `_adapt_legacy_triggers()` 桥接。shadow 候选只来自
+候选已不再有 `_adapt_legacy_triggers()` 桥接，只来自
 `core/scheduler/proposer_registry.py` 注册的原生 proposer；未迁移触发器不会在
-`gating_shadow.jsonl` 里报名。真实发送仍由旧 `_check_*()` 触发器在 `asyncio.gather()` 中自己决定。
+`gating_shadow.jsonl` 里报名。`EXECUTE_MODE="dry_run"` 时只记录 would-send；当前
+`EXECUTE_MODE="live"` 时 winner 由统一执行层真实发送，已迁移 legacy tick 自动让路。
 
 已迁移 proposer 覆盖：watch（`hr_critical/hr_high/sleep_end`）、生日四档、`period_reminder`、
 time_based 的早晚安/随机/天气/日记/主动回忆、diary 两档、`timenode`、`festival/holiday_boost`、
@@ -87,10 +98,10 @@ time_based 的早晚安/随机/天气/日记/主动回忆、diary 两档、`time
 `garden_daily` 扫描本体、`episodic_sweep`、`episodic_decay`、`dlq_monitor`、`sensor_aware`
 仍只走 legacy 真实检查或事件驱动路径。
 
-Phase 2 Step 3.5 加了 dry-run 执行观测：`run_shadow_tick()` 如果选中了带 `execute` 的 proposal，
-会调用 `execute(dry_run=True)`，向 `data/logs/execute_dryrun.jsonl` 写入 would-send / would-mark；
-watch 事件驱动触发器跳过这一步，避免 shadow tick 误模拟外部事件。urgency 分档统一由
-`core/scheduler/urgency.py` 提供。R1 后，同一个日志也记录 live execute 被 `_pipeline_send()` 拦下的
+`run_shadow_tick()` 如果选中了带 `execute` 的 proposal，会按模式调用 `execute()`：
+dry-run 写 would-send / would-mark；live 真实调用 `_pipeline_send()`。Watch 心率和睡醒事件由
+`watch.py::on_watch_event()` 使用独立 `WATCH_EXECUTE_MODE` 即时执行，普通 tick 跳过，避免重复。
+urgency 分档统一由 `core/scheduler/urgency.py` 提供。同一个日志也记录 live execute 被 `_pipeline_send()` 拦下的
 `blocked=true` 条目，用于观察 active window 真实拦截分布；该日志只做可观测性，不改变发送、
 mark 或重试行为。
 
@@ -195,10 +206,11 @@ owner chat 都会更新该时间戳。
 - 普通主动消息在 `before_send` / `_pipeline_send` 阶段被拦时，`_pipeline_send()` 返回 `None`。
 - execute live 路径里，`execute_prompt()` 收到 `None` 后只写 `execute_dryrun.jsonl` 的
   `blocked=true` 观测，不调用 `after_send`，不执行 `_mark()`，也不 `mark_done()`。
-- legacy reminder 旧路径已经对齐：只有 `_pipeline_send()` 实际返回 sent 文本后才
-  `mark_done()` 和写发送 log；active window 拦截时备忘录留在队列，下次 tick 再捞。
+- reminders proposal 由 `core/scheduler/triggers/reminders.py` 接管；只有 `_pipeline_send()`
+  实际返回 sent 文本后，`after_send` 才会 `mark_done()`。`EXECUTE_MODE="dry_run"` 回滚时，
+  `loop.py` 的 legacy reminder 路径也保持相同语义。
 
-当前已收口的“未发送不 mark”语义覆盖 execute live 路径和 legacy reminder 旧路径：被 active
+当前已收口的“未发送不 mark”语义覆盖 execute live 路径和 reminder 回滚路径：被 active
 window 拦截、LLM 空回复或发送前异常时，不调用 execute 的 `after_send` / `_mark()`，也不会把
 备忘录标记完成。其他 legacy trigger 若仍在 `_pipeline_send()` 后无条件 `_mark()`，需逐个按 sent
 结果继续收口；reminder 旧路径已完成。
@@ -217,6 +229,7 @@ window 拦截、LLM 空回复或发送前异常时，不调用 execute 的 `afte
 | `episodic_decay` | 20h | 低 | time_based | 情景记忆每日衰减 |
 | `spontaneous_recall` | 4h | 低 | time_based | 主动回忆触发 |
 | `dlq_monitor` | 24h | 低 | time_based | 扫 DLQ 目录，文件数 > 0 时 log warning |
+| `log_maintenance` | 24h | 维护 | loop.py 内联 | 清理 event_log、done reminders、dream archive、inbox/image cache，并压缩 observations |
 | `activity_remind` | 20h | 低 | — | 仅预留冷却位，尚无对应实现 |
 | `diary_reminder` | 20h | 低 | diary | 提醒用户写日记 |
 | `diary_inject` | 6h | 低 | diary | 日记上下文注入 |
@@ -250,14 +263,27 @@ window 拦截、LLM 空回复或发送前异常时，不调用 execute 的 `afte
 
 ## 冷却状态持久化
 
-冷却记录存在 `data/scheduler_state.json`：
+旧 `data/scheduler_state.json` 已由 `_migrate_scheduler_state_once()` 在启动时一次性拆分：
+
+- `data/scheduler_cooldowns.json`：canonical，保存 `_last_trigger`
+- `data/runtime/scheduler_user_state.json`：runtime，保存 `last_diary_share`、`trigger_state`、
+  followed topics 等用户级运行态
+
+迁移成功后旧文件会删除。冷却文件示例：
 
 ```json
 {
   "triggers": {
     "morning_greeting": 1748000000.0,
     "random_message": 1748003600.0
-  },
+  }
+}
+```
+
+用户级运行态示例：
+
+```json
+{
   "last_diary_share": 1748001234.0,
   "trigger_state": {
     "1043484516": {
@@ -271,7 +297,7 @@ window 拦截、LLM 空回复或发送前异常时，不调用 execute 的 `afte
 ```
 
 启动时自动恢复（`_load_scheduler_state()` 在模块导入时执行），重启不丢失冷却状态。
-状态机启动时同样从 `trigger_state` 段恢复自己的状态。
+状态机从 `scheduler_user_state.json` 的 `trigger_state` 段恢复。
 
 ---
 
@@ -389,10 +415,10 @@ curl -H "Authorization: Bearer <token>" \
 
 ## 新增触发器规范
 
-1. 在 `core/scheduler/triggers/` 下选择合适文件（或新建）
-2. 写 `async _check_xxx()` 函数，内部调 `_is_ready("xxx")` + `_mark("xxx")`
-3. 在 `loop.py` 的 `_COOLDOWNS` 字典里加冷却时间
-4. 在 `_loop()` 的 `asyncio.gather()` 里注册
-5. 如果是高优先级，加入 `_HIGH_PRIORITY_TRIGGERS`
-6. 如果需要管理面板手动触发，在 `manual_trigger()` 的 if-elif 里补充
-7. 在此文档的触发器列表里补充
+1. 在 `core/scheduler/triggers/` 下选择合适文件（或新建），优先实现只读 `propose(ctx)`
+2. proposal 通过 `proposer_registry.register_proposer()` 注册，并提供 `execute_prompt()` executor
+3. 在 `loop.py` 的 `_COOLDOWNS` 字典里加冷却时间；只允许 executor 成功发送后 `_mark()`
+4. 需要状态扫描的触发器才保留 `_check_xxx()` 并加入 `_loop()` gather；不要为纯发言新增 legacy 路径
+5. 如果是高优先级，明确 `bypass_state_machine`，必要时加入 `_HIGH_PRIORITY_TRIGGERS`
+6. 如果需要管理面板手动触发，在 `manual_trigger()` 补充 force 路径
+7. 补 proposer / live / blocked 单测，并更新此文档列表

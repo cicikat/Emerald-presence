@@ -38,7 +38,7 @@
 - 独立 dream_prompt 组装（不复用现实 prompt_builder，不过反话剧化 sanitizer）
 - 梦境原文写 `tmp/current_dream.jsonl`，退出转 `archive/`
 - 软退出（可被叶瑄挽留）+ 硬退出（绝对穿透）
-- dream_summary + 短 TTL afterglow（现实层 6f）
+- dream_summary + 短 TTL afterglow loader（`dream_afterglow.py` 已有；现实层 6f 尚未接线）
 - 隔离合同测试
 
 **三轴结构（v0）**
@@ -50,7 +50,7 @@
 - 前端 BodyState 类型 + 她的赛博感知侧栏面板
 
 **印象回流（impression v1 + patch）**
-- `impression_store`：`data/dreams/impressions/`，慢衰减（0.02/天），50 条上限
+- `impression_store`：`data/runtime/dreams/{char_id}/impressions/`，慢衰减（0.02/天），50 条上限
 - `distill_impression`：梦结束结构性剥离场景/世界/身体，生成"我好像在梦里……"低权印象
 - `impression_loader`：**唯一读 impressions/ 的模块**，ambient 取最近 ≤3 条
 - 现实层 `6g_dream_impression`，框定"模糊的梦境印象，非现实发生的事" + 防编造场景约束
@@ -94,10 +94,11 @@
 
 | 层 | 内容 | 生命周期 |
 |---|---|---|
-| `6f_dream_afterglow` | 即时情绪余韵（剥场景/世界/身体） | 短 TTL，几小时~一两天 |
+| `6f_dream_afterglow` | 即时情绪余韵（剥场景/世界/身体） | **预留未接线**；summary 和 loader 已有，现实 pipeline 尚未调用 |
 | `6g_dream_impression` | 低权"我好像在梦里…"模糊印象 | 慢衰减 |
 
-两层都从 `dreams/` 读、都**永不被 reflect/consolidate/retrieve 读**，都进 token 裁剪表早裁。
+当前只有 `6g_dream_impression` 从 dream 域读入现实 prompt，并进入 token 裁剪表最早裁剪。
+`6f` loader 仍是独立可测模块，但未接 `core/pipeline.py` / `core/prompt_builder.py`。
 
 ---
 
@@ -106,7 +107,7 @@
 | 产物 | 内容 | 去向 | 谁能读 |
 |---|---|---|---|
 | **archive 原文** | 梦境全文 | `archive/dream_*.jsonl` | **仅她复盘，任何 loader 永不读** |
-| **afterglow summary** | 剥场景的情绪余韵 | `summaries/*.json` → 6f | afterglow loader，短 TTL |
+| **afterglow summary** | 剥场景的情绪余韵 | `summaries/*.summary.json` | afterglow loader，短 TTL；当前未注入现实 prompt |
 | **impression residue** | 低权模糊印象 | `impressions/{uid}.json` → 6g | impression_loader 唯一读 |
 
 **边界精确化**：「我们共有过一场梦 + 那种情绪」**是**真实共同事件，可回流；「梦里去了哪、做了什么、什么世界设定」**不是**现实事实，只留 archive。剥离在**生成时**结构性完成，使下游没有可泄漏的场景。
@@ -116,10 +117,10 @@
 ## 五、数据目录
 
 ```
-data/dreams/{char_id}/             独立顶层根（不并入 memory/ 树）默认 char_id=yexuan
+data/runtime/dreams/{char_id}/     独立 dream 根（不并入 reality memory 树）默认 char_id=yexuan
 ├── tmp/current_dream_{uid}.jsonl  梦境原文（dream_only，退出转 archive）
 ├── archive/dream_*.jsonl          归档原文（仅复盘，永不进任何 loader）
-├── summaries/dream_*.json         afterglow 摘要（→ 6f）
+├── summaries/dream_*.summary.json afterglow 摘要（→ 6f）
 ├── impressions/{uid}.json         低权印象（→ 6g，唯 impression_loader 读）
 ├── state/{uid}/dream_state.json   per-uid 会话状态
 └── settings/{uid}.json            per-uid 梦境设置
@@ -153,9 +154,11 @@ REALITY_CHAT → DREAM_ENTRANCE_AVAILABLE → DREAM_ACTIVE → DREAM_CLOSING →
 | 端点 | 状态 | 说明 |
 |---|---|---|
 | `POST /dream/enter` | ✅ 已有 | 入梦，冻结世界/快照 |
-| `POST /dream/exit` | ✅ 已有 | 退梦（软/硬） |
-| `GET /dream/state` | ⚠️ **提案未建** | UI 读会话状态；CC 提了接口，待实现 |
-| `GET/PATCH /dream/settings` | ⚠️ **提案未建** | UI 读写设置；CC 提了接口，待实现 |
+| `POST /dream/chat` | ✅ 已有 | 梦内回合，走独立 dream pipeline |
+| `POST /dream/exit` | ✅ 已有 | 硬退出；无条件穿透并立即关闭梦境 |
+| `GET /dream/state` | ✅ 已有 | 只读 UI 投影：状态、身体数值、张力、场景和象征锚 |
+| `GET /dream/settings` | ✅ 已有 | 读取 per-uid 偏好默认值 |
+| `PATCH /dream/settings` | ✅ 已有 | 枚举校验后的局部更新；`world_layer` / `lucid_mode` 仅影响下一场梦 |
 
 ### dream_state.json 字段
 
@@ -170,8 +173,23 @@ REALITY_CHAT → DREAM_ENTRANCE_AVAILABLE → DREAM_ACTIVE → DREAM_CLOSING →
 | `world_layer` | reality_derived / abo / vampire / cat / flower_bud / custom |
 | `lucid_mode` | lucid_shared / non_lucid |
 | `enable_dream_lorebook` | bool |
+| `jailbreak_preset` | `characters/dream_presets/{name}.md` 的安全 ASCII 名；缺失时回退 `default` |
 
 > 破限属梦境独立源（D0），不在 settings 暴露开关（独立 pipeline 天然不漏进现实，工程上最不用操心）。
+
+### Emerald-client 当前接线
+
+同级项目 `D:\ai\Emerald-client` 已把 Dream 作为正式 overlay 接入，不再是 mock preview：
+
+- React API：`src/shared/api/dream.ts` 通过 Tauri invoke 调用 Dream 端点；
+- Rust bridge：`src-tauri/src/lib.rs` 提供 `dream_get_state` / `dream_enter` / `dream_chat` /
+  `dream_exit` / `dream_get_settings` / `dream_update_settings`；
+- UI：`src/windows/dream/` 提供入梦、梦内聊天、WAKE / Esc 硬退出、状态侧栏、偏好和帮助窗；
+- 状态轮询：`GET /dream/state` 每 8 秒刷新，显示她的 body 数值、叶瑄梦内张力、场景和象征锚；
+- 本地外观：聊天字号、主题字号、动态字体包、RGB 主题色、聊天背景导入裁切和模糊度只存客户端；
+- 后端偏好：memory access、感知边界、世界层、清明模式、dream lorebook 走 `/dream/settings`。
+
+当前客户端没有暴露 `jailbreak_preset` 选择器，后端仍保留该 PATCH 字段和默认值。
 
 ---
 
@@ -200,7 +218,9 @@ REALITY_CHAT → DREAM_ENTRANCE_AVAILABLE → DREAM_ACTIVE → DREAM_CLOSING →
 - non_lucid 只改叶瑄虚构内自知；系统层仍标记 dream，墙 + 逃生不变
 
 ### CURRENT（当前实现）
-见第二节功能清单。三轴 + 四档 + 六世界 + 软硬双出口 + 三层回流，全部落地，90 测试绿。
+见第二节功能清单。三轴 + 四档 + 六世界 + 软硬双出口已落地；三层产物均会生成，
+但现实 prompt 当前只接 `6g_dream_impression`，`6f_dream_afterglow` 仍未接线。测试数量以
+`tests/test_dream_*.py` 当前收集结果为准，不在合同文档里固定计数。
 
 **现实侧 loader 不引用 dream 路径——已有自动测试护栏**
 `tests/test_dream_isolation_guard.py` 静态扫描 `core/memory/*.py`、`core/pipeline.py`、
@@ -228,4 +248,6 @@ import（它只传递预加载文本给 prompt，不读 dream 数据）。
 - **vocab_strip 是手维护黑名单**：新世界/新术语忘填 `vocab.json` 会静默漏。但因承重墙是 store 隔离，仅在 F1 边界才有影响，不致命。**任何人不得把它当墙用。**
 - **身份稳定性测试是弱代理**：只断言人称正确 + 依恋关键词在场，真验证靠实际游玩。
 - **DREAM_LOCKED 预留未实现**：无系统级软退锁。
-- **~~数据目录树滞后~~（已清）**：S7 已将 dream domain 迁至 `dreams/{char_id}/` 独立顶层根（`_LAYOUT_DREAM = "v1"`），第五节目录树已同步更新。
+- **dream settings 仍保留旧路径降级读**：`_LAYOUT_DREAM = "v1"` 后写入
+  `data/runtime/dreams/{char_id}/settings/{uid}.json`，读取仍可通过 `for_read()` 回退旧
+  `data/dreams/settings/{uid}.json`。清理旧文件前先看 fallback 观测。

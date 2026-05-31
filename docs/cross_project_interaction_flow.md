@@ -3,6 +3,12 @@
 > 审计日期：2026-05-19  
 > 范围：`D:\ai\Emerald-client`、`D:\ai\yexuan_memery`、`D:\ai\qq-st-bot`  
 > 限制：本文只记录代码和文档事实；未在代码中找到的步骤标为“未找到明确实现 / 待确认”。
+>
+> **2026-05-31 更新说明**：本文保留 2026-05-19 的三仓库审计快照，不作为当前接口清单。
+> 此后 `qq-st-bot` 已拆分 datapath，调度器 proposal 已进入 live winner 执行，
+> `Emerald-client` 已正式接入 Dream overlay。当前事实优先看 `docs/data-taxonomy.md`、
+> `docs/scheduler.md`、`docs/channels.md`、`docs/dream.md` 和客户端自己的
+> `docs/backend-integration.md`。
 
 ## 1. 总览
 
@@ -133,9 +139,9 @@
 |---|---|---|
 | `core.message_queue` | QQ 会话队列 | `D:\ai\qq-st-bot\core\message_queue.py:24` / `:47` |
 | `slow_queue` | 后处理慢任务队列，单 worker，不持久化 | `D:\ai\qq-st-bot\core\post_process\slow_queue.py:31` / `:91` |
-| `data/channel_queue.json` | desktop 普通消息文件降级队列 | `D:\ai\qq-st-bot\channels\desktop.py:61` |
-| `data/mobile_queue.json` | mobile 主动消息轮询队列 | `D:\ai\qq-st-bot\channels\mobile.py:78` |
-| `data/agent_actions.json` | 桌面 action 文件队列 | `D:\ai\qq-st-bot\channels\desktop.py:79`；`D:\ai\qq-st-bot\core\tool_dispatcher.py:183` |
+| `data/runtime/channel_queue.json` | desktop 普通消息文件降级队列 | `D:\ai\qq-st-bot\channels\desktop.py:61` |
+| `data/runtime/mobile_queue.json` | mobile 主动消息轮询队列 | `D:\ai\qq-st-bot\channels\mobile.py:78` |
+| `data/runtime/agent_actions.json` | 桌面 action 文件队列 | `D:\ai\qq-st-bot\channels\desktop.py:79`；`D:\ai\qq-st-bot\core\tool_dispatcher.py:183` |
 | `pending_perception/processing` | 动作失败两阶段提交目录 | `D:\ai\qq-st-bot\core\memory\pending_perception.py` |
 | `_sleep_buffer` / `_sleep_flush_task` | Watch sleep_end 合并缓冲 | `D:\ai\qq-st-bot\admin\routers\watch.py:37` / `:38` |
 | `_queue_condition` | mobile queue 长轮询唤醒条件 | `D:\ai\qq-st-bot\channels\mobile.py:19` |

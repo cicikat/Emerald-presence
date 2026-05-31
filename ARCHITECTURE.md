@@ -295,7 +295,3 @@ Stop（Claude 准备结束响应时）
 (["路径关键词1", "路径关键词2"], "docs/新文档.md", "说明"),
 ```
 其他都不动。
-
-### 临时关闭
-
-`.claude/settings.json` 加 `"disableAllHooks": true`，或直接删 hooks 节点。改完自动 reload，不用重启 Claude Code。

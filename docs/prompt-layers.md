@@ -20,7 +20,7 @@
 | `3.5_period` | 生理期感知（第N天） | tagged（见下） | `user_profile.get_period_info()` |
 | `3.6_watch` | 最近一次睡眠数据 | tagged（见下） | `user_profile` sleep_segments |
 | `3.7_sensor` | 手机传感器（步数/电量/位置/亮屏次数） | 当天有数据即注（无 tag 门控） | `user_profile.phone_sensor_today` |
-| `3.8_activity` | 桌宠屏幕活动快照 | tagged（见下） | `data/activity_snapshot.json`（TTL 5分钟） |
+| `3.8_activity` | 桌宠屏幕活动快照 | tagged（见下） | `data/runtime/characters/{char_id}/inner/activity_snapshot.json`（TTL 5分钟） |
 | `5_profile` | 用户画像（名字/位置/宠物/兴趣/职业） | 有内容即注 | `user_profile.load()` |
 | `5.2_reminders` | 待办备忘录列表 | 有待办即注 | `get_reminders()` |
 | `5.5_lore` | 世界书条目 | LoreEngine 命中时 | `lore_engine.match()` |
@@ -30,9 +30,9 @@
 | `6c_episodic_fallback` | 近期高强度记忆兜底 | episodic_result 为空且 fallback 非空 | `episodic_memory.retrieve_fallback()`；实际消息 `_layer` 仍写 `6c_episodic`，便于统一裁剪 |
 | `mid_term` | 过去 12 小时对话压缩视图 | mid_term_context 非空 | `mid_term.format_for_prompt()`（12h 过期，最多 20 条，三时间桶渲染） |
 | `6d_diary_context` | 用户近期日记 | 有内容且命中 `emotion.down` / `emotion.indirect` | `diary_context.load()` |
-| `6e_inner_diary_facts` | 叶瑄昨天的记录（事件层，取前200字） | 昨日日记文件存在且含事件层 | `data/yexuan_inner/diary/` |
-| `6e_inner_diary_feeling` | 叶瑄昨天的心情（感受层，取前150字） | 昨日日记存在且命中 `emotion.down/indirect/deep` 或 `topic.relation` | `data/yexuan_inner/diary/` |
-| `6g_dream_impression` | 梦境印象回流（ambient，≤3条，非事实框定，叶瑄自述"我好像在梦里……"） | 有未过期印象时注入 | `core/dream/impression_loader.load_impression_text()` → `data/dreams/impressions/{uid}.json` |
+| `6e_inner_diary_facts` | 叶瑄昨天的记录（事件层，取前200字） | 昨日日记文件存在且含事件层 | `data/runtime/characters/{char_id}/inner/diary/` |
+| `6e_inner_diary_feeling` | 叶瑄昨天的心情（感受层，取前150字） | 昨日日记存在且命中 `emotion.down/indirect/deep` 或 `topic.relation` | `data/runtime/characters/{char_id}/inner/diary/` |
+| `6g_dream_impression` | 梦境印象回流（ambient，≤3条，非事实框定，叶瑄自述"我好像在梦里……"） | 有未过期印象时注入 | `core/dream/impression_loader.load_impression_text()` → `data/runtime/dreams/{char_id}/impressions/{uid}.json` |
 | `7_mes_example_item` | 对话示例（few-shot） | always（有内容） | 角色卡 mes_example |
 | `9_history` | 短期对话历史（近场保留 + 远场加权择优） | always | `short_term.load_for_prompt()` |
 | `9.5_episodic_top` | 最相关情景记忆1条（attention sweet spot） | episodic_result 非空 | 从已召回结果取第一条，不重复召回 |
@@ -42,6 +42,9 @@
 | `12_user_message` | 用户当前消息 | always | 用户输入 |
 
 > 层 10 注入安全：工具裸输出经 `ToolResult.safe_summary`（截断上限 2000 字符）包裹后，以定界标记 `<<<TOOL_DATA_START>>>` / `<<<TOOL_DATA_END>>>` 加反注入指令框定，防止外部工具/搜索结果中的不可信文本被模型当作指令执行。原始数据仅落 debug 日志，永不进 prompt/memory。
+>
+> `core/dream/dream_afterglow.py` 的短 TTL loader 已存在，但现实 pipeline 当前没有调用它，
+> 因此没有生效中的 `6f_dream_afterglow` 层；当前 Dream 回流只有 `6g_dream_impression`。
 
 ---
 

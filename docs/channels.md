@@ -28,8 +28,8 @@ QQ 收消息 → main.handle_message → Pipeline → text_output.send() 直发 
 | 通道 | 文件 | 激活方式 | 发送方式 |
 |---|---|---|---|
 | QQ | `channels/qq.py` | `standalone_mode=false` 且 `qq.enabled=true` 时由 `main.py` 注册 | `core/qq_adapter.send_message()` → NapCat |
-| 桌宠 | `channels/desktop.py` | 总是注册；WS 连接或 `set_active(True)` 后活跃 | 主动下行优先 WebSocket，失败降级到 `data/channel_queue.json` |
-| 手机 | `channels/mobile.py` | 总是注册；`POST /mobile/activate` 或 `GET /mobile/poll` 后短时活跃 | 写入 `data/mobile_queue.json`，手机端轮询读取 |
+| 桌宠 | `channels/desktop.py` | 总是注册；WS 连接或 `set_active(True)` 后活跃 | 主动下行优先 WebSocket，失败降级到 `data/runtime/channel_queue.json` |
+| 手机 | `channels/mobile.py` | 总是注册；`POST /mobile/activate` 或 `GET /mobile/poll` 后短时活跃 | 写入 `data/runtime/mobile_queue.json`，手机端轮询读取 |
 
 `channels/registry.py` 维护通道注册表：
 - `register(channel)`：启动时注册通道。
@@ -67,15 +67,45 @@ MobileChannel 的活跃状态有 120 秒 TTL：手机端持续轮询时保持活
 
 文件：`channels/desktop_ws.py`
 
-端点由管理面板服务提供：`ws://127.0.0.1:8080/ws/desktop`
+端点由管理面板服务提供：`ws://127.0.0.1:8080/ws/desktop?token=<admin.secret_key>`
+
+路由层在 `admin/admin_server.py` 校验 query token；失败时以 code `1008` 关闭。Emerald-client
+由 Rust `client_config.rs` 在公开 WS URL 上追加 token，前端只消费拼好的 URL。
 
 行为：
 - 单连接：新桌宠连接会替换旧连接。
 - 普通消息：`push_message()` 发送 `channel_message`，不等 ack。
+- 叙事分段：`turn_sink` 在普通消息之后并行发送 `message_segments`，不等 ack。
 - 桌面动作：`push_action_and_wait()` 发送 `action`，最多等 5 秒 ack。
-- 心跳：服务端每 30 秒发 `ping`，超过约 70 秒没有 `pong` 会断开。
+- 心跳：服务端每 20 秒发 `ping`，超过约 70 秒没有 `pong` 会断开。
 
 桌宠上线时会把 `DesktopChannel` 设为活跃；断开时取消文件 fallback 活跃标志。
+
+---
+
+## Narrative Message 双轨协议
+
+`core/turn_sink.py` 通过 `core/narrative_parser.py` 把 LLM 回复解析为只读 segments 视图：
+
+| segment type | 含义 |
+|---|---|
+| `say` | 台词 |
+| `do` | 动作 |
+| `env` | 环境 |
+| `feel` | 感受 |
+| `narration` | 未标记文本或容错降级 |
+
+原始回复仍是 history / event_log / Dream archive 等链路的 source of truth，不被解析器改写。
+桌面在线时，同一个 `msg_id` 会收到两条消息：
+
+```json
+{"type":"channel_message","content":"<say>你好</say>","msg_id":"..."}
+{"type":"message_segments","content":"你好","segments":[{"type":"say","text":"你好"}],"msg_id":"..."}
+```
+
+Emerald-client 的 `ChatPanel` 按 `msg_id` 关联两条消息；`message_segments` 先到时会暂存。
+旧客户端忽略未知 `message_segments` 即可继续工作。mobile / QQ / 文件 fallback 当前仍只接收
+原始文本，不消费 segments。
 
 ---
 
@@ -85,10 +115,10 @@ MobileChannel 的活跃状态有 120 秒 TTL：手机端持续轮询时保持活
 
 | 文件 | 用途 | 写入方 | 读取方 |
 |---|---|---|---|
-| `data/channel_queue.json` | 普通消息队列 | `DesktopChannel._write_to_queue()` | 桌宠端轮询 |
-| `data/mobile_queue.json` | 手机主动消息队列 | `MobileChannel._write_to_queue()` | 手机端 `/mobile/poll` |
-| `data/agent_actions.json` | 桌面动作队列 | `tool_dispatcher._push_desktop_action()` / `DesktopChannel.send(..., behavior=...)` | 桌宠端轮询 |
-| `data/pending_perception/` | 动作失败后的下轮感知 | `pipeline._parse_and_execute_intent()` | `pipeline.build_prompt()` |
+| `data/runtime/channel_queue.json` | 普通消息队列 | `DesktopChannel._write_to_queue()` | 桌宠端轮询 |
+| `data/runtime/mobile_queue.json` | 手机主动消息队列 | `MobileChannel._write_to_queue()` | 手机端 `/mobile/poll` |
+| `data/runtime/agent_actions.json` | 桌面动作队列 | `tool_dispatcher._push_desktop_action()` / `DesktopChannel.send(..., behavior=...)` | 桌宠端轮询 |
+| `data/runtime/pending_perception/` | 动作失败后的下轮感知 | `pipeline._parse_and_execute_intent()` | `pipeline.build_prompt()` |
 
 所有上述路径都通过 `core/sandbox.get_paths()` 获取，测试模式会切到 `data/test_sandbox/{session}/`。
 
@@ -112,7 +142,7 @@ MobileChannel 的活跃状态有 120 秒 TTL：手机端持续轮询时保持活
 - 文档支持类型：`.txt` / `.md` / `.docx`
 - 图片支持类型：`.jpg` / `.jpeg` / `.png` / `.gif` / `.webp` / `.heic` / `.heif` / `.bmp`
 - 文档只能单个上传；图片可以通过 `files` 多张上传；文档和图片不能混传
-- 图片按原始 bytes 计算 sha256，描述缓存写入 `data/image_cache/{sha256}.json`；命中缓存时不再落盘同一张图，也不再调用 vision
+- 图片按原始 bytes 计算 sha256，描述缓存写入 `data/cache/image_cache/{sha256}.json`；命中缓存时不再落盘同一张图，也不再调用 vision
 - 文档大小上限 5MB，图片大小上限 10MB（单张）；超出返回 413
 - 不支持类型（`.pdf` / `.zip` / `.exe` 等）上传返回 415；QQ 文件路径返回"看不懂"提示
 - 422 表示请求形态或处理失败，如空文件列表、文档多传、文档图片混传、图片识别失败、文件读取失败
@@ -145,6 +175,6 @@ MobileChannel 的活跃状态有 120 秒 TTL：手机端持续轮询时保持活
 ## 维护要点
 
 1. 新增输出通道时，实现 `channels.base.BaseChannel`，在 `main.py` 启动阶段注册。
-2. 不要在业务模块里直接写 `channel_queue.json`、`mobile_queue.json` 或 `agent_actions.json`，统一走 `DesktopChannel` / `MobileChannel` / `tool_dispatcher`。
+2. 不要在业务模块里直接写 `runtime/channel_queue.json`、`runtime/mobile_queue.json` 或 `runtime/agent_actions.json`，统一走 `DesktopChannel` / `MobileChannel` / `tool_dispatcher`。
 3. 桌面动作优先走 WebSocket ack；只有失败或离线时才降级到文件队列。
 4. 如果改跨通道感知，检查 `Pipeline._last_channel` 和 `perception_block`，避免把工具结果再次注入层 1。

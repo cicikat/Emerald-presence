@@ -1,6 +1,6 @@
 # 触发器统一写入与广播 — 设计文档（Phase 1）
 
-> 状态：草案 v0.1
+> 状态：Phase 1 已落地；本文保留原设计推导，路径按当前 datapath 校准
 > 范围：把"叶瑄发话已完成"这件事收口到一个函数，让所有入口走同一条写入 + 广播路径
 > 不做：触发器决策时机重构、冷却参数热改、调度器分类拆分 —— 全部留给 Phase 2
 
@@ -30,8 +30,8 @@
 Phase 1 必须达成：
 
 1. 任意入口产生一句叶瑄的话之后，**三处必同时有新条目**：
-   - `data/event_log/{uid}/{date}.md`
-   - `data/history/{uid}.json`（short-term）
+   - `data/runtime/memory/{char_id}/{uid}/event_log/{date}.md`
+   - `data/runtime/memory/{char_id}/{uid}/history.json`（short-term）
    - 所有目标 channel 的下行（按 fanout 策略）
 2. `/desktop/chat`、`/mobile/chat` 对客户端的可观察行为**完全不变**（字段、时序、behavior 都一致）
 3. 所有触发器写入语义统一：`trigger_name` 非空、assistant only；source 在 sink 内部保留，落盘仍编码到 `trigger_name`
@@ -136,8 +136,19 @@ async def record_assistant_turn(
 - **不替换 `_pipeline_send`**：它继续作为"跑完 pipeline 拿到文本"的封装，只是内部的 `broadcast + capture + create_task(post_process)` 这一段替换为 `await record_assistant_turn(...)`。触发器代码层面无感。
 - **不改 `capture_turn`**：它仍然是写入原语，签名稳定。
 - **不改 `channels.registry.broadcast`**：record_assistant_turn 内部就是调用它。
-- **behavior 通道**：sensor_aware 现在直推 WS 时携带 action 包。迁移后由 `DesktopChannel.send(text, user_id, behavior=...)` 接收 behavior，自己决定怎么序列化（WS 在线发原 channel_message 再发 action；离线写 `agent_actions.json`）。**客户端协议保持不变**。
-  - `MobileChannel.send` 将 behavior 同条写入 `mobile_queue.json`；`QQChannel.send` 忽略 behavior。
+- **behavior 通道**：sensor_aware 现在直推 WS 时携带 action 包。迁移后由 `DesktopChannel.send(text, user_id, behavior=...)` 接收 behavior，自己决定怎么序列化（WS 在线发原 channel_message 再发 action；离线写 `data/runtime/agent_actions.json`）。action 协议保持不变。
+  - `MobileChannel.send` 将 behavior 同条写入 `data/runtime/mobile_queue.json`；`QQChannel.send` 忽略 behavior。
+
+### 3.4 当前追加：Narrative Message 双轨
+
+`record_assistant_turn()` 当前还会为桌面 WS 预生成共享 `msg_id`：
+
+1. 原始 `assistant_text` 先按原路径 fanout，仍写入 reality memory；
+2. `core/narrative_parser.py` 解析 `<say>` / `<do>` / `<env>` / `<feel>`；
+3. desktop WS 额外 fire-and-forget 推一条同 `msg_id` 的 `message_segments`；
+4. mobile / QQ / 文件 fallback 不变；旧桌面客户端忽略未知消息即可。
+
+segments 是只读展示视图，不得替换 history / event_log / archive 中的原始回复。
 
 ---
 
@@ -202,22 +213,22 @@ async def record_assistant_turn(
 
 每个触发器触发后 3 秒内必须满足：
 
-- `data/event_log/{uid}/{date}.md` 末尾多一行，`trigger` 字段正确
-- `data/history/{uid}.json` 末尾多一行 assistant（owner 入口是 user+assistant 一对）
+- `data/runtime/memory/{char_id}/{uid}/event_log/{date}.md` 末尾多一行，`trigger` 字段正确
+- `data/runtime/memory/{char_id}/{uid}/history.json` 末尾多一行 assistant（owner 入口是 user+assistant 一对）
 
 每个触发器触发后 5 秒内必须满足：
 
 - 桌面 WS 在线时：客户端收到 message
-- 桌面 WS 离线时：`data/agent_actions.json` 或 DesktopChannel fallback 文件出现条目
-- mobile 端 active 时：`data/mobile_queue.json` 出现条目
+- 桌面 WS 离线时：`data/runtime/agent_actions.json` 或 DesktopChannel fallback 文件出现条目
+- mobile 端 active 时：`data/runtime/mobile_queue.json` 出现条目
 - QQ 在线时：QQ 通道发出消息（仅当 fanout 含 QQ）
 
 ### 6.2 回归测试
 
 - `/desktop/chat` 发一条 → memory 与 channel 行为**与改造前字节一致**
 - `/mobile/chat` 同上
-- sensor_aware 触发 → **预期差异**：多了 `mobile_queue.json` 条目（按开放问题 #1 决议可能也加 QQ）
-- sleep_end 触发 → **预期差异**：`data/history/{uid}.json` 的 user 行不再被括号 prompt 污染
+- sensor_aware 触发 → **预期差异**：多了 `data/runtime/mobile_queue.json` 条目（按开放问题 #1 决议可能也加 QQ）
+- sleep_end 触发 → **预期差异**：`data/runtime/memory/{char_id}/{uid}/history.json` 的 user 行不再被括号 prompt 污染
 
 ### 6.3 并发场景
 

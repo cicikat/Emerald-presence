@@ -1,9 +1,15 @@
 # 触发器决策层重构 — 设计文档（Phase 2）
 
-> 状态：正式设计 v1.0；Phase 2 Step 1/2 已完成（状态机地基 + gating 并行观测）
+> 状态：设计文档 + 演进记录。Step 1/2 已完成；原生 proposer 与
+> `core/scheduler/execution.py` live winner 已落地。Step 4/5/6 仍是未来设计。
 > 前置：Phase 1（record_assistant_turn 收口）已上线稳定；identity 系统已落地
 > 目标：把触发器从"到点就发"改成"在合适的时机说话"
 > 性别约定：叶瑄是「他」，用户是「她」
+
+> **当前代码校准**：`run_shadow_tick()` 函数名和 `gating_shadow.jsonl` 日志名仍保留，但
+> `EXECUTE_MODE = "live"` 时 winner 会真实发送；已迁移 legacy tick 通过
+> `legacy_tick_should_send()` 让路。Watch 仍使用独立事件驱动 `WATCH_EXECUTE_MODE`。
+> 当前事实总览见 `docs/scheduler.md`。
 
 ---
 
@@ -87,7 +93,8 @@ final_delay = chat_to_quiet_base × duration_factor × emotion_factor
 - 单例，持有当前 uid 的状态 + 转换时间戳
 - 输入：owner turn 时间（main.py / chat router 通知）、sensor 事件流（sensor_events.tick）、mood_state、会话 turn 计数
 - 输出：`get_state(uid) -> TriggerState`，供 loop.py 各触发器查询
-- 状态持久化到 `data/scheduler_state.json`（复用现有文件，加 `trigger_state` 段），重启不丢
+- 状态持久化到 `data/runtime/scheduler_user_state.json` 的 `trigger_state` 段，重启不丢；
+  冷却单独写 `data/scheduler_cooldowns.json`
 - 状态切换写一行到 `data/logs/trigger_state.jsonl`（可观测）
 
 ---
@@ -286,12 +293,13 @@ gating:
 - 此步不改任何触发器，状态机只观测不干预
 - 测试：模拟 owner turn / sensor 流，验证三态切换 + 动态滞后正确
 
-### Step 2：gating 层 + propose 协议 ✅ 已完成（shadow 模式）
+### Step 2：gating 层 + propose 协议 ✅ 已完成（历史 rollout：shadow 模式）
 - 新增 `core/scheduler/gating.py`：收集 propose、过滤、按 urgency 选一
 - 定义 `TriggerProposal` dataclass
-- loop.py 的 `_loop()` 接入 gating，但**先并行运行**：旧 `_is_ready/_mark` 路径仍生效，gating 只 log "我会选谁"不真发。对比观察一段时间。
+- rollout 初期由 loop.py 的 `_loop()` 接入 gating 后并行观测：旧 `_is_ready/_mark`
+  路径仍生效，gating 只 log "我会选谁"不真发。当前已经切到 live winner，见页首校准。
 
-### Step 3：触发器逐个迁移到 propose
+### Step 3：触发器逐个迁移到 propose（大部分已完成，live 接管中）
 - 每个主动触发器加 `propose()`，声明 requires_state / urgency / topic_source
 - 高优先级（hr_critical / 生日 / period_reminder）设 `bypass_state_machine=True`
 - 迁移一个验证一个，旧路径同步关闭

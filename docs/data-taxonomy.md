@@ -1,113 +1,169 @@
 # Data Taxonomy
 
-本文件记录 `data/` 分层迁移的目标结构和边界。当前阶段只建立路径规划，现有 loader 仍按旧路径工作，不搬文件，不改变运行行为。
+本文记录当前 `data/` 路径治理实现。代码真值在：
 
-## 目标根目录
-
-未来 `data/` 顶层按用途分为：
-
-| 目录 | 定位 |
+| 文件 | 职责 |
 |---|---|
-| `runtime/` | 运行时队列、临时动作、短生命周期通道文件 |
-| `memory/` | 会进入现实对话记忆链路的用户记忆 |
-| `generated/` | 媒体缓存、上传解析产物、LLM 生成但非核心状态的内容 |
-| `state/` | 调度器、presence、花园、活动状态等可重建或可继续运行的状态 |
-| `archive/` | 人工归档和历史保留，默认不进入现实 prompt |
-| `dreams/` | Dream Session 专用边界，默认不进入现实 prompt |
-| `config/` | 可由管理面板维护的配置型数据 |
-| `debug/` | 调试输出、异常样本、观测日志 |
-| `personas/` | 多角色 persona 元数据和按 persona 分区的角色状态 |
+| `core/data_paths.py` | `DataPaths` 实现、布局开关、路径安全检查 |
+| `core/sandbox.py` | `get_paths()` / `init_paths()` 单例胶水，测试沙盒前缀写入 |
+| `core/data_registry.py` | 每个公开路径方法的 durability / domain / scope / git_policy 元数据 |
+| `core/migration.py` | 迁移期 `for_read(new, old)` 降级读与命中观测 |
+| `core/paths.py` | 未来 taxonomy 命名空间规划占位，当前不接 loader |
 
-`core/paths.py` 提供这些未来根路径 helper，但现阶段不替换 `core/sandbox.get_paths()`，不接入 prompt、scheduler、memory loader。
+## 当前布局
 
-## Runtime / Debug 待接入项
+`core/data_paths.py` 当前启用：
 
-低风险 `runtime/` 与 `debug/` 项应等客户端轮询路径同步、且路径入口具备 sandbox-aware 兼容后再接入。当前运行代码仍保持旧行为。
-
-| 当前旧路径 | 规划新路径 | 未来读策略 | 未来写策略 |
-|---|---|---|---|
-| `data/channel_queue.json` | `data/runtime/channel_queue.json` | 优先读新路径；新路径不存在时读旧路径 | 写新路径 |
-| `data/mobile_queue.json` | `data/runtime/mobile_queue.json` | 优先读新路径；新路径不存在时读旧路径 | 写新路径 |
-| `data/agent_actions.json` | `data/runtime/agent_actions.json` | 优先读新路径；新路径不存在时读旧路径 | 写新路径 |
-| `data/debug/llm_output/` | `data/debug/llm_output/` | cleanup 优先处理新路径；新路径不存在时兼容旧路径 | 写新路径 |
-
-接入时不自动移动旧文件，也不删除旧文件。如果需要保留旧队列或旧 debug 样本，由人工在停机窗口复制到新路径，并确认客户端读取位置已经同步。
-
-## Personas 规划
-
-规划结构：
-
-```text
-data/personas/
-├── active.json
-├── registry.json
-└── p001/
-    ├── profile/
-    ├── inner_state/
-    ├── relationship/
-    └── growth/
+```python
+_LAYOUT_CHARACTER_INNER = "v1"
+_LAYOUT_REALITY = "v1"
+_LAYOUT_DREAM = "v1"
 ```
 
-persona 的稳定目录名必须使用 ASCII id，例如 `p001`、`p002`。不要用 `叶瑄` 这类中文显示名做路径。中文名、展示名、角色卡文件名应放在 `registry.json` 里映射到稳定 id。
+生产环境的实际写入根目录如下。不要根据旧设计稿中的 `data/memory/`、`data/characters/`
+或 `data/dreams/` 推断当前落盘位置。
 
-当前 `personas/` 只是规划目录。现实 loader 不会读取 `data/personas/active.json`、`registry.json` 或 `p001/` 下任何文件。
+```text
+data/
+├── runtime/
+│   ├── channel_queue.json
+│   ├── mobile_queue.json
+│   ├── agent_actions.json
+│   ├── pending_perception/
+│   ├── scheduler_user_state.json
+│   ├── memory/{char_id}/{uid}/
+│   │   ├── history.json
+│   │   ├── event_log/{date}.md
+│   │   ├── mid_term.json
+│   │   ├── episodic.json
+│   │   ├── memory_index.json
+│   │   ├── profile.json
+│   │   ├── identity.yaml
+│   │   ├── diary_context.txt
+│   │   ├── reminders.json
+│   │   └── fixation_state.json
+│   ├── characters/{char_id}/
+│   │   ├── inner/
+│   │   │   ├── mood_state.json
+│   │   │   ├── activity_state.json
+│   │   │   ├── activity_snapshot.json
+│   │   │   ├── observations.jsonl
+│   │   │   ├── author_note_state.json
+│   │   │   ├── trait_state.json
+│   │   │   ├── presence.json
+│   │   │   └── diary/
+│   │   ├── garden/{plants.json,storage.json}
+│   │   ├── pet.json
+│   │   └── character_growth/
+│   └── dreams/{char_id}/
+│       ├── tmp/
+│       ├── archive/
+│       ├── summaries/
+│       ├── impressions/
+│       ├── state/{uid}/dream_state.json
+│       └── settings/{uid}.json
+├── scheduler_cooldowns.json
+├── group_context/
+├── inbox/
+├── cache/image_cache/
+├── logs/
+│   ├── error.log
+│   ├── dead_letter_queue/
+│   ├── fixation.jsonl
+│   ├── trigger_state.jsonl
+│   ├── gating_shadow.jsonl
+│   └── execute_dryrun.jsonl
+├── debug/llm_output/
+├── diary_fallback/
+├── jailbreak_entries.json
+├── lorebook.yaml
+├── relations.yaml
+└── blacklist.yaml
+```
 
-## 会进入现实 Prompt / Retrieve 的数据
+测试模式把上述相对路径整体偏移到 `data/test_sandbox/{session_id}/`。`sandbox.init_paths()`
+还会更新 `config.yaml` 的 `data_prefix`，供旧桌宠文件轮询兼容。
 
-当前现实对话会读取这些旧路径，并可能注入 prompt 或影响 retrieve：
+## 路径边界
 
-| 旧路径 | 当前用途 |
+### Reality memory
+
+现实记忆主干统一写入 `get_paths().user_memory_root(uid, char_id)`：
+
+| 文件 | 当前用途 |
 |---|---|
-| `data/history/{uid}.json` | 层 9 短期历史 |
-| `data/event_log/{uid}/{date}.md` | 层 6b 事件搜索 |
-| `data/mid_term/{uid}.json` | `mid_term` 层 |
-| `data/episodic_memory/{uid}.json` | 层 6c / 9.5 情景记忆 |
-| `data/user_identity/{uid}.yaml` | 层 6a 用户稳定行为模式 |
-| `data/profiles/{uid}.json` | 层 5 画像，3.5/3.6/3.7 传感数据 |
-| `data/diary_context/{uid}.txt` | 层 6d 用户近期日记 |
-| `data/reminders/{uid}.json` | 层 5.2 待办备忘 |
-| `data/group_context/{gid}.json` | 层 4 群聊上下文 |
-| `data/relations.yaml` | 层 3 用户关系 |
-| `data/lorebook.yaml` | 层 5.5 世界书 |
-| `data/jailbreak_entries.json` | 层 0 / 2 / 11 破限条目 |
-| `data/activity_snapshot.json` | 层 3.8 桌面活动快照 |
-| `data/yexuan_inner/mood_state.json` | 层 1 情绪软提示 |
-| `data/yexuan_inner/presence.json` | 层 2.55 上次说话时间、2.6 活动注入判断 |
-| `data/yexuan_inner/diary/{date}.md` | 层 6e 角色日记 |
-| `data/yexuan_inner/observations.jsonl` | 层 11 style hint |
-| `data/yexuan_inner/activity_pool.yaml` / `activity_state.json` | 层 2.6 角色当前活动 |
-| `characters/yexuan_author_notes.json` + `data/yexuan_inner/trait_state.json` | 层 11 author note 轮换 |
+| `history.json` | 层 9 短期历史 |
+| `event_log/{date}.md` | 层 6b 事件搜索 |
+| `mid_term.json` | 12 小时中期摘要 |
+| `episodic.json` / `memory_index.json` | 层 6c / 9.5 情景记忆与索引 |
+| `profile.json` | 层 5 画像与低频传感数据 |
+| `identity.yaml` | 层 6a 稳定行为模式 |
+| `diary_context.txt` | 层 6d 用户近期日记上下文 |
+| `reminders.json` | 待办备忘 |
+| `fixation_state.json` | 固化 pipeline 状态 |
 
-`data/character_growth/` 当前不由主 prompt 自动注入，但仍是 legacy/兼容路径：`get_growth` 工具和旧 DLQ / 手动 `consolidate_to_growth` 仍可能读取或写入。
+`DataPaths.history()`、`mid_term()`、`profiles()` 等分类型 accessor 仍保留给少量兼容调用方；
+新增 per-user 读写优先使用 `user_memory_root()`。
+
+### Character inner
+
+角色内部状态统一落在 `data/runtime/characters/{char_id}/`。其中 `inner/`、`garden/`、
+`character_growth/` 和 `pet.json` 都按角色隔离。`activity_pool()`、`yexuan_traits()`、
+`author_notes_pool()` 属于 authored 静态内容，优先读 `content/characters/{char_id}/`，
+物理文件未迁移时回退旧位置。
+
+### Dream
+
+Dream domain 独立落在 `data/runtime/dreams/{char_id}/`，不进入 reality memory 树。
+现实侧只允许专用 loader 读取 `summaries/` 和 `impressions/` 生成低权回流层；
+`tmp/`、`archive/`、`state/`、`settings/` 均不是现实记忆源。
+
+### Shared runtime and forensic
+
+- IPC / 临时队列：`data/runtime/*.json`
+- 调度器冷却真值：`data/scheduler_cooldowns.json`
+- 调度器用户级运行态：`data/runtime/scheduler_user_state.json`
+- forensic 日志与 DLQ：`data/logs/`
+- 上传文件与视觉缓存：`data/inbox/`、`data/cache/image_cache/`
+
+## 迁移兼容
+
+`core/migration.py` 仍保留 `for_read(new, old)`：新路径缺失、为空或无法解析时回退旧路径，
+并记录命中次数和最近命中样本。当前仍可见的兼容读包括：
+
+- `event_log` 单日读取、scheduler 今日发言检查和 last-mentioned 搜索；
+- `event_log` 近 30 天 union 读；
+- `dream_settings` 从旧 `data/dreams/settings/{uid}.json` 回退。
+
+authored 静态内容另有 new-primary / old-fallback，但由 accessor 自己判断文件存在性，不走
+`for_read()`。其余 reality memory loader 已直接读取 `user_memory_root()` 下的新路径。
+
+因此不能把旧目录删除当作默认安全动作。清理前先确认 fallback 观测归零，并检查
+`tests/test_fallback_obs.py`、`tests/test_s56_layout_roundtrip.py`、`tests/test_event_log_union.py`。
 
 ## Never Prompt Load
 
-以下目录或文件默认不应进入现实 prompt/retrieve：
+以下路径默认不应直接进入现实 prompt/retrieve：
 
 | 路径 | 说明 |
 |---|---|
-| `data/debug/` | LLM 异常输出和调试样本 |
-| `data/logs/` | fixation、gating、trigger、dry-run 观测日志 |
-| `data/dead_letter_queue/` | 慢任务失败重试记录，只能由重试/管理逻辑读取 |
-| `data/archive/` | 人工归档，默认不参与现实 loader |
-| `data/dreams/archive/` | Dream Session 归档，默认不参与现实 loader |
-| `data/dreams/summaries/` | Dream Session 摘要，默认不参与现实 loader |
-| `data/personas/` | 当前未接入 loader，默认不参与现实 prompt |
-| `data/inbox/` | 上传文件落盘，只有解析后的用户消息进入对话 |
-| `data/image_cache/` | 图片描述缓存，不作为主动记忆源 |
+| `data/logs/` | forensic 日志和 DLQ |
+| `data/debug/` | 异常样本 |
+| `data/runtime/channel_queue.json` 等 | IPC 队列 |
+| `data/runtime/dreams/{char_id}/tmp/` | 活跃梦境原文 |
+| `data/runtime/dreams/{char_id}/archive/` | 梦境归档原文 |
+| `data/runtime/dreams/{char_id}/state/` | 梦境状态机 |
+| `data/runtime/dreams/{char_id}/settings/` | 用户梦境偏好 |
+| `data/inbox/` | 上传原始文件 |
+| `data/cache/image_cache/` | 图片描述缓存 |
 
-当前现实 loader 没有全量扫描 `data/` 的逻辑。`dreams/archive`、`dreams/summaries`、`personas` 默认不会被 `history`、`event_log`、`mid_term`、`episodic_memory`、`user_identity` 等现实记忆读取。
+注意：`core/tools/diary_reader.py` 会对配置的日记根目录按文件名递归查找。不要把日记根目录
+指向整个 `data/`，否则同名 `YYYY-MM-DD.md` 可能被误读。
 
-注意：`core/tools/diary_reader.py` 会对配置的日记根目录执行按文件名的递归查找。迁移时不要把它的根目录指向整个 `data/`，否则同名 `YYYY-MM-DD.md` 可能被误读成用户日记。
+## 新增路径规范
 
-## 迁移顺序
-
-建议按风险从低到高迁移：
-
-1. `runtime/` 与 `debug/`：通道队列、动作队列、调试输出、观测日志。先迁这些，验证路径入口和客户端 `data_prefix` 协议。
-2. `generated/` 与 `state/`：`inbox/`、`image_cache/`、花园、presence、activity、scheduler state 等。它们影响体验，但通常不是长期人格记忆主干。
-3. `config/`：`relations.yaml`、`blacklist.yaml`、`lorebook.yaml`、`jailbreak_entries.json`、`yexuan_traits.yaml`、activity pool 等。必须成对迁移 admin 写入端和 core 读取端。
-4. `memory/`：`history`、`event_log`、`mid_term`、`episodic_memory`、`user_identity`、`profiles`、`fixation_state`。这是现实 prompt 和固化链路主干，最后分批迁。
-5. `personas/`：等 registry、active persona、旧 `characters/`、`yexuan_inner/`、`character_growth/` 的映射边界明确后再接入。不要直接把中文角色名作为目录名。
-
-任何一步都应保持“先双读观测或只读影子验证，再切写入，再清理旧路径”的节奏；本阶段只记录目标，不启用迁移。
+1. 在 `core/data_paths.py` 增加 accessor，所有运行态 `data/` 路径都从 `get_paths()` 获取。
+2. 在 `core/data_registry.py::REGISTRY` 登记治理元数据；`tests/test_data_registry.py` 会自检。
+3. 明确 test sandbox 偏移、旧路径兼容和清理策略。
+4. 属于 retention 的路径同步登记 `RETENTION_POLICY`，并接入 `scheduler._check_log_maintenance()`。
+5. 更新本文和对应专题文档。

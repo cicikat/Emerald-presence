@@ -3,6 +3,8 @@
 > 审计日期：2026-05-19  
 > 范围：`D:\ai\Emerald-client`、`D:\ai\yexuan_memery`、`D:\ai\qq-st-bot`  
 > 说明：本文件只做文档级去重，不修复代码。若同一根因在多个仓库出现，合并成一个主 issue，并把其他记录列入“重复来源”。
+>
+> **2026-05-31 更新说明**：本文保留 2026-05-19 的审计快照，不作为当前事实清单。此后已落地 WebSocket query token 与 access log 脱敏、Emerald-client Rust 端本地配置读取、桌面动作分发、叙事分段 `message_segments` 和 Dream 正式界面。当前通道实现以 `docs/channels.md` 为准，仍待处理的问题以 `docs/known-issues.md` 为准。
 
 ## ISSUE-001：assistant turn 尚未完全统一出口
 

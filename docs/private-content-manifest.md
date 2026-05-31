@@ -76,8 +76,8 @@
 
 | 路径模式 | DataPaths 方法 | 说明 |
 |---------|---------------|------|
-| `data/dreams/{char_id}/settings/{uid}.json` | `dream_settings_path()` | 每用户的 dream 偏好设置 |
-| `data/user_identity/{uid}.yaml` | `user_identity_dir()` | 用户身份信息（手动或 LLM 积累） |
+| `data/runtime/dreams/{char_id}/settings/{uid}.json` | `dream_settings_path()` | 每用户的 dream 偏好设置 |
+| `data/runtime/memory/{char_id}/{uid}/identity.yaml` | `user_memory_root()` | 用户身份信息（手动或 LLM 积累） |
 | `data/diary_fallback/` | `diary_fallback()` | obsidian_path 未配置时的本地日记目录 |
 
 ---
@@ -86,15 +86,15 @@
 
 | 路径模式 | 说明 |
 |---------|------|
-| `data/history/`, `data/chars/*/history/` | 对话历史（丢=失忆，但属运行积累非配置） |
-| `data/mid_term/`, `data/episodic_memory/` | 记忆摘要（可从 history 重建索引） |
-| `data/memory_index/` | 向量索引（`_rebuild_index` 可重算） |
-| `data/characters/*/inner/` | 运行时角色状态（mood/activity/trait_state 等） |
-| `data/dreams/{char_id}/tmp/` | 进行中的梦（退出转 archive） |
-| `data/dreams/{char_id}/archive/` | 梦境归档（count-cap GC，不进 loader） |
+| `data/runtime/memory/{char_id}/{uid}/history.json` | 对话历史（丢=失忆，但属运行积累非配置） |
+| `data/runtime/memory/{char_id}/{uid}/{mid_term.json,episodic.json}` | 记忆摘要 |
+| `data/runtime/memory/{char_id}/{uid}/memory_index.json` | 情景记忆索引（可重算） |
+| `data/runtime/characters/{char_id}/inner/` | 运行时角色状态（mood/activity/trait_state 等） |
+| `data/runtime/dreams/{char_id}/tmp/` | 进行中的梦（退出转 archive） |
+| `data/runtime/dreams/{char_id}/archive/` | 梦境归档（count-cap GC，不进 loader） |
 | `data/logs/` | forensic 日志（可丢，不影响业务） |
-| `data/channel_queue.json` 等 | runtime IPC 文件（重启清） |
-| `data/image_cache/` | 视觉缓存（sha256，可重算） |
+| `data/runtime/channel_queue.json` 等 | runtime IPC 文件（重启清） |
+| `data/cache/image_cache/` | 视觉缓存（sha256，可重算） |
 | `data/inbox/` | 上传原始文件（解析后可删） |
 | `data/test_sandbox/` | 测试沙盒（cleanup() 清理） |
 

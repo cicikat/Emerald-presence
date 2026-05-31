@@ -29,7 +29,9 @@
 
 ## 数据文件
 
-路径统一走 `get_paths().garden()`，生产环境位于 `data/garden/`，测试模式会落到 `data/test_sandbox/{session}/garden/`。
+路径统一走 `get_paths().garden()`，生产环境位于
+`data/runtime/characters/{char_id}/garden/`，测试模式会整体偏移到
+`data/test_sandbox/{session}/runtime/characters/{char_id}/garden/`。
 
 | 文件 | 内容 |
 |---|---|
@@ -81,7 +83,9 @@ _check_garden_water()
       → water(slot_key, reason="auto")
 ```
 
-自动浇水本身不发言；只有开花时调用 `_pipeline_send(..., trigger_name="garden_bloom")`。
+自动浇水本身不发言；开花事件先进入短期事件缓存。当前 `EXECUTE_MODE="live"` 时由
+`propose_garden_bloom()` 报名，gating 选中后经统一 `execute_prompt()` 调用
+`_pipeline_send(..., trigger_name="garden_bloom")`。
 
 ### 被动浇水工具
 
@@ -135,5 +139,7 @@ _check_garden_water()
 ## 当前边界
 
 1. 写入目前使用普通 `Path.write_text()`，没有接入 `safe_write` 或锁；现在已有 `garden_water`、`garden_daily`、`water_garden` 三条写路径，后续最好补 garden 专用锁。
-2. `garden_bloom`、`garden_handle_*`、`garden_vase_wilted` 等名字在 `_COOLDOWNS` 中可见，但 `_pipeline_send()` 不会自动 check/mark 这些事件名；实际节流主要来自 `garden_water` / `garden_daily` 自身冷却和用户活跃窗口。
+2. `garden_bloom`、`garden_handle_*`、`garden_vase_wilted` 已有原生 proposer 和独立冷却；
+   事件进入缓存后由 gating 每 tick 最多选择一个，只有真实发送成功才 mark。`garden_water` /
+   `garden_daily` 扫描本体仍按原冷却执行状态变化。
 3. `ask` / `gift` / `dry` 分支会标记 `handle_triggered`，其中只有 `vase` 会从 `harvest` 移除；如果设计上“送给用户/做成干花”也应离开 harvest，需要补状态迁移。

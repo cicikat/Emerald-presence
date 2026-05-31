@@ -13,17 +13,18 @@
 - 启动入口：`main.py` → `main()` 调 `scheduler.start()`
 - 真实发送入口：`core/scheduler/loop.py` → `_pipeline_send()`
 - 状态机入口：`core/scheduler/state_machine.py` → `notify_owner_turn()` / `feed_sensor_tick()`
-- gating shadow：`core/scheduler/gating.py` → `run_shadow_tick()`
+- gating 决策：`core/scheduler/gating.py` → `run_shadow_tick()`（函数名保留 shadow，但当前 `EXECUTE_MODE="live"` 会执行 winner）
 
 **关键状态文件/日志**
-- `data/scheduler_state.json`
+- `data/scheduler_cooldowns.json`
+- `data/runtime/scheduler_user_state.json`
 - `data/logs/trigger_state.jsonl`
 - `data/logs/gating_shadow.jsonl`
 - `data/logs/execute_dryrun.jsonl`
 
 **已有测试或缺口**
 - 已有：`tests/test_state_machine.py`、`tests/test_gating.py`、`tests/test_native_proposals.py`、`tests/test_execute_dryrun.py`、`tests/test_rhythm.py`
-- 缺口：legacy `_check_*` 与 proposal live 接管并行时的端到端去重 / 回滚覆盖不足。
+- 缺口：Watch 仍有独立事件驱动 live 开关；维护型 legacy 扫描与 proposal 缓存的端到端覆盖仍可补强。
 
 **是否适合继续叠新功能**
 - 适合继续承载小型触发器，但应走 `proposer_registry.register_proposer()` + `execute_prompt()`。
@@ -31,7 +32,7 @@
 
 **最小补强**
 - 明确 `core/scheduler/execution.py` → `EXECUTE_MODE` 的配置来源和启动日志。
-- live 接管前补齐 legacy 真实路径关闭边界。
+- 为 Watch 独立开关、维护型扫描和 proposal 缓存补齐集成测试。
 
 ---
 
@@ -48,7 +49,8 @@
 **关键状态文件/日志**
 - `data/logs/execute_dryrun.jsonl`
 - `data/logs/gating_shadow.jsonl`
-- `data/scheduler_state.json`
+- `data/scheduler_cooldowns.json`
+- `data/runtime/scheduler_user_state.json`
 
 **已有测试或缺口**
 - 已有：`tests/test_execute_dryrun.py` 覆盖 dry/live、reminder mark、weather cache、gating live winner。
@@ -56,7 +58,7 @@
 
 **是否适合继续叠新功能**
 - 适合继续接入 dry-run 观测。
-- 不适合直接当最终统一执行层继续大叠，需等 live soak。
+- 可继续作为统一执行层承载小型迁移；新增发言型 trigger 不要再扩 legacy 即时发送路径。
 
 **最小补强**
 - `EXECUTE_MODE` 配置化。
@@ -75,7 +77,7 @@
 - proposal 缓存：`get_last_heart_rate_event()` / `get_last_sleep_end_event()`
 
 **关键状态文件/日志**
-- `data/profiles/{uid}.json`
+- `data/runtime/memory/{char_id}/{uid}/profile.json`
 - `_last_watch_data`、`_LAST_HEART_RATE_EVENT`、`_LAST_SLEEP_END_EVENT` 为内存状态。
 
 **已有测试或缺口**
@@ -102,20 +104,19 @@
 **关键状态文件/日志**
 - `characters/*.json`
 - `data/jailbreak_entries.json`
-- `data/activity_snapshot.json`
-- `data/yexuan_inner/mood_state.json`
-- `data/yexuan_inner/diary/*.md`
+- `data/runtime/characters/{char_id}/inner/activity_snapshot.json`
+- `data/runtime/characters/{char_id}/inner/mood_state.json`
+- `data/runtime/characters/{char_id}/inner/diary/*.md`
 - logger：`prompt_builder.token`、`prompt_builder.debug`
 
 **已有测试或缺口**
 - 已有：`tests/run_eval.py`、`tests/test_short_term.py`、`tests/test_short_term_weighting.py`
-- 缺口：`core/prompt_builder.py` 仍有 `Path("data/jailbreak_entries.json")` 绕过 sandbox；`_layer` 元数据仍需核对是否会透传 LLM。
+- 缺口：`_layer` 元数据仍需核对是否会透传 LLM。
 
 **是否适合继续叠新功能**
 - 适合叠小 prompt 层；必须加 `_layer` 并检查裁剪顺序。
 
 **最小补强**
-- jailbreak 路径迁到 `get_paths()`。
 - 核对并处理 `_layer` 透传。
 
 ---
@@ -136,15 +137,15 @@
 - 事件流水：`core/memory/event_log.py` → `append()` / `search()`
 
 **关键状态文件/日志**
-- `data/history/{uid}.json`
-- `data/event_log/{uid}/{date}.md`
-- `data/mid_term/{uid}.json`
-- `data/episodic_memory/{uid}.json`
-- `data/memory_index/{uid}.json`
-- `data/user_identity/{uid}.yaml`
-- `data/fixation_state/{uid}.json`
+- `data/runtime/memory/{char_id}/{uid}/history.json`
+- `data/runtime/memory/{char_id}/{uid}/event_log/{date}.md`
+- `data/runtime/memory/{char_id}/{uid}/mid_term.json`
+- `data/runtime/memory/{char_id}/{uid}/episodic.json`
+- `data/runtime/memory/{char_id}/{uid}/memory_index.json`
+- `data/runtime/memory/{char_id}/{uid}/identity.yaml`
+- `data/runtime/memory/{char_id}/{uid}/fixation_state.json`
 - `data/logs/fixation.jsonl`
-- `data/dead_letter_queue/*.json`
+- `data/logs/dead_letter_queue/*.json`
 
 **已有测试或缺口**
 - 已有：`tests/test_fixation_pipeline.py`、`tests/test_post_process_ordering.py`、`tests/test_slow_queue.py`、`tests/test_short_term.py`、`tests/test_short_term_weighting.py`
@@ -171,16 +172,17 @@
 - 统一下行：`core/turn_sink.py` → `record_assistant_turn()`
 - 通道广播：`channels/registry.py` → `broadcast()`
 - 桌宠 WS：`channels/desktop_ws.py` → `handle_connection()` / `push_message()` / `push_action_and_wait()`
+- 桌面叙事展示视图：`core/narrative_parser.py` → `parse_narrative_segments()`；`turn_sink` 额外推 `message_segments`
 
 **关键状态文件/日志**
-- `data/channel_queue.json`
-- `data/mobile_queue.json`
-- `data/agent_actions.json`
-- `data/pending_perception/`
+- `data/runtime/channel_queue.json`
+- `data/runtime/mobile_queue.json`
+- `data/runtime/agent_actions.json`
+- `data/runtime/pending_perception/`
 
 **已有测试或缺口**
 - 已有：`tests/test_turn_sink.py`
-- 缺口：`DesktopChannel` / `MobileChannel` 文件队列并发与损坏恢复测试不足；QQ 主入口仍是 legacy 直发。
+- 缺口：`DesktopChannel` / `MobileChannel` 文件队列并发与损坏恢复测试不足；QQ 主入口仍是 legacy 直发；`message_segments` 目前只覆盖桌面 WS。
 
 **是否适合继续叠新功能**
 - 适合承载 mobile/desktop 主动消息。
@@ -205,10 +207,10 @@
 - sensor 主动出口：`core/scheduler/triggers/sensor_aware.py` → `handle_tick()`
 
 **关键状态文件/日志**
-- `data/agent_actions.json`
-- `data/pending_perception/`
-- `data/activity_snapshot.json`
-- `data/profiles/{uid}.json`
+- `data/runtime/agent_actions.json`
+- `data/runtime/pending_perception/`
+- `data/runtime/characters/{char_id}/inner/activity_snapshot.json`
+- `data/runtime/memory/{char_id}/{uid}/profile.json`
 - sensor realtime 与 audit ring buffer 主要是内存。
 
 **已有测试或缺口**
@@ -238,11 +240,11 @@
 - 日记上下文：`core/memory/diary_context.py` → `save()` / `load()`
 
 **关键状态文件/日志**
-- `data/garden/plants.json`
-- `data/garden/storage.json`
-- `data/yexuan_inner/mood_state.json`
-- `data/yexuan_inner/diary/*.md`
-- `data/diary_context/{uid}.txt`
+- `data/runtime/characters/{char_id}/garden/plants.json`
+- `data/runtime/characters/{char_id}/garden/storage.json`
+- `data/runtime/characters/{char_id}/inner/mood_state.json`
+- `data/runtime/characters/{char_id}/inner/diary/*.md`
+- `data/runtime/memory/{char_id}/{uid}/diary_context.txt`
 
 **已有测试或缺口**
 - 已有：`tests/test_native_proposals.py` 覆盖 garden proposal。

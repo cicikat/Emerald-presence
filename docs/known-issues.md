@@ -280,3 +280,8 @@ identity 缺未跟进话题
 当前不处理
 
 Dream 输出协议设计
+
+SEC-LOG-001：WebSocket token 出现在 access log query string
+原因：token 通过 ?token= 传递，uvicorn access log 会打印完整 path
+短期：本地可接受，但截图/发帖要打码
+中期：改成 header / subprotocol / 首包鉴权，或给 access log 做 query redaction

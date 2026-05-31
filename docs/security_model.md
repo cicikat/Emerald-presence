@@ -29,8 +29,9 @@ mobile 路由依赖 `verify_token()`。
 
 ### 路径与测试沙盒
 
-运行态 data 路径应通过 `core/sandbox.get_paths()` 获取。`mode=test` 时，路径前缀切到
-`data/test_sandbox/{session}/`，并把 `data_prefix` 写入 `config.yaml` 供桌宠端读取。
+运行态 data 路径应通过 `core/sandbox.get_paths()` 获取。`core/sandbox.py` 只是单例胶水，
+实际路径实现位于 `core/data_paths.py`，治理登记位于 `core/data_registry.py`。`mode=test` 时，
+路径前缀切到 `data/test_sandbox/{session}/`，并把 `data_prefix` 写入 `config.yaml` 供桌宠端读取。
 
 `core/safe_write.py` 提供：
 - `safe_write_text/json/bytes()`：写临时文件后 replace
@@ -67,13 +68,18 @@ LLM client 在无显式 proxy 时使用 `trust_env=False`，网易云搜索的 a
 - `POST /desktop/activate`
 - `POST /desktop/deactivate`
 - `POST /upload/ingest`
-- `ws://127.0.0.1:8080/ws/desktop`
 
 这符合本地桌宠接入的便利性，但如果服务绑定到非本机地址，风险会立刻升高：伪造客户端可以写入真实对话、触发 QQ 回复、上传内容、激活通道或接收桌面广播。
 
-### WebSocket 客户端身份未校验
+### WebSocket query token 仍是过渡方案
 
-`channels/desktop_ws.py` 当前是单连接替换模型：新连接会关闭旧连接。没有 token、设备 id、origin 校验或会话超时策略。伪造连接可以抢占桌宠通道，并接收 `channel_message` / `action`。
+`ws://127.0.0.1:8080/ws/desktop?token=<admin.secret_key>` 已在路由层校验 token，失败时关闭
+code `1008`。但当前仍是单连接替换模型，没有设备 id、origin 校验或配对机制；拿到 token
+的伪造连接仍可抢占桌宠通道，并接收 `channel_message` / `message_segments` / `action`。
+
+token 放在 query string 里有泄漏风险。`admin/log_filter.py` 已给 `uvicorn.access` 安装
+query redaction，隐藏 `token=` / `secret=` 值；截图、代理日志、浏览器调试信息和其他日志链路
+仍应视为敏感。
 
 ### sandbox 不是安全沙箱
 
@@ -93,16 +99,11 @@ LLM client 在无显式 proxy 时使用 `trust_env=False`，网易云搜索的 a
 
 默认不要导出、分享或打包：
 
-- `data/history/`
-- `data/event_log/`
-- `data/mid_term/`
-- `data/episodic_memory/`
-- `data/user_identity/`
-- `data/character_growth/`
-- `data/dreams/`
-- `data/profiles/`
-- `data/diary_context/`
-- `data/yexuan_inner/mood_state.json`
+- `data/runtime/memory/`
+- `data/runtime/characters/{char_id}/character_growth/`
+- `data/runtime/characters/{char_id}/inner/mood_state.json`
+- `data/runtime/dreams/`
+- `data/diary_fallback/`
 - 用户日记、Watch/传感器数据、API keys、`config.yaml`
 
 默认可以考虑导出：
@@ -123,7 +124,7 @@ LLM client 在无显式 proxy 时使用 `trust_env=False`，网易云搜索的 a
 3. 路径穿越检查和嵌套压缩包拒绝
 4. 插件目录隔离，禁止插件直接写 memory / queue / system path
 5. 工具权限 manifest，危险能力必须用户确认
-6. WebSocket / mobile / desktop 本地 token 或配对机制
+6. WebSocket / mobile / desktop 配对机制；WebSocket query token 迁移到更稳妥的握手方式
 7. 导出清单，默认排除所有私人记忆和密钥
 
 推荐演进顺序：
@@ -138,4 +139,4 @@ Lv3：带权限 manifest 的插件系统
 
 ## 当前结论
 
-当前安全模型适合“单用户、本机、可信客户端”的开发阶段。真正的风险不是核心 pipeline，而是把无鉴权本地入口、社区资源和插件能力暴露到不可信环境。准备开放生态前，优先补 WS/mobile/desktop 身份校验、导入导出白名单、统一 source/privacy 策略。
+当前安全模型适合“单用户、本机、可信客户端”的开发阶段。真正的风险不是核心 pipeline，而是把无鉴权本地入口、query token、社区资源和插件能力暴露到不可信环境。准备开放生态前，优先补 WS/mobile/desktop 配对、导入导出白名单、统一 source/privacy 策略。
