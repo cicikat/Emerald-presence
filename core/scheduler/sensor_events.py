@@ -12,6 +12,7 @@ from typing import Optional
 
 from core.memory import realtime_state
 from core import activity_manager
+from core.scheduler.rhythm import is_quiet_sleep_time
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ _last_app: Optional[str] = None
 _last_app_category: Optional[str] = None
 _last_chat_at: Optional[float] = None
 _last_proactive_at: Optional[float] = None
+_last_presence_was_sleep_guarded: bool = False
 _focus_window_in_app_started_at: Optional[float] = None
 _focus_window_in_app_name: Optional[str] = None
 _recent_switch_events: list[float] = []   # 各次切换的 unix 时间戳
@@ -110,38 +112,58 @@ def _set_cooldown(event_type: str) -> None:
 
 
 def _build_context(snap: dict, presence: str) -> dict:
+    from core.scheduler.presence_model import derive_presence_state
     now = time.time()
+    idle_secs    = snap.get("input", {}).get("idle_seconds", 0)
+    at_desk_secs = realtime_state.get_continuous_at_desk_seconds()
+
+    # away_since: use _last_presence_changed_at only when user was already absent
+    # (if they just left this tick, _last_presence is still "active" → away_since=None,
+    # which conservatively maps to BRIEFLY_AWAY rather than GENUINELY_ABSENT)
+    away_since = _last_presence_changed_at if _last_presence in ("idle", "away") else None
+
+    ps = derive_presence_state(
+        idle_seconds=idle_secs,
+        continuous_at_desk_seconds=at_desk_secs,
+        last_chat_at=_last_chat_at,
+        last_proactive_at=_last_proactive_at,
+        now=now,
+        away_since=away_since,
+    )
+
     try:
         ye_xuan_activity = activity_manager.get_current().get("current", "")
     except Exception:
         ye_xuan_activity = ""
     screen = snap.get("screen", {}) or {}
-    visible_text = screen.get("visible_text", []) or []
+    visible_text   = screen.get("visible_text", []) or []
     clickable_text = screen.get("clickable_text", []) or []
-    screen_text_hint = "；".join(str(x) for x in visible_text[:8] if str(x).strip())
+    screen_text_hint  = "；".join(str(x) for x in visible_text[:8]   if str(x).strip())
     screen_click_hint = "；".join(str(x) for x in clickable_text[:8] if str(x).strip())
-    focus = snap.get("focus", {}) or {}
+    focus     = snap.get("focus", {}) or {}
     focus_app = focus.get("app", "") or screen.get("package_name", "")
     title_hint = focus.get("title_hint", "") or screen.get("window_title", "")
     return {
-        "minutes_since_last_proactive": (
-            round((now - _last_proactive_at) / 60) if _last_proactive_at else None
-        ),
-        "minutes_since_last_chat": (
-            round((now - _last_chat_at) / 60) if _last_chat_at else None
-        ),
-        "local_hour":                 datetime.now().hour,
-        "presence":                   presence,
-        "focus_app":                  focus_app,
-        "focus_title_hint":           title_hint,
-        "screen_package":             screen.get("package_name", ""),
-        "screen_app_label":           screen.get("app_label", ""),
-        "screen_window_title":        screen.get("window_title", ""),
-        "screen_text_hint":           screen_text_hint[:300],
-        "screen_click_hint":          screen_click_hint[:240],
-        "continuous_at_desk_seconds": realtime_state.get_continuous_at_desk_seconds(),
-        "keystroke_density":          _keystroke_density(snap),
-        "ye_xuan_activity":           ye_xuan_activity,
+        # ── Semantic presence layer (P1) ─────────────────────────────────────
+        "presence_state":       ps,
+        "presence_attribution": ps.attribution.value,
+        "presence_summary":     ps.state_summary,
+        # ── Deprecated raw fields (kept for compatibility, do not use in new templates) ──
+        "minutes_since_last_proactive": ps.proactive_gap_min,
+        "minutes_since_last_chat":      ps.conversational_gap_min,
+        "presence":                     presence,
+        "continuous_at_desk_seconds":   at_desk_secs,
+        # ── Other context fields ─────────────────────────────────────────────
+        "local_hour":          datetime.now().hour,
+        "focus_app":           focus_app,
+        "focus_title_hint":    title_hint,
+        "screen_package":      screen.get("package_name", ""),
+        "screen_app_label":    screen.get("app_label", ""),
+        "screen_window_title": screen.get("window_title", ""),
+        "screen_text_hint":    screen_text_hint[:300],
+        "screen_click_hint":   screen_click_hint[:240],
+        "keystroke_density":   _keystroke_density(snap),
+        "ye_xuan_activity":    ye_xuan_activity,
     }
 
 
@@ -182,6 +204,7 @@ def tick() -> list[dict]:
     global _last_app, _last_app_category
     global _focus_window_in_app_started_at, _focus_window_in_app_name
     global _recent_switch_events
+    global _last_presence_was_sleep_guarded
 
     snap = realtime_state.get()
     if snap is None:
@@ -191,8 +214,20 @@ def tick() -> list[dict]:
     if now - snap.get("received_at", 0) > 90:
         return []
 
+    presence  = realtime_state.get_presence()
+    idle_secs = snap.get("input", {}).get("idle_seconds", 0)
+
+    # ── Sleep guard: 23:00–08:00 + idle≥300s → suppress all events ──────────
+    # Prevents "离开/回来/几百分钟没理" during likely sleep. Still maintains
+    # _last_presence state so the first post-sleep tick doesn't burst events.
+    if is_quiet_sleep_time() and idle_secs >= realtime_state.IDLE_LEFT_THRESHOLD:
+        if _last_presence is None or presence != _last_presence:
+            _last_presence = presence
+            _last_presence_changed_at = now
+        _last_presence_was_sleep_guarded = True
+        return []
+
     events: list[dict] = []
-    presence     = realtime_state.get_presence()
     focus        = snap.get("focus", {})
     screen       = snap.get("screen", {}) or {}
     focus_app    = focus.get("app", "") or screen.get("package_name", "")
@@ -224,10 +259,12 @@ def tick() -> list[dict]:
             })
 
         # idle/away 持续 ≥5min 后变 active
+        # Skip if the idle period was sleep-guarded to avoid "离开了 420 分钟"
         if (
             _last_presence in ("idle", "away")
             and presence == "active"
             and prev_duration >= 5 * 60
+            and not _last_presence_was_sleep_guarded
             and not _in_cooldown(PRESENCE_RETURNED)
         ):
             minutes_away = round(prev_duration / 60)
@@ -240,6 +277,7 @@ def tick() -> list[dict]:
 
         _last_presence = presence
         _last_presence_changed_at = now
+        _last_presence_was_sleep_guarded = False
 
     # ── 3. LONG_FOCUS 时间窗口维护 ────────────────────────────────────────────
     if focus_app:

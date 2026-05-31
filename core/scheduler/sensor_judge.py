@@ -62,9 +62,9 @@ _SYSTEM = (
     "- 61-80：有意义的瞬间，适合开口\n"
     "- 81-100：几乎一定该说点什么\n\n"
     "重要倾向（以下情况应扣分）：\n"
-    "- 距上次对话或主动开口很近（<10 分钟）\n"
+    "- 用户状态为「刚刚还在交流」时（刚刚说过话，不必主动）\n"
+    "- 用户状态表明正在专注做事（打扰成本高）\n"
     "- 同类事件刚刚出现过\n"
-    "- 用户正在深度专注，打扰成本高\n"
     "- 深夜时段，除非事件本身就跟「该休息」相关\n"
     "- 事件描述非常普通，缺乏开口契机\n\n"
     "只输出 JSON，不要 markdown，不要任何其他文字：\n"
@@ -76,15 +76,12 @@ _USER_TEMPLATE = """\
 {event_narrative}
 
 【上下文】
-- 距上次有人主动开口：{minutes_since_last_proactive} 分钟
-- 距上次对话：{minutes_since_last_chat} 分钟
 - 现在是本地时间 {local_hour} 点
-- 用户在线状态：{presence}
+- 用户状态：{presence_summary}
 - 用户当前应用：{focus_app}
 - 用户当前在做什么：{focus_title_hint}
 - 手机屏幕文本摘要：{screen_text_hint}
 - 手机可点击项摘要：{screen_click_hint}
-- 用户已连续在桌前：{continuous_at_desk_human}
 - 用户键击密度：{keystroke_density}\
 """
 
@@ -104,18 +101,28 @@ async def judge(event: dict) -> dict:
     narrative  = event.get("narrative", "")
     ctx        = event.get("context", {})
 
-    at_desk_secs = int(ctx.get("continuous_at_desk_seconds") or 0)
+    # Use the semantic presence_summary from the derived PresenceState.
+    # Falls back gracefully if ctx comes from an older code path.
+    presence_summary = ctx.get("presence_summary") or ""
+    if not presence_summary:
+        ps_obj = ctx.get("presence_state")
+        if ps_obj is not None:
+            presence_summary = getattr(ps_obj, "state_summary", "") or ""
+    if not presence_summary:
+        from core.scheduler.rhythm import is_quiet_sleep_time
+        if is_quiet_sleep_time():
+            presence_summary = "睡眠保护中，不应主动打扰"
+        else:
+            presence_summary = ctx.get("presence", "unknown")
+
     user_text = _USER_TEMPLATE.format(
         event_narrative=narrative,
-        minutes_since_last_proactive=_fmt_minutes(ctx.get("minutes_since_last_proactive")),
-        minutes_since_last_chat=_fmt_minutes(ctx.get("minutes_since_last_chat")),
         local_hour=ctx.get("local_hour", "?"),
-        presence=ctx.get("presence", "unknown"),
+        presence_summary=presence_summary,
         focus_app=ctx.get("focus_app", ""),
         focus_title_hint=ctx.get("focus_title_hint", ""),
         screen_text_hint=ctx.get("screen_text_hint", ""),
         screen_click_hint=ctx.get("screen_click_hint", ""),
-        continuous_at_desk_human=_at_desk_human(at_desk_secs),
         keystroke_density=ctx.get("keystroke_density", "未知"),
     )
 

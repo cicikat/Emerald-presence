@@ -126,6 +126,30 @@ def _presence_phrase(presence: str) -> str:
     return "已经离开很久"
 
 
+def _presence_narrative(ctx: dict) -> str:
+    """
+    Return an attribution-aware presence phrase for LLM situation narratives.
+
+    Uses PresenceState.attribution to select the correct semantic framing:
+    - FOCUSED_SILENT → "专注做事" (never "没理我/冷落")
+    - SLEEPING        → "" (caller should suppress presence line entirely)
+    - GENUINELY_ABSENT is the only attribution where absence semantics apply
+    Falls back to _presence_phrase() when new context fields are absent.
+    """
+    from core.scheduler.presence_model import Attribution
+
+    attribution = ctx.get("presence_attribution", "")
+    summary     = ctx.get("presence_summary", "")
+
+    if not attribution:
+        return _presence_phrase(ctx.get("presence", "unknown"))
+
+    if attribution == Attribution.SLEEPING.value:
+        return ""
+
+    return summary or _presence_phrase(ctx.get("presence", "unknown"))
+
+
 # ── BehaviorPlanner（纯硬代码，模块级函数）──────────────────────────────────
 
 def _resolve_level_and_id(event_type: str, score: int) -> tuple[str, str]:
@@ -227,15 +251,12 @@ def build_situation_narrative(behavior: dict) -> str:
     narrative = behavior["narrative"]
 
     local_hour   = int(ctx.get("local_hour", datetime.now().hour))
-    presence     = ctx.get("presence", "unknown")
     focus_app    = ctx.get("focus_app", "")
     title_hint   = ctx.get("focus_title_hint", "")
     at_desk_secs = int(ctx.get("continuous_at_desk_seconds") or 0)
-    minutes_chat = ctx.get("minutes_since_last_chat")
 
     time_str     = _time_phrase(local_hour)
-    presence_str = _presence_phrase(presence)
-    chat_str     = _chat_phrase(minutes_chat)
+    presence_str = _presence_narrative(ctx)  # attribution-aware, never "没理我"
     at_desk_str  = _at_desk_phrase(at_desk_secs)
 
     if focus_app and title_hint:
@@ -245,16 +266,18 @@ def build_situation_narrative(behavior: dict) -> str:
     else:
         focus_str = ""
 
-    state_parts = [f"她{presence_str}"]
+    state_parts = []
+    if presence_str:
+        state_parts.append(presence_str)
     if focus_str:
         state_parts.append(focus_str)
-    state_line = "，".join(state_parts)
+    state_line = "，".join(state_parts) if state_parts else "她的状态未知"
 
     opener = _LEVEL_OPENERS.get(level, "（{char}想说点什么。").format(char=char)
 
     return (
         f"{opener}现在是{time_str}，{state_line}，\n"
-        f"已经{at_desk_str}了。上次跟他说话是{chat_str}。{narrative}）"
+        f"已经{at_desk_str}了。{narrative}）"
     )
 
 
