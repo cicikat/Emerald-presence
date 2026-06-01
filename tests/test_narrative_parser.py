@@ -36,15 +36,17 @@ def _all_text(result):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_plain_text_single_narration_segment():
+    # Markdown 路径下纯文本视为 say（对白），内容不丢
     r = parse_narrative_segments("hello world")
-    assert _types(r) == ["narration"]
+    assert len(r["segments"]) == 1
     assert r["segments"][0]["text"] == "hello world"
     assert r["content"] == "hello world"
 
 
 def test_plain_text_chinese():
+    # Markdown 路径下纯文本视为 say（对白）
     r = parse_narrative_segments("她低着头，沉默了很久。")
-    assert _types(r) == ["narration"]
+    assert len(r["segments"]) == 1
     assert r["content"] == "她低着头，沉默了很久。"
 
 
@@ -261,3 +263,159 @@ def test_multiline_reply():
     assert "narration" in types
     assert "say" in types
     assert "feel" in types
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 2A — Chat 模式最小验收（prompt 指令 + parser 联通）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_phase2a_say_only_valid():
+    """用户说"你好" → 模型可仅输出 <say>你好。</say>"""
+    r = parse_narrative_segments("<say>你好。</say>")
+    assert r["segments"] == [{"type": "say", "text": "你好。"}]
+
+
+def test_phase2a_do_plus_say_valid():
+    """可观察动作 + 对白组合合法"""
+    r = parse_narrative_segments("<do>他轻轻点头。</do> <say>早安。</say>")
+    assert _types(r) == ["do", "say"]
+    assert r["segments"][0]["text"] == "他轻轻点头。"
+    assert r["segments"][1]["text"] == "早安。"
+
+
+def test_phase2a_natural_language_valid():
+    """Markdown 路径下自然语言输出解析为 say（对白），内容不丢"""
+    r = parse_narrative_segments("早安。")
+    assert len(r["segments"]) == 1
+    assert r["segments"][0]["text"] == "早安。"
+    assert r["content"] == "早安。"
+
+
+def test_phase2a_chat_style_instruction_in_prompt():
+    """chat 风格指令使用 Markdown 格式（*do*），不再使用 XML <say>/<do> 标签。"""
+    import pathlib
+    src = pathlib.Path("core/prompt_builder.py").read_text(encoding="utf-8")
+    assert '"chat":' in src or "'chat':" in src
+
+    chat_block_start = src.find('"chat": (')
+    chat_block_end = src.find("),", chat_block_start)
+    chat_instruction = src[chat_block_start:chat_block_end]
+
+    # 应包含 Markdown 动作格式说明（单星号）
+    assert "*" in chat_instruction, "chat 指令应包含 Markdown *动作* 格式说明"
+    # 不应再使用 XML 标签作为格式指引
+    assert "<say>" not in chat_instruction, "chat 指令不应使用 XML <say> 标签"
+    assert "<do>" not in chat_instruction, "chat 指令不应使用 XML <do> 标签"
+    # <env>/<feel> 仍不应在 chat 指令中被推荐
+    assert "优先用 <env>" not in chat_instruction
+    assert "可以用 <env>" not in chat_instruction
+    assert "优先用 <feel>" not in chat_instruction
+    assert "可以用 <feel>" not in chat_instruction
+    assert "严禁出现任何动作描写" not in chat_instruction
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Markdown 协议 — Phase 1B（新格式兼容）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_md_do_asterisk_single_line():
+    r = parse_narrative_segments("*他低下头，轻轻碰了碰你的额头。*")
+    assert _types(r) == ["do"]
+    assert r["segments"][0]["text"] == "他低下头，轻轻碰了碰你的额头。"
+
+
+def test_md_do_not_bold():
+    """**text** 不应被识别为 do。"""
+    r = parse_narrative_segments("**加粗文字**")
+    assert all(s["type"] != "do" for s in r["segments"])
+
+
+def test_md_feel_underscore():
+    r = parse_narrative_segments("_他忽然觉得心口很安静。_")
+    assert _types(r) == ["feel"]
+    assert r["segments"][0]["text"] == "他忽然觉得心口很安静。"
+
+
+def test_md_feel_not_double_underscore():
+    """__text__ 不应被识别为 feel。"""
+    r = parse_narrative_segments("__下划线__")
+    assert all(s["type"] != "feel" for s in r["segments"])
+
+
+def test_md_env_blockquote():
+    r = parse_narrative_segments("> 夜色很低，窗外的风声轻轻压下来。")
+    assert _types(r) == ["env"]
+    assert r["segments"][0]["text"] == "夜色很低，窗外的风声轻轻压下来。"
+
+
+def test_md_plain_text_is_say():
+    r = parse_narrative_segments("你还好吗？")
+    assert _types(r) == ["say"]
+    assert r["segments"][0]["text"] == "你还好吗？"
+
+
+def test_md_mixed_all_types():
+    reply = "*他走近，低下头。*\n你还好吗？\n_他忽然觉得这一刻很安静。_\n> 窗外的风声轻轻压下来。"
+    r = parse_narrative_segments(reply)
+    assert _types(r) == ["do", "say", "feel", "env"]
+
+
+def test_md_multiline_say_accumulated():
+    """连续普通文本行合并为一个 say segment。"""
+    reply = "你还好吗？\n这几天怎么样。"
+    r = parse_narrative_segments(reply)
+    assert len(r["segments"]) == 1
+    assert r["segments"][0]["type"] == "say"
+    assert "你还好吗？" in r["segments"][0]["text"]
+    assert "这几天怎么样。" in r["segments"][0]["text"]
+
+
+def test_md_empty_line_flushes_say():
+    """空行分隔两段对白，产生两个 say segments。"""
+    reply = "第一句。\n\n第二句。"
+    r = parse_narrative_segments(reply)
+    say_segs = [s for s in r["segments"] if s["type"] == "say"]
+    assert len(say_segs) == 2
+
+
+def test_md_inline_asterisk_not_do():
+    """行内 *强调* 不独占整行，不应被识别为 do。"""
+    r = parse_narrative_segments("他说，*悄悄地*，我不知道。")
+    assert all(s["type"] != "do" for s in r["segments"])
+
+
+def test_md_inline_underscore_not_feel():
+    """行内 _下划线_ 不独占整行，不应被识别为 feel。"""
+    r = parse_narrative_segments("变量_name_here")
+    assert all(s["type"] != "feel" for s in r["segments"])
+
+
+def test_md_content_strips_markers():
+    reply = "*他走近。*\n你好。\n_心里平静。_\n> 风声。"
+    r = parse_narrative_segments(reply)
+    assert "他走近。" in r["content"]
+    assert "你好。" in r["content"]
+    assert "心里平静。" in r["content"]
+    assert "风声。" in r["content"]
+    assert "*" not in r["content"]
+    assert "_" not in r["content"]
+
+
+def test_md_old_xml_still_works():
+    """旧 XML 格式继续正常解析，不受 Markdown 路径影响。"""
+    r = parse_narrative_segments("<say>你好</say><do>动作</do>")
+    assert _types(r) == ["say", "do"]
+    assert r["segments"][0]["text"] == "你好"
+    assert r["segments"][1]["text"] == "动作"
+
+
+def test_md_empty_asterisks_no_segment():
+    """** 中间为空，不产生 do 段落。"""
+    r = parse_narrative_segments("**")
+    assert all(s["type"] != "do" for s in r["segments"])
+
+
+def test_md_empty_string_no_segments():
+    r = parse_narrative_segments("")
+    assert r["segments"] == []
+    assert r["content"] == ""

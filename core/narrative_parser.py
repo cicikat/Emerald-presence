@@ -1,19 +1,20 @@
 """
-core/narrative_parser — Emerald Narrative Message Protocol Phase 1 parser.
+core/narrative_parser — Emerald Narrative Message Protocol parser.
 
-Parses an LLM reply into typed narrative segments without touching the
-original reply string.  The raw reply is the source of truth for all
-archive / history / event_log chains; segments are a read-only view.
+Supports two output formats:
+  XML      : <say>…</say>  <do>…</do>  <env>…</env>  <feel>…</feel>
+  Markdown : plain text (say), *action* (do), _feel_ (feel), > env (env)
 
-Supported protocol tags: <say>, <do>, <env>, <feel>
-Any other tag-like token is treated as literal narration text so no
-content is ever lost.
+Format is auto-detected per reply: the XML path is taken when any known
+open-tag is present; otherwise the Markdown path applies.  Both paths
+return the same NarrativeParseResult shape and never raise (fallback:
+single narration segment with the full reply).
 
 Usage::
 
     from core.narrative_parser import parse_narrative_segments
     result = parse_narrative_segments(reply)
-    # result["content"]  — tag-markup stripped plain text
+    # result["content"]  — marker-stripped plain text
     # result["segments"] — list of {"type": ..., "text": ...}
 
 This module intentionally has zero imports from dreams/, impression_loader,
@@ -25,10 +26,21 @@ from typing import TypedDict
 
 KNOWN_TAGS: frozenset[str] = frozenset({"say", "do", "env", "feel"})
 
+# ── XML path ─────────────────────────────────────────────────────────────────
 # Matches any XML-like open or close token: <word> or </word>
 _TAG_TOKEN_RE = re.compile(r"<(/?)([\w]+)>")
 # Strips all XML-like tag markers for building the clean content string
 _ALL_TAG_RE = re.compile(r"</?[a-zA-Z]\w*>")
+# Detects presence of at least one known XML open-tag → selects XML path
+_HAS_XML_RE = re.compile(r"<(?:say|do|env|feel)>")
+
+# ── Markdown path ─────────────────────────────────────────────────────────────
+# *action*   single asterisk, no internal asterisks, whole line
+_MD_DO_RE = re.compile(r"^\*([^*]+)\*$")
+# _feel_     single underscore, no internal underscores, whole line
+_MD_FEEL_RE = re.compile(r"^_([^_]+)_$")
+# > env      blockquote prefix
+_MD_ENV_RE = re.compile(r"^> (.+)$")
 
 
 class NarrativeSegment(TypedDict):
@@ -37,7 +49,7 @@ class NarrativeSegment(TypedDict):
 
 
 class NarrativeParseResult(TypedDict):
-    content: str   # tag-markup stripped plain text
+    content: str   # marker-stripped plain text
     segments: list  # list[NarrativeSegment]
 
 
@@ -59,6 +71,13 @@ def parse_narrative_segments(reply: str) -> NarrativeParseResult:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _parse(reply: str) -> NarrativeParseResult:
+    if _HAS_XML_RE.search(reply):
+        return _parse_xml(reply)
+    return _parse_markdown(reply)
+
+
+def _parse_xml(reply: str) -> NarrativeParseResult:
+    """Parse legacy XML-tag format.  Kept intact for backward compatibility."""
     # Phase 1: tokenise
     # Each token is ("text"|"open_known"|"close_known", value)
     # Unknown tags are kept as literal "text" tokens so content is never lost.
@@ -117,6 +136,66 @@ def _parse(reply: str) -> NarrativeParseResult:
 
     # Phase 3: build clean content string
     content = _ALL_TAG_RE.sub("", reply).strip()
+    content = re.sub(r"\n{3,}", "\n\n", content)
+    content = re.sub(r" {2,}", " ", content)
+
+    return {"content": content, "segments": segments}
+
+
+def _parse_markdown(reply: str) -> NarrativeParseResult:
+    """
+    Parse Markdown-format reply (triggered when no known XML tag detected).
+
+    Line-level classification (single-line markers only):
+      *text*  → do    (no internal asterisks; whole line)
+      _text_  → feel  (no internal underscores; whole line)
+      > text  → env
+      other   → say   (plain speech; accumulated across consecutive lines)
+
+    Empty lines flush the current say buffer without creating a segment.
+    """
+    segments: list[NarrativeSegment] = []
+    say_lines: list[str] = []
+
+    def _flush_say() -> None:
+        text = "\n".join(say_lines).strip()
+        say_lines.clear()
+        if text:
+            segments.append({"type": "say", "text": text})
+
+    for line in reply.split("\n"):
+        stripped = line.strip()
+
+        if not stripped:
+            _flush_say()
+            continue
+
+        m_do = _MD_DO_RE.match(stripped)
+        m_feel = _MD_FEEL_RE.match(stripped)
+        m_env = _MD_ENV_RE.match(stripped)
+
+        if m_do:
+            _flush_say()
+            text = m_do.group(1).strip()
+            if text:
+                segments.append({"type": "do", "text": text})
+        elif m_feel:
+            _flush_say()
+            text = m_feel.group(1).strip()
+            if text:
+                segments.append({"type": "feel", "text": text})
+        elif m_env:
+            _flush_say()
+            text = m_env.group(1).strip()
+            if text:
+                segments.append({"type": "env", "text": text})
+        else:
+            say_lines.append(line)
+
+    _flush_say()
+
+    # Build clean content from segment texts (markers already stripped)
+    content = "\n".join(s["text"] for s in segments).strip()
     content = re.sub(r"\n{3,}", "\n\n", content)
     content = re.sub(r" {2,}", " ", content)
 
