@@ -67,7 +67,7 @@ class LoreEntry(BaseModel):
 
 @router.get("/lorebook", summary="获取所有世界书条目")
 async def get_lorebook(auth=Depends(verify_token)):
-    """读取 data/lorebook.yaml 并返回全部条目"""
+    """读取 characters/reality/lorebook.yaml 并返回全部条目"""
     data = _read_lorebook()
     return {"entries": data.get("entries", [])}
 

@@ -8,10 +8,10 @@
 
 | 层标识 | 内容 | 触发条件 | 数据来源 |
 |---|---|---|---|
-| `0_jailbreak` | 破限预设 layer=0 | 文件存在且 enabled | `data/jailbreak_entries.json` |
+| `0_jailbreak` | 破限预设 layer=0 | 文件存在且 enabled | `characters/reality/jailbreak_entries.json` |
 | `1_system_prompt` | 角色存在性定义 + 情绪软提示 + `{perception_block}` 槽位 | always | `characters/yexuan.json` + `core/mood_text.py` |
 | `2_char_desc` | 角色描述 + 性格 + 情境 | always | 角色卡 |
-| `2_jailbreak` | 破限预设 layer=2 | 文件存在且 enabled | `data/jailbreak_entries.json` |
+| `2_jailbreak` | 破限预设 layer=2 | 文件存在且 enabled | `characters/reality/jailbreak_entries.json` |
 | `2.5_time` | 当前时间（年月日 时:分 星期X） | always | 实时生成 |
 | `2.55_last_seen` | 用户上次说话时间 | 距上次说话 ≥ 6 小时 | `core/presence.py` → `get_last_seen_text()` |
 | `2.6_activity` | 叶瑄此刻的状态 | 对话开头（history 为空）或沉默超10分钟 | `activity_manager.get_prompt_fragment()`，每15-45分钟随机切换，部分活动会从 episodic_memory 按 strength 加权抽一条记忆作为"叶瑄在想什么"注入 |
@@ -38,7 +38,7 @@
 | `9.5_episodic_top` | 最相关情景记忆1条（attention sweet spot） | episodic_result 非空 | 从已召回结果取第一条，不重复召回 |
 | `10_tool_result` | 本轮工具执行结果 | 有工具调用时 | `tool_dispatcher.execute()` 裸输出经 `core/tools/tool_result.py` 截断+定界框定后注入（`safe_summary`） |
 | `11_author_note` | 人设核心提醒 + 输出格式规则 + 纠偏 | always | 硬编码 + `author_note_rotator` + consistency_check |
-| `11_jailbreak` | 破限预设 layer=11 | 文件存在且 enabled | `data/jailbreak_entries.json` |
+| `11_jailbreak` | 破限预设 layer=11 | 文件存在且 enabled | `characters/reality/jailbreak_entries.json` |
 | `12_user_message` | 用户当前消息 | always | 用户输入 |
 
 > 层 10 注入安全：工具裸输出经 `ToolResult.safe_summary`（截断上限 2000 字符）包裹后，以定界标记 `<<<TOOL_DATA_START>>>` / `<<<TOOL_DATA_END>>>` 加反注入指令框定，防止外部工具/搜索结果中的不可信文本被模型当作指令执行。原始数据仅落 debug 日志，永不进 prompt/memory。

@@ -3,8 +3,8 @@
 扫描消息中的关键词，命中时注入对应的世界观描述
 
 数据来源（两个都会加载，取并集）：
-  1. data/lorebook.yaml          — admin 面板可编辑的独立世界书文件
-  2. 角色卡 JSON 的 world_book 字段 — SillyTavern 格式的内嵌世界书
+  1. characters/reality/lorebook.yaml  — authored reality 世界书（admin 面板可编辑）
+  2. 角色卡 JSON 的 world_book 字段    — SillyTavern 格式的内嵌世界书
 
 YAML 条目格式：
   keyword: ["圣塞西尔", "学院"]   ← 列表字段名是 keyword（单数）

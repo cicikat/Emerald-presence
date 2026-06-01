@@ -240,6 +240,11 @@ class DataPaths:
             return self._p("dreams", "settings", safe_user_id(user_id) + ".json")
         return self._p("runtime", "dreams", char_id, "settings", safe_user_id(user_id) + ".json")
 
+    def dream_hud_state_path(self, user_id: str | int, *, char_id: str = "yexuan") -> Path:
+        if _LAYOUT_DREAM == "legacy":
+            return self._p("dreams", "state", safe_user_id(user_id), "dream_hud_state.json")
+        return self._p("runtime", "dreams", char_id, "state", safe_user_id(user_id), "dream_hud_state.json")
+
     def garden(self, *, char_id: str = "yexuan") -> Path:
         if _LAYOUT_CHARACTER_INNER == "legacy":
             return self._p("garden")
@@ -264,12 +269,48 @@ class DataPaths:
                 logger.warning(f"[sandbox] defaults seed not found: {src}")
         return runtime_path
 
-    # ── admin 运行时可写（走沙盒偏移，test mode 不污染 prod）─────────────────
+    def _reality_p(self, filename: str) -> Path:
+        """Authored reality prompt assets 路径。
+        production → characters/reality/{filename}
+        test       → data/test_sandbox/{id}/reality/{filename}（沙盒隔离）
+        不 fallback 到 data/。
+        """
+        if self.mode == "test":
+            return self._base / "reality" / filename
+        return Path("characters") / "reality" / filename
+
+    # ── authored reality prompt assets（characters/reality/，不走 data/ 沙盒偏移）
     def jailbreak_entries(self) -> Path:
-        return self._seed_if_missing(self._p("jailbreak_entries.json"), "jailbreak_entries.json")
+        """主路径：characters/reality/jailbreak_entries.json（无 data/ fallback）"""
+        p = self._reality_p("jailbreak_entries.json")
+        if not p.exists():
+            src = _DEFAULTS_ROOT / "jailbreak_entries.json"
+            if src.exists():
+                p.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, p)
+                logger.info(f"[sandbox] seeded {p} from {src}")
+            else:
+                logger.warning(
+                    f"[data_paths] characters/reality/jailbreak_entries.json 不存在"
+                    f"，defaults 种子也不存在 ({src})，将返回空列表"
+                )
+        return p
 
     def lorebook(self) -> Path:
-        return self._seed_if_missing(self._p("lorebook.yaml"), "lorebook.yaml")
+        """主路径：characters/reality/lorebook.yaml（无 data/ fallback）"""
+        p = self._reality_p("lorebook.yaml")
+        if not p.exists():
+            src = _DEFAULTS_ROOT / "lorebook.yaml"
+            if src.exists():
+                p.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, p)
+                logger.info(f"[sandbox] seeded {p} from {src}")
+            else:
+                logger.warning(
+                    f"[data_paths] characters/reality/lorebook.yaml 不存在"
+                    f"，defaults 种子也不存在 ({src})，将返回空列表"
+                )
+        return p
 
     def relations(self) -> Path:
         return self._seed_if_missing(self._p("relations.yaml"), "relations.yaml")

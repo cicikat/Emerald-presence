@@ -65,12 +65,14 @@
 
 | 路径 | DataPaths 方法 | 说明 |
 |------|---------------|------|
-| `data/lorebook.yaml` | `lorebook()` | 实际世界书条目（defaults/ 种子为空） |
+| `characters/reality/lorebook.yaml` | `lorebook()` | 现实世界书条目（defaults/ 种子为空） |
+| `characters/reality/jailbreak_entries.json` | `jailbreak_entries()` | 破限预设条目（defaults/ 种子为空） |
 | `data/relations.yaml` | `relations()` | 实际关系数据（defaults/ 种子为最小默认） |
-| `data/jailbreak_entries.json` | `jailbreak_entries()` | 实际破限条目（defaults/ 种子为空） |
 | `data/blacklist.yaml` | `blacklist()` | 实际黑名单（defaults/ 种子为空） |
 
 > 这类文件 git_policy = `seed`（registry 中正确），种子可从 git 恢复，但运行时的私人定制内容只在磁盘上。
+>
+> 注意：`characters/reality/lorebook.yaml` 和 `characters/reality/jailbreak_entries.json` 已从 `data/` 迁移至 `characters/reality/`，旧路径不再运行时读取。
 
 ### 2d. 用户级不可重建配置
 
