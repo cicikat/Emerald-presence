@@ -205,14 +205,14 @@ data/
 └── (锁池)                        core/memory/locks.py 管理，运行时内存对象，不落盘
 ```
 
-> **Phase 2（disk-wired integrator + Dream 读取接口）**：`core/memory/user_hidden_state.py` + `core/memory/user_hidden_state_integrator.py` + `core/memory/user_hidden_state_store.py`
-> schema：`UserHiddenState`（sensitivity / touch_need / embodied_ease / body_memory）。
-> integrator 入口（纯内存）：`integrate_event` → 写 `touch_need.deficit`；`integrate_impression` → 写 `sensitivity.current`（仅增）。
-> integrator 入口（Phase 2 disk-wired）：`integrate_event_and_save(uid, event, envelope, now)` / `integrate_impression_and_save(uid, impression, envelope, now)` — 内部执行 load → integrate → 原子保存（仅 accepted + can_write_memory 时写盘）。
-> Dream 读取：`load_dream_snapshot(uid, now)` → 只读 bucket 快照（low/mid/high），不暴露 float 原始值，不写磁盘，Dream LLM 上下文注入用。
-> 长期层（sensitivity.baseline / touch_need.baseline / embodied_ease / body_memory）integrator 内零写入。
-> 所有变更需 `WriteEnvelope.can_write_memory=True`，Dream 不得直接写任何字段。
-> 持久化路径：`user_memory_root(uid)/hidden_state.json`，原子写入，store 不做 envelope 门控（由调用方负责）。
+> **User Hidden State（Phase 3 开发中，Phase 0–2 已完成）**：
+> `core/memory/user_hidden_state.py` — schema（UserHiddenState：sensitivity / touch_need / embodied_ease / body_memory）+ 所有 primitive helpers；Phase 3 前 apply_time_decay / consolidate_baselines / reinforce_body_memory / nudge_embodied_ease / accrue_touch_deficit 为 NotImplementedError stub。
+> `core/memory/user_hidden_state_integrator.py` — Phase 2 disk-wired 入口：`integrate_event_and_save` / `integrate_impression_and_save`（load → 中期层 mutate → 原子保存，仅 accepted + can_write_memory 时写盘）；Phase 3 新增 `integrate_body_cue_and_save`（长期层 body_memory）及 TypeError 类型守卫。
+> `core/memory/user_hidden_state_store.py` — `load_hidden_state` / `save_hidden_state` / `load_dream_snapshot`（只读 bucket 快照，不暴露 float，Dream LLM 上下文注入用）。
+> Phase 3 新增：`core/scheduler/triggers/hidden_state_decay.py`（12h decay tick + 168h consolidate tick，使用 stamp_trigger()，不入 pipeline）；`prompt_builder.py` 注入 `user_hidden_state_snapshot` layer（tag-gated，body_intimate 触发，可裁剪）。
+> 长期层写权限：body_memory ← integrate_body_cue；embodied_ease ← nudge_embodied_ease；baselines ← apply_time_decay + consolidate_baselines（均调度器持 stamp_trigger() 触发）。
+> 安全不变量：所有变更需 `WriteEnvelope.can_write_memory=True`；Dream 不得直接写任何字段（DREAM_DIRECT_WRITABLE = frozenset()）；snapshot 只输出 bucket string，不暴露 float 原始值。
+> 持久化路径：`user_memory_root(uid)/hidden_state.json`，原子写入，store 不做 envelope 门控（由调用方负责）。设计文档：`docs/user_hidden_state_phase3.md`。
 
 > **authored 静态配置**（不走沙盒）：
 > - `content/characters/yexuan/activity_pool.yaml`
