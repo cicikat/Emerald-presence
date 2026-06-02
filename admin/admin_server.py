@@ -32,7 +32,7 @@ app = FastAPI(
 from admin.routers import (
     users, memory, relations,
     system, lorebook,
-    settings_proxy, settings_llm, settings_misc,
+    settings_proxy, settings_llm, settings_misc, settings_prompt_assets,
     character, chat,
     scheduler, watch, agent, sensor,
     garden, mobile, diary, chat_log,
@@ -47,7 +47,8 @@ app.include_router(system.router,         prefix="",           tags=["系统"])
 app.include_router(lorebook.router,       prefix="",           tags=["世界书"])
 app.include_router(settings_proxy.router, prefix="",           tags=["设置-代理"])
 app.include_router(settings_llm.router,   prefix="",           tags=["设置-LLM"])
-app.include_router(settings_misc.router,  prefix="",           tags=["设置-杂项"])
+app.include_router(settings_misc.router,          prefix="", tags=["设置-杂项"])
+app.include_router(settings_prompt_assets.router, prefix="", tags=["设置-Prompt资产"])
 app.include_router(character.router,      prefix="",           tags=["角色卡"])
 app.include_router(chat.router,           prefix="",           tags=["对话"])
 app.include_router(scheduler.router,      prefix="",           tags=["调度器"])
