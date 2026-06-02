@@ -68,10 +68,13 @@ Phase 0 schema stub — User Hidden State System
 """
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
+
+_log = logging.getLogger(__name__)
 
 # ── A. UpdateSource ────────────────────────────────────────────────────────────
 
@@ -509,11 +512,40 @@ def to_dict(state: UserHiddenState) -> dict[str, Any]:
 
     Does NOT write to disk.  Does NOT write memory, mood, profile, or event_log.
     Caller is responsible for persistence via WriteEnvelope-gated path.
-
-    Raises:
-        NotImplementedError: Phase 0 — implementation deferred to Phase 1.
     """
-    raise NotImplementedError("to_dict: Phase 0 stub")
+    def _scalar(s: ScalarState) -> dict[str, Any]:
+        return {
+            "value": s.value,
+            "last_updated": s.last_updated,
+            "last_update_source": s.last_update_source.value,
+        }
+
+    def _entry(e: BodyMemoryEntry) -> dict[str, Any]:
+        return {
+            "cue": e.cue,
+            "response_tag": e.response_tag,
+            "weight": e.weight,
+            "created_at": e.created_at,
+            "last_reinforced": e.last_reinforced,
+        }
+
+    return {
+        "schema_version": state.schema_version,
+        "last_decay_tick": state.last_decay_tick,
+        "sensitivity": {
+            "baseline": _scalar(state.sensitivity.baseline),
+            "current": _scalar(state.sensitivity.current),
+        },
+        "touch_need": {
+            "baseline": _scalar(state.touch_need.baseline),
+            "deficit": _scalar(state.touch_need.deficit),
+        },
+        "embodied_ease": _scalar(state.embodied_ease),
+        "body_memory": {
+            "entries": [_entry(e) for e in state.body_memory.entries],
+            "max_entries": state.body_memory.max_entries,
+        },
+    }
 
 
 def from_dict(data: dict[str, Any]) -> UserHiddenState:
@@ -522,10 +554,101 @@ def from_dict(data: dict[str, Any]) -> UserHiddenState:
     Does NOT read from disk.  Does NOT write memory, mood, profile, or event_log.
     Unknown keys are ignored; missing keys fall back to default_hidden_state values.
 
-    Raises:
-        NotImplementedError: Phase 0 — implementation deferred to Phase 1.
+    schema_version missing  → logs warning, proceeds with lenient deserialization.
+    schema_version mismatch → logs warning, returns default_hidden_state().
     """
-    raise NotImplementedError("from_dict: Phase 0 stub")
+    if not isinstance(data, dict):
+        _log.warning("[user_hidden_state] from_dict: expected dict, got %r — returning default", type(data).__name__)
+        return default_hidden_state()
+
+    defaults = default_hidden_state()
+
+    if "schema_version" not in data:
+        _log.warning("[user_hidden_state] from_dict: schema_version key missing — proceeding with lenient deserialization")
+    else:
+        sv = data["schema_version"]
+        if sv != defaults.schema_version:
+            _log.warning(
+                "[user_hidden_state] from_dict: schema_version mismatch (got %r, expected %r) — returning default",
+                sv, defaults.schema_version,
+            )
+            return default_hidden_state()
+
+    def _scalar(raw: Any, dflt: ScalarState) -> ScalarState:
+        if not isinstance(raw, dict):
+            return dflt
+        try:
+            source_str = raw.get("last_update_source", dflt.last_update_source.value)
+            try:
+                source = UpdateSource(source_str)
+            except ValueError:
+                source = dflt.last_update_source
+            return ScalarState(
+                value=float(raw.get("value", dflt.value)),
+                last_updated=raw.get("last_updated", dflt.last_updated),
+                last_update_source=source,
+            )
+        except Exception:
+            return dflt
+
+    def _entry(raw: Any) -> Optional[BodyMemoryEntry]:
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return BodyMemoryEntry(
+                cue=str(raw.get("cue", "")),
+                response_tag=str(raw.get("response_tag", "")),
+                weight=float(raw.get("weight", 0.0)),
+                created_at=str(raw.get("created_at", "")),
+                last_reinforced=str(raw.get("last_reinforced", "")),
+            )
+        except Exception:
+            return None
+
+    sens_raw = data.get("sensitivity")
+    if not isinstance(sens_raw, dict):
+        sens_raw = {}
+    sensitivity = SensitivityState(
+        baseline=_scalar(sens_raw.get("baseline"), defaults.sensitivity.baseline),
+        current=_scalar(sens_raw.get("current"), defaults.sensitivity.current),
+    )
+
+    tn_raw = data.get("touch_need")
+    if not isinstance(tn_raw, dict):
+        tn_raw = {}
+    touch_need = TouchNeedState(
+        baseline=_scalar(tn_raw.get("baseline"), defaults.touch_need.baseline),
+        deficit=_scalar(tn_raw.get("deficit"), defaults.touch_need.deficit),
+    )
+
+    embodied_ease = _scalar(data.get("embodied_ease"), defaults.embodied_ease)
+
+    bm_raw = data.get("body_memory")
+    if isinstance(bm_raw, dict):
+        entries_raw = bm_raw.get("entries", [])
+        entries = [e for e in (_entry(r) for r in (entries_raw if isinstance(entries_raw, list) else [])) if e is not None]
+        try:
+            max_entries = int(bm_raw.get("max_entries", defaults.body_memory.max_entries))
+        except (TypeError, ValueError):
+            max_entries = defaults.body_memory.max_entries
+    else:
+        entries = []
+        max_entries = defaults.body_memory.max_entries
+
+    sv_out = data.get("schema_version", defaults.schema_version)
+    try:
+        sv_out = int(sv_out)
+    except (TypeError, ValueError):
+        sv_out = defaults.schema_version
+
+    return UserHiddenState(
+        sensitivity=sensitivity,
+        touch_need=touch_need,
+        embodied_ease=embodied_ease,
+        body_memory=BodyMemory(entries=entries, max_entries=max_entries),
+        last_decay_tick=data.get("last_decay_tick", defaults.last_decay_tick),
+        schema_version=sv_out,
+    )
 
 
 # ── G. Input event dataclasses ─────────────────────────────────────────────────

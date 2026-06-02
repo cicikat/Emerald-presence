@@ -731,13 +731,31 @@ sensor privacy 全系统已经完成。
 
 ---
 
-## 八、用户隐性状态（user_hidden_state）— Phase 1 MVP
+## 八、用户隐性状态（user_hidden_state）— Phase 1.5
 
 **文件**：
-- `core/memory/user_hidden_state.py` — 数据结构、常量、primitive 函数
+- `core/memory/user_hidden_state.py` — 数据结构、常量、primitive 函数、`to_dict` / `from_dict`
 - `core/memory/user_hidden_state_integrator.py` — Reality Event + Dream Impression → 中期层 integrator
+- `core/memory/user_hidden_state_store.py` — 磁盘 I/O（`load_hidden_state` / `save_hidden_state`）
 
-**Phase 1 MVP 状态**：Reality Event 和 Dream Impression 可经 integrator 更新中期层字段。无磁盘 I/O，无 pipeline 接线，Dream 不得直接写任何字段。
+**Phase 1 MVP 状态**：Reality Event 和 Dream Impression 可经 integrator 更新中期层字段。无 pipeline 接线，Dream 不得直接写任何字段。
+
+**Phase 1.5 新增**：序列化与持久化已实现，尚未接线至 pipeline。
+
+### 持久化（Phase 1.5）
+
+| 函数 | 文件 | 说明 |
+|---|---|---|
+| `to_dict(state)` | `user_hidden_state.py` | 序列化为 JSON-compatible dict，纯函数，不写磁盘 |
+| `from_dict(data)` | `user_hidden_state.py` | 反序列化；缺字段回退 default；`schema_version` 缺失→lenient 警告；`schema_version` 不匹配→返回 default |
+| `load_hidden_state(uid)` | `user_hidden_state_store.py` | 从磁盘加载；文件缺失/损坏/schema 不匹配均返回 default，不抛异常 |
+| `save_hidden_state(uid, state)` | `user_hidden_state_store.py` | 原子写入（`safe_write_json`）；返回 bool，不抛异常 |
+
+**路径**：`user_memory_root(uid) / hidden_state.json`
+
+**WriteEnvelope 说明**：store 本身不执行 envelope 门控。调用方在调用 `save_hidden_state` 前必须已持有 `WriteEnvelope(can_write_memory=True)`。
+
+**不接线**：Dream、build_snapshot、scheduler、自动保存。
 
 ### 字段一览（UserHiddenState）
 
