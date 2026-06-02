@@ -3,6 +3,24 @@ core/memory/user_hidden_state.py
 ================================
 Phase 0 schema stub — User Hidden State System
 
+=== FIELD ADMISSION TEST ===
+
+  A field belongs in User Hidden State only if it describes the USER'S OWN
+  psycho-physical constitution — something that remains meaningful regardless
+  of which companion object is involved.
+
+  Ask: "If the companion object changes, does this value reset to zero?"
+    YES → it is relationship state. Do NOT put it here.
+    NO  → it may belong here.
+
+  Admitted:
+    embodied_ease     — user's baseline ease/tension in body-intimate contexts.
+                        A constitution-level set-point; regresses to center, not 0.
+
+  Rejected (belong in a future relationship_state module):
+    body_familiarity       — resets when the companion changes → relationship state.
+    somatic_familiarity    — same reason → relationship state.
+
 === SECURITY BOUNDARIES (MUST READ BEFORE EXTENDING) ===
 
   Phase 0 scope:
@@ -182,7 +200,7 @@ class UserHiddenState:
 
     sensitivity: SensitivityState = field(default_factory=SensitivityState)
     touch_need: TouchNeedState = field(default_factory=TouchNeedState)
-    body_familiarity: ScalarState = field(default_factory=ScalarState)
+    embodied_ease: ScalarState = field(default_factory=ScalarState)
     body_memory: BodyMemory = field(default_factory=BodyMemory)
     last_decay_tick: Optional[str] = None
     schema_version: int = 1
@@ -204,7 +222,7 @@ CURRENT_SENS_REGRESS_HL_DAYS: float = 5.0      # current sensitivity → baselin
 SENS_BASELINE_CENTER_HL_DAYS: float = 180.0    # sensitivity baseline → center
 TOUCH_DEFICIT_DECAY_HL_DAYS: float = 10.0      # touch deficit → 0
 TOUCH_BASELINE_CENTER_HL_DAYS: float = 180.0   # touch baseline → center
-FAMILIARITY_COLD_HL_DAYS: float = 90.0         # familiarity → 0 (cold)
+EMBODIED_EASE_CENTER_HL_DAYS: float = 90.0     # embodied_ease → SCALAR_CENTER (constitution regression)
 MEMORY_EXTINCTION_HL_DAYS: float = 45.0        # body-memory weight decay
 
 # Learning / nudge limits
@@ -245,7 +263,7 @@ def default_hidden_state() -> UserHiddenState:
       sensitivity.current   = 50
       touch_need.baseline   = 50
       touch_need.deficit    = 0
-      body_familiarity      = 0
+      embodied_ease         = 50  (SCALAR_CENTER — constitution neutral)
       body_memory           = empty, max_entries=BODY_MEMORY_MAX_ENTRIES
 
     This function does not write memory, mood, profile, or event_log.
@@ -260,7 +278,7 @@ def default_hidden_state() -> UserHiddenState:
             baseline=ScalarState(value=SCALAR_CENTER, last_update_source=UpdateSource.INIT),
             deficit=ScalarState(value=0.0, last_update_source=UpdateSource.INIT),
         ),
-        body_familiarity=ScalarState(value=0.0, last_update_source=UpdateSource.INIT),
+        embodied_ease=ScalarState(value=SCALAR_CENTER, last_update_source=UpdateSource.INIT),
         body_memory=BodyMemory(entries=[], max_entries=BODY_MEMORY_MAX_ENTRIES),
         last_decay_tick=None,
         schema_version=1,
@@ -345,10 +363,9 @@ def nudge_current_sensitivity(
 ) -> UserHiddenState:
     """Nudge sensitivity.current by delta, clamped to scalar range.
 
-    Phase 1 requirement:
-      Caller MUST hold a WriteEnvelope with can_write_memory=True.
-      This function does not emit a WriteEnvelope stamp.
-      It does not write memory, mood, profile, or event_log.
+    Caller MUST hold a WriteEnvelope with can_write_memory=True.
+    This function does not emit a WriteEnvelope stamp.
+    It does not write memory, mood, profile, or event_log.
 
     Dream-derived sources (DREAM_AFTERGLOW, DREAM_IMPRESSION,
     DREAM_BODY_EVENT) must only enter via the Reality-side integrator
@@ -357,11 +374,11 @@ def nudge_current_sensitivity(
     SENSOR_SIGNAL source is accepted as an argument type but must NOT
     be passed unless the caller's WriteEnvelope explicitly grants
     can_write_memory=True for sensor paths.
-
-    Raises:
-        NotImplementedError: Phase 0 — implementation deferred to Phase 1.
     """
-    raise NotImplementedError("nudge_current_sensitivity: Phase 0 stub")
+    state.sensitivity.current.value = _clamp(state.sensitivity.current.value + delta)
+    state.sensitivity.current.last_updated = now
+    state.sensitivity.current.last_update_source = source
+    return state
 
 
 def accrue_touch_deficit(
@@ -388,38 +405,55 @@ def discharge_touch_deficit(
     source: UpdateSource,
     now: str,
 ) -> UserHiddenState:
-    """Reduce touch deficit by amount (positive means deficit decreases).
+    """Reduce touch deficit by amount (positive amount means deficit decreases).
 
-    Phase 1 requirement:
-      Caller MUST hold a WriteEnvelope with can_write_memory=True.
-      This function does not emit a WriteEnvelope stamp.
-      It does not write memory, mood, profile, or event_log.
-
-    Raises:
-        NotImplementedError: Phase 0 — implementation deferred to Phase 1.
+    Caller MUST hold a WriteEnvelope with can_write_memory=True.
+    This function does not emit a WriteEnvelope stamp.
+    It does not write memory, mood, profile, or event_log.
     """
-    raise NotImplementedError("discharge_touch_deficit: Phase 0 stub")
+    state.touch_need.deficit.value = _clamp(state.touch_need.deficit.value - amount)
+    state.touch_need.deficit.last_updated = now
+    state.touch_need.deficit.last_update_source = source
+    return state
 
 
-def reinforce_familiarity(
+def nudge_embodied_ease(
     state: UserHiddenState,
-    exposure: float,
+    delta: float,
     source: UpdateSource,
     now: str,
 ) -> UserHiddenState:
-    """Increase body_familiarity by exposure * learning_rate, clamped.
+    """Nudge embodied_ease by delta, clamped to scalar range.
 
-    Phase 1 requirement:
-      Caller MUST hold a WriteEnvelope with can_write_memory=True.
-      This function does not emit a WriteEnvelope stamp.
-      It does not write memory, mood, profile, or event_log.
+    embodied_ease is the user's baseline ease/tension constitution in body-intimate
+    contexts.  It regresses toward SCALAR_CENTER (50), not toward 0.
 
-    Dream-derived sources must only enter via Reality-side integrator.
+    What this field MEANS:
+      "When body-intimate dimensions arise, how readily does this user relax
+       at a constitutional level?"
+
+    What this field does NOT mean:
+      "How familiar is this user with their companion's body?"
+      Relationship-specific somatic familiarity must NOT be written here.
+
+    Call restrictions:
+      - Only the Reality-side integrator may call this, after obtaining a
+        WriteEnvelope with can_write_memory=True.
+      - Dream turns must NOT call this directly.
+      - Pure "familiarity with companion's body" exposure must NOT be written here.
+      - Baseline / long-term updates must go through consolidation or an
+        envelope-gated integrator, not ad-hoc nudges.
+
+    This function does not emit a WriteEnvelope stamp.
+    It does not write memory, mood, profile, or event_log.
+
+    Dream-derived sources (DREAM_AFTERGLOW, DREAM_IMPRESSION, DREAM_BODY_EVENT)
+    must only enter via the Reality-side integrator at Dream exit.
 
     Raises:
         NotImplementedError: Phase 0 — implementation deferred to Phase 1.
     """
-    raise NotImplementedError("reinforce_familiarity: Phase 0 stub")
+    raise NotImplementedError("nudge_embodied_ease: Phase 0 stub")
 
 
 def reinforce_body_memory(
@@ -625,7 +659,7 @@ def to_dream_snapshot(state: UserHiddenState, now: str) -> dict[str, Any]:
         {
             "sensitivity":     "low" | "mid" | "high",
             "touch_appetite":  "low" | "mid" | "high",
-            "familiarity":     "new" | "warming" | "familiar",
+            "embodied_ease":   "guarded" | "neutral" | "easy",
             "memory_cues":     [str, ...],   # top cue strings by weight
         }
 
@@ -634,10 +668,10 @@ def to_dream_snapshot(state: UserHiddenState, now: str) -> dict[str, Any]:
         low   < 35
         mid   35 – 65
         high  > 65
-      familiarity:
-        new      < 20
-        warming  20 – 60
-        familiar > 60
+      embodied_ease (user's constitutional ease in body-intimate contexts):
+        guarded  < 35   — tends toward tension / wariness
+        neutral  35 – 65
+        easy     > 65   — tends toward relaxed openness
 
     Raises:
         NotImplementedError: Phase 0 — implementation deferred to Phase 1.

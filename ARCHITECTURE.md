@@ -205,6 +205,14 @@ data/
 └── (锁池)                        core/memory/locks.py 管理，运行时内存对象，不落盘
 ```
 
+> **Phase 1 MVP（无磁盘 I/O，未接 pipeline）**：`core/memory/user_hidden_state.py` + `core/memory/user_hidden_state_integrator.py`
+> schema：`UserHiddenState`（sensitivity / touch_need / embodied_ease / body_memory）。
+> integrator 入口：`integrate_event(RealityEventType, state, envelope, now)` → 写 `touch_need.deficit`；
+> `integrate_impression(ImpressionInput, state, envelope, now)` → 写 `sensitivity.current`（仅增）。
+> 长期层（sensitivity.baseline / touch_need.baseline / embodied_ease / body_memory）integrator 内零写入。
+> 所有变更需 `WriteEnvelope.can_write_memory=True`，Dream 不得直接写任何字段。
+> 数据落盘路径待 Phase 2 确定，届时写入 `data/runtime/memory/{char_id}/{uid}/` 下新文件。
+
 > **authored 静态配置**（不走沙盒）：
 > - `content/characters/yexuan/activity_pool.yaml`
 > - `content/characters/yexuan/traits.yaml`
