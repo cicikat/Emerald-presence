@@ -204,9 +204,10 @@ def test_write_episode_normal_write_under_cap_unchanged(sandbox):
 def test_capture_turn_writes_short_term_and_event_log(sandbox):
     from core.memory.fixation_pipeline import capture_turn
     from core.memory import short_term
+    from core.write_envelope import stamp_ingest
 
     uid = "u1"
-    turn_id = capture_turn(uid, "你好", "你好呀", "happy")
+    turn_id = capture_turn(uid, "你好", "你好呀", "happy", envelope=stamp_ingest())
 
     history = short_term.load(uid)
     assert len(history) == 2
@@ -220,11 +221,12 @@ def test_capture_turn_idempotent(sandbox):
     """相同 turn_id 重复调用不重复写入 short_term。"""
     from core.memory.fixation_pipeline import capture_turn
     from core.memory import short_term
+    from core.write_envelope import stamp_ingest
 
     uid = "u_idem"
 
     # 先写一次
-    turn_id = capture_turn(uid, "msg", "reply", "neutral")
+    turn_id = capture_turn(uid, "msg", "reply", "neutral", envelope=stamp_ingest())
     count_after_first = len(short_term.load(uid))
 
     # 手动把 turn_id 注入已有条目，模拟幂等场景
