@@ -212,6 +212,7 @@ async def handle_message(message: dict):
                 target_id=target_id,
                 is_group=is_group,
                 session_state=state,
+                origin="user_live",
             )
             state.clear()
             if tool_result:
@@ -233,6 +234,7 @@ async def handle_message(message: dict):
             target_id=target_id,
             is_group=is_group,
             session_state=state,
+            origin="user_live",
         )
         state.clear()
         if ask_text:
@@ -333,6 +335,7 @@ async def handle_message(message: dict):
                 target_id=target_id,
                 is_group=is_group,
                 session_state=state,
+                origin="user_live",
             )
             if ask_text:
                 logger.info(f"[handle_message] 高危工具 {t_name}，等待用户确认")

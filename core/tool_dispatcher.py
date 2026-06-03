@@ -652,6 +652,9 @@ def get_probe_prompt(location: str) -> str:
     return "\n".join(lines)
 
 
+_EXECUTE_ALLOWED_ORIGINS: frozenset[str] = frozenset({"user_live", "assistant_intent"})
+
+
 async def execute(
     tool_name: str,
     tool_args: dict,
@@ -659,13 +662,25 @@ async def execute(
     target_id: str,
     is_group: bool,
     session_state,
+    *,
+    origin: str = "",
 ) -> tuple[str | None, str | None]:
     """
     执行工具，返回 (tool_result, ask_confirm_text)
 
     tool_result:      工具执行结果字符串，None 表示无结果
     ask_confirm_text: 高危工具等待确认时的询问文字，None 表示无需确认
+
+    origin 必须显式传入并在白名单内，否则 fail-closed：返回 (None, None) + 记 warning。
+    白名单：user_live（Path A 用户发起）/ assistant_intent（Path B 意图执行，附加门控）。
     """
+    if origin not in _EXECUTE_ALLOWED_ORIGINS:
+        logger.warning(
+            "[tool_dispatcher.execute] 拒绝执行: origin=%r 不在白名单, tool=%s",
+            origin, tool_name,
+        )
+        return None, None
+
     from core import user_relation
 
     from core.error_handler import get_tool_fail_response
@@ -729,7 +744,7 @@ class ToolDispatcher:
     def get_tools_schema(self, categories: list[str] | None = None) -> list:
         return get_tools_schema(categories=categories)
 
-    async def execute(self, tool_name, tool_args, user_id, target_id, is_group, session_state):
+    async def execute(self, tool_name, tool_args, user_id, target_id, is_group, session_state, *, origin: str = ""):
         return await execute(
             tool_name=tool_name,
             tool_args=tool_args,
@@ -737,4 +752,5 @@ class ToolDispatcher:
             target_id=target_id,
             is_group=is_group,
             session_state=session_state,
+            origin=origin,
         )

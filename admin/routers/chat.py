@@ -146,6 +146,7 @@ async def _probe_and_execute_tools(message: str, user_id: str) -> str | None:
                 target_id=user_id,
                 is_group=False,
                 session_state=state,
+                origin="user_live",
             )
             if t_result:
                 from core.config_loader import _char_name
