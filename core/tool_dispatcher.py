@@ -374,9 +374,20 @@ _TOOL_REGISTRY["web_search"] = {
 
 _TOOL_REGISTRY["read_diary"] = {
     "func": _read_diary_wrapper,
-    "description": f"当用户提到日记、让{_CHAR}看日记、读日记、评价日记时，必须调用此工具获取真实内容，禁止凭空编造日记内容",
+    "description": (
+        f"当用户主动请求让{_CHAR}查看、阅读或评价自己的日记时调用。"
+        f"用户仅提及日记（如'我在写日记'）但未明确要求查看时，不调用。"
+    ),
     "dangerous": False,
-    "category": "memory",
+    "category": "info",
+    "examples": [
+        "帮我看看今天的日记",
+        "你来读读我写的日记",
+        "评价一下我最近的日记",
+        "把我的日记给你看",
+        "读一下我4月10号写的",
+    ],
+    "keywords": ["看日记", "读日记", "日记给你看", "日记给你", "日记读一下", "日记你看看"],
     "parameters": {
         "type": "object",
         "properties": {
