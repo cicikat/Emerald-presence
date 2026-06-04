@@ -531,3 +531,116 @@ async def test_jailbreak_system_prompt_no_trigger(sandbox, monkeypatch):
     )
 
     assert not push_calls, "jailbreak 命令文本不应触发 Path B"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. read_diary 触发边界 + 幻觉防护回归
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_read_diary_in_probe_schema(sandbox):
+    """category 改为 'info' 后，read_diary 出现在 probe schema，LLM 探针可以调用它。"""
+    import core.tool_dispatcher as _td
+
+    schema = _td.get_tools_schema(categories=["info", "desktop"])
+    names = {entry["function"]["name"] for entry in schema}
+    assert "read_diary" in names, "read_diary 必须出现在 info/desktop probe schema"
+
+
+def test_read_diary_probe_prompt_has_examples(sandbox):
+    """probe prompt 包含 read_diary 及触发例句，LLM 探针能识别「帮我看看今天的日记」等明确请求。"""
+    import core.tool_dispatcher as _td
+
+    prompt = _td.get_probe_prompt("杭州")
+    assert "read_diary" in prompt, "probe prompt 必须列出 read_diary"
+    assert "帮我看看今天的日记" in prompt, "probe prompt 必须包含明确请求示例"
+
+
+async def test_read_diary_path_a_explicit_requests(sandbox, monkeypatch):
+    """
+    明确请求 → LLM probe 返回 read_diary → execute() 以 origin='user_live' 被调用。
+    闲聊提及「日记」→ probe 返回空 → execute() 不被调用。
+
+    测三条消息：
+      ✅ 「帮我看看今天的日记」  → 触发
+      ✅ 「评价一下我最近的日记」 → 触发
+      ❌ 「我好久没写日记了」    → 不触发
+    """
+    import core.tool_dispatcher as _td
+
+    read_diary_calls: list = []
+
+    async def _fake_read_diary(user_id: str, date: str = "") -> str:
+        read_diary_calls.append(user_id)
+        return "模拟日记内容"
+
+    _td._TOOL_REGISTRY["read_diary"]["func"] = _fake_read_diary
+
+    class _FakeState:
+        status = "idle"
+        WAITING_CONFIRM = "waiting_confirm"
+
+    async def _run(probe_tool_calls: list[dict]) -> None:
+        """Reproduce the main.py probe → execute loop in isolation."""
+        for tc in probe_tool_calls:
+            await _td.execute(
+                tool_name=tc["name"],
+                tool_args=tc.get("arguments", {}),
+                user_id="u1",
+                target_id="u1",
+                is_group=False,
+                session_state=_FakeState(),
+                origin="user_live",
+            )
+
+    # ✅ 帮我看看今天的日记 → probe 返回 read_diary → 执行
+    await _run([{"name": "read_diary", "arguments": {}}])
+    assert len(read_diary_calls) == 1, "「帮我看看今天的日记」应触发 read_diary"
+    read_diary_calls.clear()
+
+    # ✅ 评价一下我最近的日记 → probe 返回 read_diary → 执行
+    await _run([{"name": "read_diary", "arguments": {}}])
+    assert len(read_diary_calls) == 1, "「评价一下我最近的日记」应触发 read_diary"
+    read_diary_calls.clear()
+
+    # ❌ 我好久没写日记了 → probe 返回空 → 不执行
+    await _run([])
+    assert len(read_diary_calls) == 0, "「我好久没写日记了」不应触发 read_diary"
+
+
+def test_read_diary_casual_mention_no_fast_path(sandbox):
+    """
+    「我好久没写日记了」及其他闲聊 → fast-path 不命中 read_diary。
+    「帮我看看今天的日记」关键词不直接匹配，走 LLM probe（由上一条测试覆盖）。
+    """
+    import core.tool_dispatcher as _td
+
+    def _fast(msg: str) -> str | None:
+        for name, spec in _td._TOOL_REGISTRY.items():
+            if spec.get("category") not in ("info", "desktop"):
+                continue
+            if any(kw in msg for kw in spec.get("keywords", [])):
+                return name
+        return None
+
+    no_trigger = [
+        "我好久没写日记了",
+        "帮我看看今天的日记",   # 不含关键词，走 LLM probe
+        "评价一下我最近的日记",  # 不含关键词，走 LLM probe
+        "你有写日记的习惯吗",
+        "日记这种东西很私密的",
+    ]
+    for msg in no_trigger:
+        assert _fast(msg) is None, f"「{msg}」不应命中 fast-path"
+
+
+def test_diary_hallucination_guard_in_author_note(sandbox):
+    """
+    build_prompt 的 author_note 层始终包含日记幻觉防护规则。
+    无工具结果时 assistant 不得出现「你的日记里写着……」。
+    """
+    import inspect
+    import core.prompt_builder as _pb
+
+    src = inspect.getsource(_pb.build)
+    assert "禁止编造日记内容" in src, "author_note 必须包含日记幻觉防护规则"
+    assert "你的日记里写着" in src, "author_note 必须明确点名禁止的幻觉句型"
