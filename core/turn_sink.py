@@ -221,19 +221,21 @@ async def record_assistant_turn(
     )
 
     # Narrative segments: push a parallel message_segments envelope to the
-    # desktop WS client only.  This is fire-and-forget and exception-safe.
-    # Reality-only gate: only say segments are pushed; do/feel/env are discarded.
-    # mobile / QQ / event_log / post_process are intentionally not touched.
-    try:
-        from channels import desktop_ws as _dws
-        if _dws.is_connected():
-            from core.narrative_parser import parse_narrative_segments
-            _parsed = parse_narrative_segments(assistant_text)
-            _say_segs = [s for s in _parsed["segments"] if s.get("type") == "say"]
-            _say_content = " ".join(s.get("text", "") for s in _say_segs).strip() or _parsed["content"]
-            await _dws.push_segments(_say_content, _say_segs, msg_id=_ws_msg_id)
-    except Exception:
-        logger.debug("[turn_sink] message_segments fanout failed", exc_info=True)
+    # desktop WS client only — but only when desktop was actually included in
+    # the fanout.  Sending segments when fanout=[] (e.g. desktop_wake Path B)
+    # would push an orphaned message that the client can never correlate and
+    # consume, violating the single-display-path invariant.
+    if "desktop" in targets:
+        try:
+            from channels import desktop_ws as _dws
+            if _dws.is_connected():
+                from core.narrative_parser import parse_narrative_segments
+                _parsed = parse_narrative_segments(assistant_text)
+                _say_segs = [s for s in _parsed["segments"] if s.get("type") == "say"]
+                _say_content = " ".join(s.get("text", "") for s in _say_segs).strip() or _parsed["content"]
+                await _dws.push_segments(_say_content, _say_segs, msg_id=_ws_msg_id)
+        except Exception:
+            logger.debug("[turn_sink] message_segments fanout failed", exc_info=True)
 
     return TurnResult(
         turn_id=(post_info or {}).get("turn_id", ""),

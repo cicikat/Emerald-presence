@@ -390,11 +390,16 @@ async def desktop_wake(body: dict = Body(default={})):
     if last_seen is not None:
         try:
             from core.memory.short_term import load as _load_st
+            from channels import desktop_ws as _dws_pa
             history = _load_st(uid)
             user_turn_ids = {
                 e["_turn_id"] for e in history
                 if e.get("role") == "user" and e.get("_turn_id")
             }
+            # If WS is currently connected, exclude turns that were generated *after*
+            # this WS session was accepted: those were already fanout-pushed to the
+            # client and replaying them via HTTP would show the same reply twice.
+            ws_connect_time = _dws_pa.get_connect_time()
             pending = [
                 e for e in history
                 if (
@@ -402,6 +407,7 @@ async def desktop_wake(body: dict = Body(default={})):
                     and e.get("timestamp", 0) > last_seen
                     and e.get("_turn_id")
                     and e["_turn_id"] not in user_turn_ids
+                    and (not ws_connect_time or e.get("timestamp", 0) <= ws_connect_time)
                 )
             ]
             if pending:

@@ -21,11 +21,17 @@ _current_ws: WebSocket | None = None
 _lock = asyncio.Lock()
 _pending_acks: dict[str, asyncio.Future] = {}
 _last_pong: float = 0.0
+_connect_time: float = 0.0  # epoch when the current WS session was accepted
 _heartbeat_task: asyncio.Task | None = None
 
 
 def is_connected() -> bool:
     return _current_ws is not None
+
+
+def get_connect_time() -> float:
+    """Return the epoch timestamp when the current WS session was accepted (0 if not connected)."""
+    return _connect_time if _current_ws is not None else 0.0
 
 
 def _new_msg_id() -> str:
@@ -100,7 +106,7 @@ async def push_action_and_wait(
 
 async def handle_connection(ws: WebSocket) -> None:
     """处理一个新 WS 连接的完整生命周期。由路由层调用。"""
-    global _current_ws, _last_pong, _heartbeat_task
+    global _current_ws, _last_pong, _connect_time, _heartbeat_task
     await ws.accept()
 
     async with _lock:
@@ -111,6 +117,7 @@ async def handle_connection(ws: WebSocket) -> None:
                 pass
         _current_ws = ws
         _last_pong = time.time()
+        _connect_time = time.time()
 
     # 通知 channel 抽象层桌宠上线
     from channels.registry import get as get_channel
@@ -139,6 +146,7 @@ async def handle_connection(ws: WebSocket) -> None:
         async with _lock:
             if _current_ws is ws:
                 _current_ws = None
+                _connect_time = 0.0
                 if ch is not None:
                     ch.set_active(False)
         logger.info("[desktop_ws] 连接已清理")
