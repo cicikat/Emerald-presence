@@ -422,10 +422,10 @@ class Pipeline:
                 from core.config_loader import get_config
                 cfg = get_config()
                 every_n = cfg.get("memory", {}).get("summary_every_n_rounds", 20)
-                _hist_len_after = len(_st.load(user_id)) + 2
+                _hist_len_after = len(_st.load(user_id, char_id=_char_id)) + 2
                 if _hist_len_after > 0 and _hist_len_after % every_n == 0:
                     _should_update_profile = True
-                    _profile_recent = _st.load(user_id)[-(every_n * 2):]
+                    _profile_recent = _st.load(user_id, char_id=_char_id)[-(every_n * 2):]
             except Exception as e:
                 log_error("post_process.check_conditions", e)
 
