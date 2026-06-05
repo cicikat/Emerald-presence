@@ -11,8 +11,9 @@ from pathlib import Path
 import yaml
 
 from core.memory.locks import uid_lock
+from core.memory.path_resolver import resolve_path
+from core.memory.scope import MemoryScope
 from core.safe_write import safe_write_text
-from core.sandbox import get_paths, safe_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +33,13 @@ _REQUIRED_FIELDS = {"text", "confidence", "evidence_count", "last_updated"}
 
 
 def _identity_read_file(user_id: str, *, char_id: str = "yexuan") -> Path:
-    uid = safe_user_id(user_id)
-    return get_paths().user_memory_root(uid, char_id=char_id) / "identity.yaml"
+    scope = MemoryScope.reality_scope(str(user_id), char_id)
+    return resolve_path(scope, "identity")
 
 
 def _identity_write_file(user_id: str, *, char_id: str = "yexuan") -> Path:
-    """写路径：始终写新布局，保证父目录存在。"""
-    uid = safe_user_id(user_id)
-    p = get_paths().user_memory_root(uid, char_id=char_id) / "identity.yaml"
+    scope = MemoryScope.reality_scope(str(user_id), char_id)
+    p = resolve_path(scope, "identity")
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
