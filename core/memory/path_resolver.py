@@ -68,7 +68,7 @@ def resolve_path(scope: MemoryScope, artifact: str) -> Path:
     # ── reality-scoped: (char_id, uid) ──────────────────────────────────────
 
     if artifact == "history":
-        return paths.history(char_id=char_id) / f"{uid}.json"
+        return paths.user_memory_root(uid, char_id=char_id) / "history.json"
 
     if artifact == "event_log":
         return paths.event_log(char_id=char_id) / uid

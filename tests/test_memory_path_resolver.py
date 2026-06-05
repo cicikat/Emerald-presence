@@ -364,3 +364,21 @@ def test_memory_index_same_root_as_mid_term(sandbox):
     idx = resolve_path(REALITY, "memory_index")
     mt = resolve_path(REALITY, "mid_term")
     assert idx.parent == mt.parent
+
+
+# ---------------------------------------------------------------------------
+# P1-2G: history path layout consistency
+# history must live under runtime/memory/{char_id}/{uid}/ — same root as mid_term
+# ---------------------------------------------------------------------------
+
+def test_history_exact_layout(sandbox):
+    """history → runtime/memory/{char_id}/{uid}/history.json"""
+    p = _s(resolve_path(REALITY, "history"))
+    assert f"runtime/memory/{CHAR}/{UID}/history.json" in p
+
+
+def test_history_same_root_as_mid_term(sandbox):
+    """history and mid_term must share the same parent directory (user_memory_root)."""
+    hist = resolve_path(REALITY, "history")
+    mt = resolve_path(REALITY, "mid_term")
+    assert hist.parent == mt.parent
