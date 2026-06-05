@@ -8,7 +8,7 @@ P1-0H: 运行期 yexuan fallback 审计测试
   * 关键 admin/core 源文件中不存在活跃 resolver fallback "yexuan" 字符串
 
 已知剩余 TODO（不写 failing 断言，见文件底部注释）：
-  T1: prompt_builder.get_period_info 未传 char_id（char_id 在调用帧内可用）
+  T1: [已修] prompt_builder.get_period_info 已传 char_id（P1-0H.1, 2026-06-05）
   T2: scheduler/loop.py + period.py get_period_info 无 char_id 上下文
   T3: scheduler/time_based.py yexuan_inner_diary() 无 char_id
   T4: admin/routers/chat.py get_affection_level 未传 char_id（已冻结系统）
@@ -416,11 +416,9 @@ def test_pipeline_dlq_new_payload_no_fallback():
 # 知名剩余 TODO（不写 failing 断言）
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# T1 (prompt_builder.py:397)
-#   get_period_info(user_id) 调用未传 char_id。
-#   build_prompt() 的 char_id 参数在调用帧内可用，修复是 1-liner。
-#   风险：active ≠ yexuan 时生理期数据读错角色 bucket。
-#   修复建议：get_period_info(user_id, char_id=char_id)
+# T1 (prompt_builder.py) ── [已修 P1-0H.1, 2026-06-05]
+#   get_period_info(user_id, char_id=char_id) に修正済。
+#   tests/test_prompt_builder_period_scope.py にて 7 件のテストで検証済。
 #
 # T2 (scheduler/loop.py:478, scheduler/triggers/period.py:13)
 #   get_period_info(uid) 在调度器中无 char_id 上下文。

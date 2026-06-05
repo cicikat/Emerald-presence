@@ -206,14 +206,14 @@ def _save(user_id: str, profile: dict, *, char_id: str = "yexuan"):
         log_error("user_profile._save", e)
 
 
-def save(user_id: str, profile: dict):
+def save(user_id: str, profile: dict, *, char_id: str = "yexuan"):
     """公开接口：直接将 profile 写回磁盘（admin 覆盖编辑用）"""
-    _save(user_id, profile)
+    _save(user_id, profile, char_id=char_id)
 
 
-def clear(user_id: str):
+def clear(user_id: str, *, char_id: str = "yexuan"):
     """清空用户画像（admin 用）"""
-    _save(user_id, dict(_DEFAULT_PROFILE))
+    _save(user_id, dict(_DEFAULT_PROFILE), char_id=char_id)
 
 
 # ─── 好感度系统（已冻结） ────────────────────────────────────────────────────────────────
@@ -287,9 +287,9 @@ def get_affection_level(user_id: str) -> dict:
 
 # ─── 生理期 ────────────────────────────────────────────────────────────────────
 
-def get_period_info(user_id: str) -> dict:
+def get_period_info(user_id: str, *, char_id: str = "yexuan") -> dict:
     """读取生理期信息，返回包含 last_period_date 字段的字典"""
-    profile = load(user_id)
+    profile = load(user_id, char_id=char_id)
     return {"last_period_date": profile.get("last_period_date")}
 
 
