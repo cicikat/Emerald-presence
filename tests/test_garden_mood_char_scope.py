@@ -1,0 +1,242 @@
+"""
+tests/test_garden_mood_char_scope.py
+
+P1-0F: garden manager mood_state char_id 隔离验收测试
+
+Covers:
+1. force_water(char_id="hongcha") 读取 hongcha mood，不读 yexuan mood
+2. force_water(char_id="yexuan") 读取 yexuan mood，不读 hongcha mood
+3. auto_water_tick(char_id="hongcha") 读取 hongcha mood
+4. get_state(char_id="hongcha") 使用 hongcha 花园路径，不接触 yexuan 路径
+5. water() 写入 char_id 对应花园路径，不写另一角色路径
+6. 生产调用点（garden_tools.water_garden）透传 active char_id
+7. 生产调用点（admin/routers/garden）透传 active char_id
+8. 回归：char_id="yexuan_j5412" 的 mood 读取到 j5412 路径
+"""
+
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from core.garden import manager as garden_manager
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+def _seed_mood(sandbox, char_id: str, mood: str) -> None:
+    p = sandbox.mood_state(char_id=char_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        json.dumps({"current": mood, "intensity": 0.5, "previous": "neutral", "updated_at": 0.0}),
+        encoding="utf-8",
+    )
+
+
+def _write_active(sandbox, char_id: str) -> None:
+    p = sandbox.active_prompt_assets()
+    p.write_text(
+        json.dumps({"active_character": char_id, "enabled_lorebooks": [], "enabled_jailbreaks": []}),
+        encoding="utf-8",
+    )
+
+
+# ── 1. force_water reads hongcha mood, not yexuan ────────────────────────────
+
+def test_force_water_hongcha_reads_hongcha_mood(sandbox):
+    """force_water(char_id='hongcha') must use hongcha mood, not yexuan's."""
+    # hongcha mood → calm slot (matches neutral-ish moods)
+    # yexuan mood → different slot
+    _seed_mood(sandbox, "hongcha", "neutral")
+    _seed_mood(sandbox, "yexuan", "yandere")
+
+    captured = []
+
+    real_get_current = __import__(
+        "core.memory.mood_state", fromlist=["get_current"]
+    ).get_current
+
+    def spy_get_current(*, char_id="yexuan"):
+        captured.append(char_id)
+        return real_get_current(char_id=char_id)
+
+    with patch("core.memory.mood_state.get_current", side_effect=spy_get_current):
+        garden_manager.force_water(char_id="hongcha")
+
+    assert captured, "get_current must be called"
+    assert all(cid == "hongcha" for cid in captured), (
+        f"force_water(char_id='hongcha') must call get_current(char_id='hongcha'), got {captured}"
+    )
+
+
+# ── 2. force_water reads yexuan mood, not hongcha ────────────────────────────
+
+def test_force_water_yexuan_reads_yexuan_mood(sandbox):
+    """force_water(char_id='yexuan') must use yexuan mood, not hongcha's."""
+    _seed_mood(sandbox, "yexuan", "neutral")
+    _seed_mood(sandbox, "hongcha", "yandere")
+
+    captured = []
+    real_get_current = __import__(
+        "core.memory.mood_state", fromlist=["get_current"]
+    ).get_current
+
+    def spy_get_current(*, char_id="yexuan"):
+        captured.append(char_id)
+        return real_get_current(char_id=char_id)
+
+    with patch("core.memory.mood_state.get_current", side_effect=spy_get_current):
+        garden_manager.force_water(char_id="yexuan")
+
+    assert all(cid == "yexuan" for cid in captured), (
+        f"force_water(char_id='yexuan') must call get_current(char_id='yexuan'), got {captured}"
+    )
+
+
+# ── 3. auto_water_tick passes char_id to get_current ─────────────────────────
+
+def test_auto_water_tick_passes_char_id_to_mood(sandbox, monkeypatch):
+    """auto_water_tick(char_id='hongcha') must call get_current(char_id='hongcha')."""
+    _seed_mood(sandbox, "hongcha", "neutral")
+    # Force probability to always trigger
+    monkeypatch.setattr(garden_manager.random, "random", lambda: 0.0)
+
+    captured = []
+    real_get_current = __import__(
+        "core.memory.mood_state", fromlist=["get_current"]
+    ).get_current
+
+    def spy_get_current(*, char_id="yexuan"):
+        captured.append(char_id)
+        return real_get_current(char_id=char_id)
+
+    with patch("core.memory.mood_state.get_current", side_effect=spy_get_current):
+        garden_manager.auto_water_tick(char_id="hongcha")
+
+    assert captured, "get_current must be called when probability triggers"
+    assert all(cid == "hongcha" for cid in captured), (
+        f"auto_water_tick(char_id='hongcha') must pass char_id='hongcha', got {captured}"
+    )
+
+
+# ── 4. get_state uses char_id garden path, not other char ────────────────────
+
+def test_get_state_uses_char_id_path(sandbox):
+    """get_state(char_id='hongcha') must bootstrap hongcha garden, not yexuan's."""
+    state = garden_manager.get_state(char_id="hongcha")
+
+    hongcha_plants = sandbox.garden(char_id="hongcha") / "plants.json"
+    yexuan_plants  = sandbox.garden(char_id="yexuan") / "plants.json"
+
+    assert hongcha_plants.exists(), "get_state must bootstrap hongcha plants.json"
+    assert not yexuan_plants.exists(), "get_state(char_id='hongcha') must NOT create yexuan plants.json"
+
+    assert "slots" in state
+
+
+# ── 5. water writes to char_id path only ─────────────────────────────────────
+
+def test_water_writes_to_char_id_path_only(sandbox):
+    """water(char_id='hongcha') must write hongcha garden, not yexuan's."""
+    result = garden_manager.water("calm", reason="test", char_id="hongcha")
+
+    hongcha_plants = sandbox.garden(char_id="hongcha") / "plants.json"
+    yexuan_plants  = sandbox.garden(char_id="yexuan") / "plants.json"
+
+    assert result["ok"] is True
+    assert hongcha_plants.exists(), "water must write hongcha plants.json"
+    assert not yexuan_plants.exists(), "water(char_id='hongcha') must not create yexuan plants.json"
+
+    data = json.loads(hongcha_plants.read_text(encoding="utf-8"))
+    assert data["slots"]["calm"]["growth"] > 0
+
+
+# ── 6. garden_tools.water_garden passes active char_id ───────────────────────
+
+@pytest.mark.asyncio
+async def test_water_garden_tool_passes_active_char_id(sandbox):
+    """water_garden() must resolve active_character and pass it to force_water."""
+    _write_active(sandbox, "hongcha")
+
+    captured_char_ids = []
+    real_force_water = garden_manager.force_water
+
+    def spy_force_water(mood=None, *, char_id="yexuan"):
+        captured_char_ids.append(char_id)
+        return {"ok": False, "reason": "no_slot_for_mood", "mood": "neutral"}
+
+    with patch.object(garden_manager, "force_water", side_effect=spy_force_water):
+        from core.tools.garden_tools import water_garden
+        await water_garden()
+
+    assert captured_char_ids, "force_water must be called"
+    assert captured_char_ids[0] == "hongcha", (
+        f"water_garden must pass active char_id='hongcha', got {captured_char_ids[0]!r}"
+    )
+
+
+# ── 7. admin garden route passes active char_id ──────────────────────────────
+
+@pytest.mark.asyncio
+async def test_garden_admin_route_passes_active_char_id(sandbox):
+    """GET /garden/state must call get_state(char_id=active_character)."""
+    _write_active(sandbox, "hongcha")
+
+    captured = []
+    real_get_state = garden_manager.get_state
+
+    def spy_get_state(*, char_id="yexuan"):
+        captured.append(char_id)
+        return real_get_state(char_id=char_id)
+
+    with patch.object(garden_manager, "get_state", side_effect=spy_get_state):
+        from admin.routers.garden import _active_char_id
+        resolved = _active_char_id()
+
+    assert resolved == "hongcha", (
+        f"admin garden router must resolve active char_id='hongcha', got {resolved!r}"
+    )
+
+
+# ── 8. char_id='yexuan_j5412' reads j5412 mood path ─────────────────────────
+
+def test_explicit_char_id_reads_correct_mood_path(sandbox):
+    """force_water(char_id='yexuan_j5412') reads j5412 mood bucket, not base yexuan."""
+    _seed_mood(sandbox, "yexuan_j5412", "happy")
+    _seed_mood(sandbox, "yexuan", "sleepy")
+
+    captured = []
+    real_get_current = __import__(
+        "core.memory.mood_state", fromlist=["get_current"]
+    ).get_current
+
+    def spy_get_current(*, char_id="yexuan"):
+        captured.append(char_id)
+        return real_get_current(char_id=char_id)
+
+    with patch("core.memory.mood_state.get_current", side_effect=spy_get_current):
+        garden_manager.force_water(char_id="yexuan_j5412")
+
+    assert captured, "get_current must be called"
+    assert all(cid == "yexuan_j5412" for cid in captured), (
+        f"force_water(char_id='yexuan_j5412') must read j5412 mood, got {captured}"
+    )
+
+
+# ── 9. two-char isolation: hongcha garden ≠ yexuan garden ────────────────────
+
+def test_two_char_garden_isolation(sandbox):
+    """Watering hongcha and yexuan gardens must be completely independent."""
+    # Water yexuan 3 times
+    for _ in range(3):
+        garden_manager.water("calm", reason="test", char_id="yexuan")
+
+    # Water hongcha 1 time
+    garden_manager.water("calm", reason="test", char_id="hongcha")
+
+    yexuan_data  = json.loads((sandbox.garden(char_id="yexuan") / "plants.json").read_text())
+    hongcha_data = json.loads((sandbox.garden(char_id="hongcha") / "plants.json").read_text())
+
+    assert yexuan_data["slots"]["calm"]["growth"] == 30, "yexuan calm growth must be 30"
+    assert hongcha_data["slots"]["calm"]["growth"] == 10, "hongcha calm growth must be 10"

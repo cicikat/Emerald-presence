@@ -1,12 +1,13 @@
 """
 core/garden/manager — 五株并行花园系统核心逻辑。
-数据目录: data/garden/（via get_paths().garden()）
+数据目录: data/runtime/characters/{char_id}/garden/（via get_paths().garden(char_id=)）
 
 公开函数：
-  water(slot_key, *, reason) -> dict
-  auto_water_tick() -> dict | None
-  force_water(mood=None) -> dict
-  get_state() -> dict
+  water(slot_key, *, reason, char_id) -> dict
+  auto_water_tick(*, char_id) -> dict | None
+  force_water(mood=None, *, char_id) -> dict
+  daily_check(*, char_id) -> list
+  get_state(*, char_id) -> dict
 """
 
 import json
@@ -37,22 +38,20 @@ _garden_lock = threading.RLock()
 
 # ── 路径 helpers ───────────────────────────────────────────────────────────────
 
-def _plants_path() -> Path:
-    """写路径：始终指向新布局。"""
-    return get_paths().garden() / "plants.json"
+def _plants_path(char_id: str = "yexuan") -> Path:
+    return get_paths().garden(char_id=char_id) / "plants.json"
 
 
-def _storage_path() -> Path:
-    """写路径：始终指向新布局。"""
-    return get_paths().garden() / "storage.json"
+def _storage_path(char_id: str = "yexuan") -> Path:
+    return get_paths().garden(char_id=char_id) / "storage.json"
 
 
-def _read_plants_path() -> Path:
-    return _plants_path()
+def _read_plants_path(char_id: str = "yexuan") -> Path:
+    return _plants_path(char_id)
 
 
-def _read_storage_path() -> Path:
-    return _storage_path()
+def _read_storage_path(char_id: str = "yexuan") -> Path:
+    return _storage_path(char_id)
 
 
 # ── JSON I/O ──────────────────────────────────────────────────────────────────
@@ -64,7 +63,7 @@ def _load(path: Path, default):
         return default
 
 
-def _save(path: Path, data) -> None:
+def _save(path: Path, data, *, char_id: str = "yexuan") -> None:
     if not safe_write_json(path, data):
         raise OSError(f"failed to write garden state: {path}")
     if _TRANSITION_CHARACTER_INNER:
@@ -100,10 +99,10 @@ def _resolve_slot_for_mood(mood: str) -> str | None:
     return None
 
 
-def _bootstrap() -> dict:
+def _bootstrap(*, char_id: str = "yexuan") -> dict:
     """plants.json 不存在则初始化五槽位；storage.json 不存在则初始化空仓库。返回 plants 数据。"""
-    read_plants = _read_plants_path()
-    read_storage = _read_storage_path()
+    read_plants = _read_plants_path(char_id)
+    read_storage = _read_storage_path(char_id)
 
     if not read_plants.exists():
         now = time.time()
@@ -119,12 +118,12 @@ def _bootstrap() -> dict:
                 "bloomed_at": None,
             }
         data = {"slots": slots}
-        _save(_plants_path(), data)
+        _save(_plants_path(char_id), data, char_id=char_id)
     else:
         data = _load(read_plants, {"slots": {}})
 
     if not read_storage.exists():
-        _save(_storage_path(), {"harvest": [], "vase": [], "history": []})
+        _save(_storage_path(char_id), {"harvest": [], "vase": [], "history": []}, char_id=char_id)
 
     return data
 
@@ -150,10 +149,10 @@ def _on_bloom(plant: dict, storage: dict) -> None:
 
 # ── 公开函数 ───────────────────────────────────────────────────────────────────
 
-def water(slot_key: str, *, reason: str) -> dict:
+def water(slot_key: str, *, reason: str, char_id: str = "yexuan") -> dict:
     """给指定槽位浇一次水，推进 growth / stage，bloom 时自动重播种。"""
     with _garden_lock:
-        data = _bootstrap()
+        data = _bootstrap(char_id=char_id)
         slots = data["slots"]
 
         if slot_key not in slots:
@@ -174,15 +173,15 @@ def water(slot_key: str, *, reason: str) -> dict:
         events = []
         if bloomed:
             plant["bloomed_at"] = time.time()
-            storage = _load(_read_storage_path(), {"harvest": [], "vase": [], "history": []})
+            storage = _load(_read_storage_path(char_id), {"harvest": [], "vase": [], "history": []})
             _on_bloom(plant, storage)
-            _save(_storage_path(), storage)
+            _save(_storage_path(char_id), storage, char_id=char_id)
             meta = _flower_meta(plant["flower_id"])
             events.append({"type": "bloom", "flower_id": plant["flower_id"], "name": meta["name"]})
         else:
             plant["stage"] = new_stage
 
-        _save(_plants_path(), data)
+        _save(_plants_path(char_id), data, char_id=char_id)
 
         return {
             "ok": True,
@@ -196,47 +195,47 @@ def water(slot_key: str, *, reason: str) -> dict:
         }
 
 
-def auto_water_tick() -> dict | None:
+def auto_water_tick(*, char_id: str = "yexuan") -> dict | None:
     """scheduler 调用入口。按概率 roll，命中后读 mood 并浇对应槽位。"""
     if random.random() >= AUTO_WATER_PROBABILITY:
         return None
 
     from core.memory.mood_state import get_current
-    mood = get_current()
+    mood = get_current(char_id=char_id)
 
     slot_key = _resolve_slot_for_mood(mood)
     if slot_key is None:
         return None
 
-    result = water(slot_key, reason="auto")
+    result = water(slot_key, reason="auto", char_id=char_id)
     logger.info(
-        "[garden] auto water: mood=%s slot=%s stage=%s growth=%s bloomed=%s",
-        mood, slot_key, result.get("stage"), result.get("growth"), result.get("bloomed"),
+        "[garden] auto water: char=%s mood=%s slot=%s stage=%s growth=%s bloomed=%s",
+        char_id, mood, slot_key, result.get("stage"), result.get("growth"), result.get("bloomed"),
     )
     return result
 
 
-def force_water(mood: str | None = None) -> dict:
+def force_water(mood: str | None = None, *, char_id: str = "yexuan") -> dict:
     """被动浇水入口（工具调用）。mood 为 None 时自动读当前情绪。"""
     if mood is None:
         from core.memory.mood_state import get_current
-        mood = get_current()
+        mood = get_current(char_id=char_id)
 
     slot_key = _resolve_slot_for_mood(mood)
     if slot_key is None:
         return {"ok": False, "reason": "no_slot_for_mood", "mood": mood}
 
-    return water(slot_key, reason="force")
+    return water(slot_key, reason="force", char_id=char_id)
 
 
-def daily_check() -> list:
+def daily_check(*, char_id: str = "yexuan") -> list:
     """
     每天扫一次：harvest 过期 / harvest 触发 handle / vase 枯萎。
     状态变更必执行；返回事件列表给上层 trigger 决定是否让叶瑄说话。
     """
     with _garden_lock:
-        _bootstrap()
-        storage = _load(_read_storage_path(), {"harvest": [], "vase": [], "history": []})
+        _bootstrap(char_id=char_id)
+        storage = _load(_read_storage_path(char_id), {"harvest": [], "vase": [], "history": []})
         now = time.time()
         events = []
 
@@ -307,16 +306,16 @@ def daily_check() -> list:
             meta = _flower_meta(item["flower_id"])
             events.append({"type": "vase_wilted", "flower_id": item["flower_id"], "name": meta["name"]})
 
-        _save(_storage_path(), storage)
+        _save(_storage_path(char_id), storage, char_id=char_id)
         return events
 
 
-def get_state() -> dict:
+def get_state(*, char_id: str = "yexuan") -> dict:
     """给 admin 路由返回完整花园状态。"""
     with _garden_lock:
-        data = _bootstrap()
+        data = _bootstrap(char_id=char_id)
         slots = data["slots"]
-        storage = _load(_read_storage_path(), {"harvest": [], "vase": [], "history": []})
+        storage = _load(_read_storage_path(char_id), {"harvest": [], "vase": [], "history": []})
 
         result_slots = []
         for flower in FLOWERS:

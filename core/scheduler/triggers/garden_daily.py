@@ -16,6 +16,32 @@ GARDEN_EVENT_PROPOSAL_TTL_SECONDS = 24 * 3600
 _LAST_DAILY_EVENTS: list[dict] = []
 
 
+def _active_char_id() -> str | None:
+    try:
+        import json as _j
+        raw = _j.loads(
+            __import__("core.sandbox", fromlist=["get_paths"]).get_paths()
+            .active_prompt_assets().read_text(encoding="utf-8")
+        )
+        cid = (raw.get("active_character") or "").strip()
+    except Exception:
+        logger.warning("[garden_daily] active_prompt_assets 读取失败，跳过本次 tick")
+        return None
+
+    if not cid:
+        logger.warning("[garden_daily] active_character 为空，跳过本次 tick")
+        return None
+
+    try:
+        from core.asset_registry import get_registry
+        get_registry().resolve(cid, "character")
+    except ValueError:
+        logger.warning("[garden_daily] active_character %r 不在注册表，跳过本次 tick", cid)
+        return None
+
+    return cid
+
+
 async def _check_garden_daily() -> None:
     from core.scheduler.execution import legacy_tick_should_send
 
@@ -24,8 +50,11 @@ async def _check_garden_daily() -> None:
     _mark("garden_daily")
     legacy_send = legacy_tick_should_send()
 
+    char_id = _active_char_id()
+    if char_id is None:
+        return
     try:
-        events = garden_manager.daily_check()
+        events = garden_manager.daily_check(char_id=char_id)
     except Exception:
         logger.exception("[garden] daily_check failed")
         return

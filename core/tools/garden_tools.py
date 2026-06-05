@@ -18,13 +18,40 @@ _STAGE_CN = {
 }
 
 
+def _active_char_id() -> str | None:
+    try:
+        import json as _j
+        from core.sandbox import get_paths
+        raw = _j.loads(get_paths().active_prompt_assets().read_text(encoding="utf-8"))
+        cid = (raw.get("active_character") or "").strip()
+    except Exception:
+        logger.warning("[garden_tools] active_prompt_assets 读取失败")
+        return None
+
+    if not cid:
+        logger.warning("[garden_tools] active_character 为空")
+        return None
+
+    try:
+        from core.asset_registry import get_registry
+        get_registry().resolve(cid, "character")
+    except ValueError:
+        logger.warning("[garden_tools] active_character %r 不在注册表", cid)
+        return None
+
+    return cid
+
+
 async def water_garden() -> str:
     """
     用户催角色去浇花时调用。角色会根据当前心情选择花园里对应那一株来浇。
     无参数，无冷却。返回一句给 LLM 的状态描述，角色基于这句话自然回复。
     """
     char = _char_name()
-    result = garden_manager.force_water()
+    char_id = _active_char_id()
+    if char_id is None:
+        return f"{char}想去浇水，但暂时找不到当前活跃角色，没浇成。"
+    result = garden_manager.force_water(char_id=char_id)
 
     if not result.get("ok"):
         reason = result.get("reason", "unknown")

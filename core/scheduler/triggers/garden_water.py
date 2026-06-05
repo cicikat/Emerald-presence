@@ -15,6 +15,32 @@ GARDEN_EVENT_PROPOSAL_TTL_SECONDS = 10 * 60
 _LAST_BLOOM_EVENTS: list[dict] = []
 
 
+def _active_char_id() -> str | None:
+    try:
+        import json as _j
+        raw = _j.loads(
+            __import__("core.sandbox", fromlist=["get_paths"]).get_paths()
+            .active_prompt_assets().read_text(encoding="utf-8")
+        )
+        cid = (raw.get("active_character") or "").strip()
+    except Exception:
+        logger.warning("[garden_water] active_prompt_assets 读取失败，跳过本次 tick")
+        return None
+
+    if not cid:
+        logger.warning("[garden_water] active_character 为空，跳过本次 tick")
+        return None
+
+    try:
+        from core.asset_registry import get_registry
+        get_registry().resolve(cid, "character")
+    except ValueError:
+        logger.warning("[garden_water] active_character %r 不在注册表，跳过本次 tick", cid)
+        return None
+
+    return cid
+
+
 async def _check_garden_water() -> None:
     from core.scheduler.execution import legacy_tick_should_send
 
@@ -23,8 +49,11 @@ async def _check_garden_water() -> None:
     _mark("garden_water")
     legacy_send = legacy_tick_should_send()
 
+    char_id = _active_char_id()
+    if char_id is None:
+        return
     try:
-        result = garden_manager.auto_water_tick()
+        result = garden_manager.auto_water_tick(char_id=char_id)
     except Exception:
         logger.exception("[garden] auto_water_tick failed")
         return
