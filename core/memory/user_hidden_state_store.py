@@ -42,8 +42,9 @@ from core.memory.user_hidden_state import (
     to_dict,
     to_dream_snapshot,
 )
+from core.memory.path_resolver import resolve_path
+from core.memory.scope import MemoryScope
 from core.safe_write import safe_write_json
-from core.sandbox import get_paths
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,8 @@ def load_hidden_state(uid: str | int, *, char_id: str = "yexuan") -> UserHiddenS
 
     Path: user_memory_root(uid, char_id=char_id) / hidden_state.json
     """
-    path: Path = get_paths().user_memory_root(uid, char_id=char_id) / HIDDEN_STATE_FILENAME
+    scope = MemoryScope.reality_scope(str(uid), char_id)
+    path: Path = resolve_path(scope, "hidden_state")
 
     if not path.exists():
         return default_hidden_state()
@@ -118,7 +120,8 @@ def _load_afterglow_raw(uid: str | int, *, char_id: str = "yexuan") -> dict | No
     Internal helper called by read_afterglow_residue() in user_hidden_state.py.
     Read-only.  Does NOT write anything.  Does NOT emit a WriteEnvelope stamp.
     """
-    path: Path = get_paths().user_memory_root(uid, char_id=char_id) / AFTERGLOW_FILENAME
+    scope = MemoryScope.reality_scope(str(uid), char_id)
+    path: Path = resolve_path(scope, "afterglow_residue")
     if not path.exists():
         return None
     try:
@@ -152,7 +155,8 @@ def save_afterglow_residue(
         logger.warning("[afterglow] save_afterglow_residue: invalid residue type %r", type(residue).__name__)
         return False
 
-    path: Path = get_paths().user_memory_root(uid, char_id=char_id) / AFTERGLOW_FILENAME
+    scope = MemoryScope.reality_scope(str(uid), char_id)
+    path: Path = resolve_path(scope, "afterglow_residue")
     data = {
         "emotional_tags": list(residue.emotional_tags),
         "tone": residue.tone,
@@ -176,7 +180,8 @@ def save_hidden_state(uid: str | int, state: UserHiddenState, *, char_id: str = 
 
     Path: user_memory_root(uid, char_id=char_id) / hidden_state.json
     """
-    path: Path = get_paths().user_memory_root(uid, char_id=char_id) / HIDDEN_STATE_FILENAME
+    scope = MemoryScope.reality_scope(str(uid), char_id)
+    path: Path = resolve_path(scope, "hidden_state")
     data = to_dict(state)
     ok = safe_write_json(path, data)
     if not ok:
