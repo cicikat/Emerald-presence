@@ -436,7 +436,9 @@ async def desktop_wake(body: dict = Body(default={})):
             uid=uid,
             channel="desktop",
             kind="wake",
-            payload=body if isinstance(body, dict) else {},
+            # payload={} — do NOT include last_seen or any per-request dynamic field;
+            # wake identity is fully encoded by source+uid+char+channel+kind+bucket.
+            payload={},
         )
         _pe_result = await _rpe(_pe)
     except Exception:
