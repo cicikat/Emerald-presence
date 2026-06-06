@@ -192,6 +192,7 @@ def build(
     tags: set[str] | None = None,
     dream_impression_text: str = "",
     char_id: str = "yexuan",
+    user_facts_text: str = "",
 ) -> tuple[list[dict], dict]:
     """
     组装完整的 prompt 消息列表
@@ -513,6 +514,22 @@ def build(
             "role": "system",
             "content": "【关于这个用户】\n" + "，".join(profile_parts),
             "_layer": "5_profile",
+        })
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 层 5.1：全局用户事实（跨角色客观信息，与角色主观记忆无关）
+    # 来自 user_facts.py；uid-only，不含角色关系史或主观印象。
+    # 标题明确区分：角色不应把此处内容当作自己的记忆或感受。
+    # ─────────────────────────────────────────────────────────────────────────
+    if user_facts_text:
+        _layers.append("5.1_user_facts")
+        messages.append({
+            "role": "system",
+            "content": (
+                "【用户客观信息（跨角色通用，非角色记忆）】\n"
+                + user_facts_text
+            ),
+            "_layer": "5.1_user_facts",
         })
 
     # ─────────────────────────────────────────────────────────────────────────

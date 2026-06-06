@@ -174,10 +174,11 @@ class Pipeline:
         返回 context 字典，供 build_prompt 使用：
         {
             "history":            list[dict],  # 短期对话历史
-            "profile":            dict,        # 用户画像
+            "profile":            dict,        # 用户画像（scoped by char_id）
             "relation":           dict,        # 用户关系配置
             "group_context":      str,         # 群消息流（私聊为 ""）
-            "user_identity_text": str,         # 用户稳定行为模式描述
+            "user_identity_text": str,         # 用户稳定行为模式描述（scoped by char_id）
+            "user_facts_text":    str,         # 跨角色全局用户事实（uid-only，无 char_id）
             "event_search_result": str,        # 事件日志语义搜索结果
             "lore_entries":       list[str],   # 命中的世界书条目
         }
@@ -189,7 +190,7 @@ class Pipeline:
         assert char_id is not None
 
         from core.memory import short_term, user_profile, group_context, event_log, mid_term
-        from core.memory import user_identity
+        from core.memory import user_identity, user_facts
         from core import user_relation, llm_client
 
         # 需要 IO 的任务并发进行
@@ -246,6 +247,8 @@ class Pipeline:
         profile              = await profile_future
         mid_term_text        = await mid_term_future
         user_identity_text   = await user_identity.format_for_prompt(uid, char_id=char_id)
+        # uid-only global facts — no char_id, no fallback
+        user_facts_text      = user_facts.format_for_prompt(uid)
 
         from core.tools.reminder import get_reminders
         reminders = get_reminders(uid)
@@ -276,6 +279,7 @@ class Pipeline:
             "relation":            relation,
             "group_context":       recent_group_ctx,
             "user_identity_text":  user_identity_text,
+            "user_facts_text":     user_facts_text,
             "event_search_result": event_search_result,
             "lore_entries":        lore_entries,
             "reminders":           reminders,
@@ -342,6 +346,7 @@ class Pipeline:
             profile=context["profile"],
             group_context=context["group_context"],
             user_identity_text=context["user_identity_text"],
+            user_facts_text=context.get("user_facts_text", ""),
             event_search_result=context["event_search_result"],
             lore_entries=context["lore_entries"],
             tool_result=tool_result,

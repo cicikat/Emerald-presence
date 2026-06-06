@@ -163,8 +163,10 @@ def resolve_path(scope: MemoryScope, artifact: str) -> Path:
     # ── global-scoped: (uid) only — char_id is None in scope ────────────────
 
     if artifact == "user_facts":
-        # Planned layout: {data_base}/global_facts/{uid}.json
-        return paths._p("global_facts", uid + ".json")
+        # Global per-user: data/runtime/memory/global/{uid}/user_facts.json
+        # Parallel to reality user_memory_root (data/runtime/memory/{char_id}/{uid}/)
+        # but without char_id since this is cross-character.
+        return paths._p("runtime", "memory", "global", uid, "user_facts.json")
 
     # ── dream-scoped: (char_id, uid, world_id) ───────────────────────────────
 
