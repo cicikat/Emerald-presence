@@ -13,7 +13,7 @@ from pathlib import Path
 from core.config_loader import get_config
 from core.error_handler import log_error
 from core.memory.path_resolver import resolve_path
-from core.memory.scope import MemoryScope
+from core.memory.scope import MemoryScope, require_character_id
 from core.safe_write import safe_write_json
 from core.sandbox import safe_user_id
 
@@ -229,12 +229,14 @@ def _log_turn_group_score(user_id, group: list[dict], selected: bool, total: flo
 
 
 def _history_path(user_id: str, *, char_id: str = "yexuan") -> Path:
+    require_character_id(char_id)
     scope = MemoryScope.reality_scope(safe_user_id(user_id), char_id)
     return resolve_path(scope, "history")
 
 
 def _history_write_path(user_id: str, *, char_id: str = "yexuan") -> Path:
     """写路径：始终写新布局。"""
+    require_character_id(char_id)
     scope = MemoryScope.reality_scope(safe_user_id(user_id), char_id)
     p = resolve_path(scope, "history")
     p.parent.mkdir(parents=True, exist_ok=True)

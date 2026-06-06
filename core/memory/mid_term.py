@@ -11,7 +11,7 @@ from pathlib import Path
 
 from core.error_handler import log_error
 from core.memory.path_resolver import resolve_path
-from core.memory.scope import MemoryScope
+from core.memory.scope import MemoryScope, require_character_id
 from core.safe_write import safe_write_json
 
 logger = logging.getLogger(__name__)
@@ -21,11 +21,13 @@ MAX_EVENTS = 20
 
 
 def _read_file(uid: str, *, char_id: str = "yexuan") -> Path:
+    require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(uid), char_id)
     return resolve_path(scope, "mid_term")
 
 
 def _write_file(uid: str, *, char_id: str = "yexuan") -> Path:
+    require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(uid), char_id)
     p = resolve_path(scope, "mid_term")
     p.parent.mkdir(parents=True, exist_ok=True)

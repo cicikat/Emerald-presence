@@ -10,7 +10,7 @@ import math
 import time
 from pathlib import Path
 
-from core.memory.scope import MemoryScope
+from core.memory.scope import MemoryScope, require_character_id
 from core.memory.path_resolver import resolve_path
 from core.sandbox import safe_user_id
 from core.safe_write import safe_write_json
@@ -20,12 +20,14 @@ logger = logging.getLogger(__name__)
 
 
 def _mem_read_file(user_id: str, *, char_id: str = "yexuan") -> Path:
+    require_character_id(char_id)
     uid = safe_user_id(user_id)
     scope = MemoryScope.reality_scope(uid, char_id)
     return resolve_path(scope, "episodic")
 
 
 def _mem_write_file(user_id: str, *, char_id: str = "yexuan") -> Path:
+    require_character_id(char_id)
     uid = safe_user_id(user_id)
     scope = MemoryScope.reality_scope(uid, char_id)
     p = resolve_path(scope, "episodic")
@@ -34,12 +36,14 @@ def _mem_write_file(user_id: str, *, char_id: str = "yexuan") -> Path:
 
 
 def _index_read_file(user_id: str, *, char_id: str = "yexuan") -> Path:
+    require_character_id(char_id)
     uid = safe_user_id(user_id)
     scope = MemoryScope.reality_scope(uid, char_id)
     return resolve_path(scope, "memory_index")
 
 
 def _index_write_file(user_id: str, *, char_id: str = "yexuan") -> Path:
+    require_character_id(char_id)
     uid = safe_user_id(user_id)
     scope = MemoryScope.reality_scope(uid, char_id)
     p = resolve_path(scope, "memory_index")
@@ -48,6 +52,7 @@ def _index_write_file(user_id: str, *, char_id: str = "yexuan") -> Path:
 
 
 def _load_memories(user_id: str, *, char_id: str = "yexuan") -> list:
+    require_character_id(char_id)  # guard before try — ValueError must not be swallowed
     try:
         return json.loads(_mem_read_file(user_id, char_id=char_id).read_text(encoding="utf-8"))
     except Exception:
@@ -70,6 +75,7 @@ def load_unconsolidated(user_id: str, *, char_id: str = "yexuan") -> list[dict]:
 
 
 def _load_index(user_id: str, *, char_id: str = "yexuan") -> dict:
+    require_character_id(char_id)  # guard before try — ValueError must not be swallowed
     try:
         return json.loads(_index_read_file(user_id, char_id=char_id).read_text(encoding="utf-8"))
     except Exception:

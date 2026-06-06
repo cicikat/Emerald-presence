@@ -79,3 +79,16 @@ class MemoryScope:
             character_id=payload.get("character_id"),
             world_id=payload.get("world_id"),
         )
+
+
+def require_character_id(char_id: object) -> str:
+    """Validate that char_id is a non-empty string.  Raises ValueError otherwise.
+
+    Call at the top of every scoped-store path helper so invalid char_id is
+    rejected before any string processing or scope construction.
+    """
+    if not isinstance(char_id, str) or not char_id:
+        raise ValueError(
+            f"character_id must be a non-empty string, got {char_id!r}"
+        )
+    return char_id

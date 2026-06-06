@@ -11,7 +11,8 @@ from pathlib import Path
 
 from core.config_loader import get_config, _char_name
 from core.error_handler import log_error
-from core.sandbox import get_paths, safe_user_id
+from core.memory.path_resolver import resolve_path
+from core.memory.scope import MemoryScope, require_character_id
 
 logger = logging.getLogger(__name__)
 _CHAR = _char_name()
@@ -28,14 +29,15 @@ _DEFAULT_PROFILE = {
 
 
 def _profile_read_path(user_id: str, *, char_id: str = "yexuan") -> Path:
-    uid = safe_user_id(user_id)
-    return get_paths().user_memory_root(uid, char_id=char_id) / "profile.json"
+    require_character_id(char_id)
+    scope = MemoryScope.reality_scope(str(user_id), char_id)
+    return resolve_path(scope, "profile")
 
 
 def _profile_write_path(user_id: str, *, char_id: str = "yexuan") -> Path:
-    """写路径：始终写新布局。"""
-    uid = safe_user_id(user_id)
-    p = get_paths().user_memory_root(uid, char_id=char_id) / "profile.json"
+    require_character_id(char_id)
+    scope = MemoryScope.reality_scope(str(user_id), char_id)
+    p = resolve_path(scope, "profile")
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 

@@ -12,7 +12,7 @@ import yaml
 
 from core.memory.locks import uid_lock
 from core.memory.path_resolver import resolve_path
-from core.memory.scope import MemoryScope
+from core.memory.scope import MemoryScope, require_character_id
 from core.safe_write import safe_write_text
 
 logger = logging.getLogger(__name__)
@@ -33,11 +33,13 @@ _REQUIRED_FIELDS = {"text", "confidence", "evidence_count", "last_updated"}
 
 
 def _identity_read_file(user_id: str, *, char_id: str = "yexuan") -> Path:
+    require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(user_id), char_id)
     return resolve_path(scope, "identity")
 
 
 def _identity_write_file(user_id: str, *, char_id: str = "yexuan") -> Path:
+    require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(user_id), char_id)
     p = resolve_path(scope, "identity")
     p.parent.mkdir(parents=True, exist_ok=True)

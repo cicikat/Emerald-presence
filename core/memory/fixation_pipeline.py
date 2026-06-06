@@ -20,7 +20,7 @@ from typing import Literal
 
 from core.error_handler import log_error
 from core.memory.path_resolver import resolve_path
-from core.memory.scope import MemoryScope
+from core.memory.scope import MemoryScope, require_character_id
 from core.safe_write import rotate_jsonl_if_needed, safe_append_jsonl, safe_write_json, safe_write_text
 from core.sandbox import get_paths
 
@@ -98,12 +98,14 @@ _IDENTITY_SYSTEM_PROMPT = """\
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _state_read_file(uid: str, *, char_id: str = "yexuan") -> Path:
+    require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(uid), char_id)
     return resolve_path(scope, "fixation_state")
 
 
 def _state_write_file(uid: str, *, char_id: str = "yexuan") -> Path:
     """写路径：始终写新布局。"""
+    require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(uid), char_id)
     p = resolve_path(scope, "fixation_state")
     p.parent.mkdir(parents=True, exist_ok=True)
