@@ -1,5 +1,5 @@
 """
-garden_water trigger — 每 30 分钟 roll 一次自动浇水。
+garden_water trigger — 每 300 分钟 roll 一次自动浇水。
 开花时让叶瑄说一句（低频里程碑，不 sample）。
 """
 

@@ -71,7 +71,7 @@
 
 ### 自动浇水
 
-`garden_water` 冷却 30 分钟；触发后有 30% 概率命中。
+`garden_water` 冷却 300 分钟；触发后有 30% 概率命中。
 
 ```
 _check_garden_water()

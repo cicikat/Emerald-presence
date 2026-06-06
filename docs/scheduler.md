@@ -245,7 +245,7 @@ window 拦截、LLM 空回复或发送前异常时，不调用 execute 的 `afte
 | `festival` | 20h | 低 | festival | 节日感知 |
 | `holiday_boost` | 2h | 低 | festival | 长假加速发送 |
 | `episodic_sweep` | 30min | 低 | episodic_sweep | mid_term 老化扫描，aged > 11h 且未晋升的条目批量入队 reflect_to_episodic |
-| `garden_water` | 30min | 低 | garden_water | 30% 概率按当前 mood_state 给对应花槽自动浇水 |
+| `garden_water` | 300min | 低 | garden_water | 30% 概率按当前 mood_state 给对应花槽自动浇水 |
 | `garden_daily` | 24h | 低 | garden_daily | 扫描 harvest 过期、采后处理、花瓶枯萎 |
 | `garden_bloom` | 8h | 低 | garden_water | 开花事件发言名；事件发言前单独 check/mark |
 | `garden_harvest_expired` | 4h | 低 | garden_daily | 收获过期事件发言名；事件发言前单独 check/mark |
