@@ -148,6 +148,16 @@ class Pipeline:
                 self.lore_engine.load_entries(new_char.world_book)
         logger.info(f"[pipeline] character hot-swapped to {new_id!r} ({new_char.name})")
 
+    def _current_reality_scope(self, user_id: str) -> MemoryScope:
+        """Construct a reality-domain MemoryScope for the active character.
+
+        Calls _refresh_character_if_needed() — raises ValueError/RuntimeError on
+        invalid active character.  Callers must not call _refresh_character_if_needed()
+        again separately.
+        """
+        self._refresh_character_if_needed()
+        return MemoryScope.reality_scope(str(user_id), self._active_character_id)
+
     # ──────────────────────────────────────────────────────────────────────────
     # 步骤 1：并发拉取记忆数据 + 世界书匹配
     # ──────────────────────────────────────────────────────────────────────────
@@ -172,92 +182,92 @@ class Pipeline:
             "lore_entries":       list[str],   # 命中的世界书条目
         }
         """
-        # Guard: validate active_character before reading any memory.
-        # Raises ValueError/RuntimeError on invalid state — aborts the turn.
-        self._refresh_character_if_needed()
+        # Guard: validates active_character and constructs scope; raises on invalid state.
+        scope = self._current_reality_scope(user_id)
+        uid = scope.uid
+        char_id = scope.character_id
+        assert char_id is not None
 
         from core.memory import short_term, user_profile, group_context, event_log, mid_term
         from core.memory import user_identity
         from core import user_relation, llm_client
 
-        _char_id = self._active_character_id
-
         # 需要 IO 的任务并发进行
         loop = asyncio.get_event_loop()
         event_search_task = asyncio.create_task(
-            event_log.search(user_id, content, llm_client, char_id=_char_id)
+            event_log.search(uid, content, llm_client, char_id=char_id)
         )
         profile_future = loop.run_in_executor(
-            None, lambda: user_profile.load(user_id, char_id=_char_id)
+            None, lambda: user_profile.load(uid, char_id=char_id)
         )
         mid_term_future = loop.run_in_executor(
-            None, lambda: mid_term.format_for_prompt(user_id, char_id=_char_id)
+            None, lambda: mid_term.format_for_prompt(uid, char_id=char_id)
         )
 
         # 同步读取（内存/小文件，不值得并发）
-        history          = short_term.load_for_prompt(user_id, char_id=_char_id)
+        history          = short_term.load_for_prompt(uid, char_id=char_id)
         recent_group_ctx = group_context.get_recent(group_id)
-        relation         = user_relation.get_relation(user_id)
+        relation         = user_relation.get_relation(uid)
         lore_entries     = self.lore_engine.match(content, history)
 
         # 情景记忆检索
         from core.memory.episodic_memory import retrieve, format_for_prompt
         episodic_memories = retrieve(
-            user_id=user_id,
+            user_id=uid,
             topic=content,
             top_k=3,
-            char_id=_char_id,
+            char_id=char_id,
         )
         from core.memory.mood_state import get_current as _get_mood
         episodic_result = format_for_prompt(
             episodic_memories,
             char_name=self.character.name,
-            current_emotion=_get_mood(char_id=_char_id),
+            current_emotion=_get_mood(char_id=char_id),
         )
 
         # 兜底召回：tag 未命中时备用，存入 context 供 prompt_builder 判断
         from core.memory.episodic_memory import retrieve_fallback
         _recent_texts = [h.get("content", "") for h in history[-5:]]
         episodic_fallback = retrieve_fallback(
-            user_id=user_id,
+            user_id=uid,
             recent_history=_recent_texts,
             top_k=1,
-            char_id=_char_id,
+            char_id=char_id,
         )
         from core.memory.mood_state import get_current as _get_mood2
         episodic_fallback_result = format_for_prompt(
             episodic_fallback,
             char_name=self.character.name,
-            current_emotion=_get_mood2(char_id=_char_id),
+            current_emotion=_get_mood2(char_id=char_id),
         ) if episodic_fallback else ""
 
         # 等待异步任务
         event_search_result  = await event_search_task
         profile              = await profile_future
         mid_term_text        = await mid_term_future
-        user_identity_text   = await user_identity.format_for_prompt(user_id, char_id=_char_id)
+        user_identity_text   = await user_identity.format_for_prompt(uid, char_id=char_id)
 
         from core.tools.reminder import get_reminders
-        reminders = get_reminders(user_id)
+        reminders = get_reminders(uid)
         from core.memory.diary_context import load as _load_diary
-        diary_context = _load_diary(user_id)
+        diary_context = _load_diary(uid)
 
         from datetime import datetime
         _hour = datetime.now().hour
         if _hour >= 23 or _hour < 6:
             from core.memory.mood_state import get_current as _mood_get, update as _mood_update
-            if _mood_get(char_id=_char_id) not in ("yandere", "angry"):
-                _mood_update("sleepy", source="schedule", char_id=_char_id)
+            if _mood_get(char_id=char_id) not in ("yandere", "angry"):
+                _mood_update("sleepy", source="schedule", char_id=char_id)
 
         # Dream impression — ambient, read-only, never written by reality chain
         try:
             from core.dream.impression_loader import load_impression_text as _load_imp
-            dream_impression_text = _load_imp(user_id, char_id=_char_id)
+            dream_impression_text = _load_imp(uid, char_id=char_id)
         except Exception:
             dream_impression_text = ""
 
         logger.debug(
-            f"[pipeline.fetch_context] uid={user_id} "
+            f"[pipeline.fetch_context] uid={uid} "
             f"history={len(history)} lore={len(lore_entries)}"
         )
         return {
@@ -295,6 +305,7 @@ class Pipeline:
         author_note_extra 用完后立即清空（只影响本轮）。
         """
         self._refresh_character_if_needed()
+        _char_id = self._active_character_id
         from core import prompt_builder
         from core.config_loader import get_config
         from datetime import datetime
@@ -399,10 +410,11 @@ class Pipeline:
         if envelope is None:
             envelope = WriteEnvelope()
 
-        # Guard: validate + hot-swap active_character before any write.
-        # Raises ValueError/RuntimeError on invalid state — aborts the turn without writing.
-        self._refresh_character_if_needed()
-        _char_id = self._active_character_id
+        # Guard: validates active_character and constructs scope; raises on invalid state.
+        scope = self._current_reality_scope(user_id)
+        char_id = scope.character_id
+        assert char_id is not None
+        scope_payload = scope.to_payload()
 
         from core.memory import locks as _locks
         from core import llm_client
@@ -423,10 +435,10 @@ class Pipeline:
                 from core.config_loader import get_config
                 cfg = get_config()
                 every_n = cfg.get("memory", {}).get("summary_every_n_rounds", 20)
-                _hist_len_after = len(_st.load(user_id, char_id=_char_id)) + 2
+                _hist_len_after = len(_st.load(user_id, char_id=char_id)) + 2
                 if _hist_len_after > 0 and _hist_len_after % every_n == 0:
                     _should_update_profile = True
-                    _profile_recent = _st.load(user_id, char_id=_char_id)[-(every_n * 2):]
+                    _profile_recent = _st.load(user_id, char_id=char_id)[-(every_n * 2):]
             except Exception as e:
                 log_error("post_process.check_conditions", e)
 
@@ -444,14 +456,14 @@ class Pipeline:
                 async with _locks.global_lock("mood_state"):
                     try:
                         from core.memory.mood_state import update as _update_mood
-                        _update_mood(_emotion, source="detect", char_id=_char_id)
+                        _update_mood(_emotion, source="detect", char_id=char_id)
 
                         try:
                             from core import user_relation as _user_relation
                             _relation = _user_relation.get_relation(user_id)
                             if _check_yandere_trigger(content, reply, _relation.get("priority", 1)):
                                 from core.memory.mood_state import update as _update_mood_y
-                                _update_mood_y("yandere", source="trigger", char_id=_char_id)
+                                _update_mood_y("yandere", source="trigger", char_id=char_id)
                         except Exception as e:
                             log_error("post_process.yandere", e)
                     except Exception as e:
@@ -460,7 +472,7 @@ class Pipeline:
             # ── capture_turn：写 short_term + event_log（含 turn_id 血缘）───
             try:
                 from core.memory.fixation_pipeline import capture_turn as _capture_turn
-                _turn_id = _capture_turn(user_id, content, reply, _emotion, turn_id=_turn_id, trigger_name=trigger_name, envelope=envelope, char_id=_char_id)
+                _turn_id = _capture_turn(user_id, content, reply, _emotion, turn_id=_turn_id, trigger_name=trigger_name, envelope=envelope, char_id=char_id)
                 _critical_written = True
                 logger.debug(f"[pipeline.post_process] capture_turn: {_turn_id}")
             except Exception as e:
@@ -473,8 +485,8 @@ class Pipeline:
                         "reply": reply,
                         "emotion": _emotion,
                         "trigger_name": trigger_name,
-                        "char_id": _char_id,
-                        "scope": MemoryScope.reality_scope(str(user_id), _char_id).to_payload(),
+                        "char_id": char_id,
+                        "scope": scope_payload,
                     })
 
         # ── uid_lock 释放，入慢队列 ───────────────────────────────────────────
@@ -491,8 +503,8 @@ class Pipeline:
                 "reply": reply,
                 "tags": _mt_tags,
                 "emotion": _emotion,
-                "char_id": _char_id,
-                "scope": MemoryScope.reality_scope(str(user_id), _char_id).to_payload(),
+                "char_id": char_id,
+                "scope": scope_payload,
             })
         slow_queue.enqueue("consistency_check", {
             "reply": reply,
@@ -501,8 +513,8 @@ class Pipeline:
             slow_queue.enqueue("user_profile_update", {
                 "uid": user_id,
                 "recent": _profile_recent,
-                "char_id": _char_id,
-                "scope": MemoryScope.reality_scope(str(user_id), _char_id).to_payload(),
+                "char_id": char_id,
+                "scope": scope_payload,
             })
             logger.info(f"[pipeline.post_process] 用户画像更新已入队: {user_id}")
 
