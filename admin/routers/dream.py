@@ -36,6 +36,7 @@ _VALID_MEMORY_ACCESS = frozenset({"card_only", "relationship_summary", "full_sna
 _VALID_BOUNDARY_LEVEL = frozenset({"vague", "body_perceptible", "numbers_visible", "threshold_break"})
 _VALID_WORLD_LAYER = frozenset({"reality_derived", "abo", "vampire", "cat", "flower_bud", "custom"})
 _VALID_LUCID_MODE = frozenset({"lucid_shared", "non_lucid"})
+_VALID_DREAM_MODE = frozenset({"sandbox", "scenario", "mirror"})
 
 _ENUM_VALIDATORS: dict[str, frozenset] = {
     "memory_access": _VALID_MEMORY_ACCESS,
@@ -63,6 +64,14 @@ def _owner_uid() -> str:
 async def dream_enter(body: dict = {}):
     uid = _owner_uid()
     entry_reason = (body.get("entry_reason") or "").strip()
+    dream_mode = (body.get("dream_mode") or "sandbox").strip()
+    script_id = (body.get("script_id") or "").strip() or None
+
+    if dream_mode not in _VALID_DREAM_MODE:
+        raise HTTPException(
+            status_code=422,
+            detail=f"dream_mode={dream_mode!r} 非法，有效值：{sorted(_VALID_DREAM_MODE)}",
+        )
 
     from core.pipeline_registry import get as _get_pipeline
     from core.dream.dream_pipeline import enter_dream
@@ -74,7 +83,10 @@ async def dream_enter(body: dict = {}):
     if not char_id:
         raise HTTPException(status_code=503, detail="active character not set")
 
-    result = await enter_dream(uid, entry_reason=entry_reason, char_id=char_id)
+    result = await enter_dream(
+        uid, entry_reason=entry_reason, char_id=char_id,
+        dream_mode=dream_mode, script_id=script_id,
+    )
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("error", "cannot enter dream"))
     return result
@@ -219,9 +231,20 @@ async def dream_state_get():
     body = BodyState.from_dict(state.get("body_state") or {})
     settings = _load_settings(uid)
 
+    dream_mode = state.get("dream_mode", "sandbox")
+    scenario_info: dict | None = None
+    if dream_mode == "scenario" and state.get("scenario_core"):
+        _sc = state["scenario_core"]
+        scenario_info = {
+            "script_id": _sc.get("script_id"),
+            "current_stage_id": _sc.get("current_stage_id"),
+        }
+
     base = {
         "status": state.get("status", "REALITY_CHAT"),
         "dream_id": state.get("dream_id"),
+        "dream_mode": dream_mode,
+        "scenario": scenario_info,
         "frozen_world": state.get("frozen_world"),
         "lucid_mode": state.get("lucid_mode"),
         "body": {

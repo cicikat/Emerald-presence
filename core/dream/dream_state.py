@@ -25,6 +25,16 @@ class DreamStatus(str, Enum):
     REALITY_AFTERGLOW = "REALITY_AFTERGLOW"
 
 
+class DreamMode(str, Enum):
+    """Dream session mode — frozen at enter_dream, immutable for session lifetime."""
+    sandbox = "sandbox"
+    scenario = "scenario"
+    mirror = "mirror"
+
+
+_VALID_DREAM_MODES: frozenset[str] = frozenset(m.value for m in DreamMode)
+
+
 def default_state(user_id: str | int) -> dict[str, Any]:
     return {
         "user_id": safe_user_id(user_id),
@@ -173,6 +183,8 @@ def clear_local_state(state: dict[str, Any]) -> dict[str, Any]:
         "context_snapshot", "dream_id",
         "frozen_world",  # re-frozen from settings at next enter_dream
         "lucid_mode",  # session-local, cleared at dream close
+        "dream_mode",  # session-local, cleared at dream close
+        "scenario_core",  # scenario kernel — session-local, cleared at dream close
     ):
         out.pop(key, None)
     return out
