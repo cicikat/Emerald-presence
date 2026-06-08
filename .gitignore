@@ -1,3 +1,4 @@
+# runtime data — see blacklist.example.yaml and relations.example.yaml for structure
 data/
 logs/
 # 角色卡（实际角色文件含隐私内容不提交；模板和示例文件已移至 docs/templates/）

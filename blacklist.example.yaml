@@ -1,0 +1,3 @@
+# blacklist.yaml — copy to data/blacklist.yaml and add real QQ UIDs to block
+blacklist:
+- '000000000'

@@ -1,0 +1,20 @@
+# relations.yaml — copy to data/relations.yaml
+# default entry applies to any uid not listed explicitly
+relations:
+  default:
+    role: stranger
+    nickname: null
+    priority: 1
+    permissions:
+      agent_control: false
+      image_gen: false
+    extra_prompt: ''
+  # Add per-user entries below (key is QQ uid as string):
+  # '123456789':
+  #   role: lover
+  #   nickname: 风谕
+  #   priority: 10
+  #   permissions:
+  #     agent_control: true
+  #     image_gen: true
+  #   extra_prompt: ''
