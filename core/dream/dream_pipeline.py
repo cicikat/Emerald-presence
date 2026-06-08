@@ -15,7 +15,9 @@ Isolation contract (BY CONSTRUCTION):
 """
 
 import asyncio
+import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -23,6 +25,57 @@ logger = logging.getLogger(__name__)
 
 HARD_EXIT_KEYWORD = "/stop"
 _SOFT_EXIT_ACCEPT_MARKER = "[[EXIT_DREAM_ACCEPT]]"
+
+# ── scenario_control block parser (v0.6) ──────────────────────────────────────
+
+_SCENARIO_CONTROL_RE = re.compile(
+    r"<scenario_control>\s*(.*?)\s*</scenario_control>",
+    re.DOTALL,
+)
+_VALID_PROGRESS_SIGNALS: frozenset[str] = frozenset({"not_close", "approaching", "satisfied"})
+
+
+def _extract_scenario_control(reply: str) -> tuple[str, dict | None]:
+    """
+    Strip <scenario_control>…</scenario_control> from the LLM reply and parse it.
+
+    Returns (visible_reply, parsed_control_or_None).
+    - visible_reply always has the block removed (even when parse fails).
+    - parsed_control is None when block is absent, JSON-invalid, or has an
+      illegal progress_signal; caller must not update ScenarioCore in that case.
+    - Fail-soft: never raises.
+    """
+    match = _SCENARIO_CONTROL_RE.search(reply)
+    if not match:
+        return reply, None
+
+    # Strip the block from visible reply regardless of validity
+    visible = (reply[: match.start()] + reply[match.end() :]).strip()
+
+    try:
+        data = json.loads(match.group(1))
+    except (json.JSONDecodeError, ValueError):
+        logger.debug("[dream_pipeline] scenario_control JSON parse failed")
+        return visible, None
+
+    if not isinstance(data, dict):
+        return visible, None
+
+    signal = data.get("progress_signal")
+    if signal not in _VALID_PROGRESS_SIGNALS:
+        logger.debug("[dream_pipeline] scenario_control invalid progress_signal=%r", signal)
+        return visible, None
+
+    matched_exit_signs = data.get("matched_exit_signs", [])
+    blocked_events = data.get("blocked_events", [])
+    if not isinstance(matched_exit_signs, list) or not isinstance(blocked_events, list):
+        return visible, None
+
+    return visible, {
+        "progress_signal": signal,
+        "matched_exit_signs": [str(x) for x in matched_exit_signs],
+        "blocked_events": [str(x) for x in blocked_events],
+    }
 
 
 def _state_char_id(state: dict, handler: str, uid: str = "", dream_id: str = "") -> str:
@@ -155,11 +208,20 @@ async def dream_turn(
         yexuan_tension=current_yexuan_tension,
         world_id=state.get("frozen_world", "reality_derived"),
         lucid_mode=lucid_mode,
+        dream_mode=state.get("dream_mode", "sandbox"),
+        scenario_core=state.get("scenario_core"),
     )
 
     # Call LLM — zero reality side-effects
     from core import llm_client
     reply = await llm_client.chat(messages)
+
+    # ── v0.6: strip scenario_control block BEFORE anything else sees the reply ─
+    # parsed_control is None when block is absent or invalid (fail-soft).
+    # visible reply (control block removed) is used for dream log + return value.
+    parsed_control: dict | None = None
+    if state.get("dream_mode") == "scenario":
+        reply, parsed_control = _extract_scenario_control(reply)
 
     # Detect soft exit acceptance
     exit_accepted = False
@@ -185,6 +247,49 @@ async def dream_turn(
         emotional_tension=new_projection["yexuan_tension"],
         body_state=new_body.to_dict(),
     )
+    # Scenario progression update (v0.5 stage_turns + v0.6 progress signal + v0.7 stage transition)
+    if state.get("dream_mode") == "scenario" and state.get("scenario_core"):
+        from core.dream.scenario_core import ScenarioCore
+        sc = ScenarioCore.from_dict(state["scenario_core"])
+        # _did_advance: True when stage transition or completion fires this turn.
+        # The transitioning turn belongs to the OLD stage, so the NEW stage must
+        # start at stage_turns=0 — we skip increment_stage_turns() on transition turns.
+        _did_advance = False
+        if parsed_control is not None:
+            sc = sc.with_progress_signal(
+                parsed_control["progress_signal"],
+                parsed_control["matched_exit_signs"],
+                parsed_control["blocked_events"],
+            )
+            # v0.7: advance stage on consecutive satisfied streak (>= 2), skip if already completed
+            if sc.satisfied_streak >= 2 and sc.ending_state != "completed":
+                from core.dream.scenario_loader import load_script, get_next_stage
+                try:
+                    script = load_script(sc.script_id)
+                    next_stage = get_next_stage(script, sc.current_stage_id)
+                    if next_stage is not None:
+                        sc = sc.advance_to_stage(next_stage["id"])
+                        _did_advance = True
+                        logger.info(
+                            "[dream_pipeline] stage advance uid=%s %s→%s",
+                            uid, sc.script_id, next_stage["id"],
+                        )
+                    else:
+                        sc = sc.mark_completed()
+                        _did_advance = True
+                        logger.info(
+                            "[dream_pipeline] scenario completed uid=%s script=%s",
+                            uid, sc.script_id,
+                        )
+                except Exception as _tr_exc:
+                    logger.warning("[dream_pipeline] stage transition failed: %s", _tr_exc)
+        else:
+            # Missing/invalid control block: reset satisfied_streak (conservative — prevents
+            # silent stage promotion when LLM occasionally omits the control block)
+            sc = sc.reset_satisfied_streak()
+        if not _did_advance:
+            sc = sc.increment_stage_turns()
+        state["scenario_core"] = sc.to_dict()
     write_state(uid, state)
 
     # Transition to DREAM_CLOSING if soft exit was accepted
@@ -229,7 +334,8 @@ async def force_exit_dream(uid: str) -> None:
 
 
 async def enter_dream(
-    uid: str, entry_reason: str = "", *, char_id: str = "yexuan"
+    uid: str, entry_reason: str = "", *, char_id: str = "yexuan",
+    dream_mode: str = "sandbox", script_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Transition uid into DREAM_ACTIVE.
@@ -240,11 +346,52 @@ async def enter_dream(
     char_id must be passed explicitly by the production caller (admin router reads
     it from pipeline._active_character_id). The default "yexuan" is a legacy/test
     compatibility shim — production paths must not rely on it.
+
+    dream_mode: "sandbox" | "scenario" | "mirror" — frozen for session lifetime.
+    script_id: required when dream_mode == "scenario"; the scenario script to load.
     """
-    from core.dream.dream_state import read_state, write_state, DreamStatus
+    from core.dream.dream_state import read_state, write_state, DreamStatus, _VALID_DREAM_MODES
     from core.dream.dream_context import build_snapshot
 
+    if dream_mode not in _VALID_DREAM_MODES:
+        return {"ok": False, "error": f"invalid dream_mode={dream_mode!r}"}
+
     state = read_state(uid)
+
+    # ── Phase A: dream_mode mid-session write guard ───────────────────────────
+    # Fail-loud with a specific error before the generic status barrier, so callers
+    # know whether the block is "wrong mode" or "session still open".
+    _ACTIVE_BARRIER = frozenset({
+        DreamStatus.DREAM_ACTIVE.value,
+        DreamStatus.DREAM_CLOSING.value,
+        DreamStatus.DREAM_EXIT_REQUESTED.value,
+    })
+    _current_status = state.get("status")
+    if _current_status in _ACTIVE_BARRIER:
+        _current_mode = state.get("dream_mode")
+        if dream_mode != _current_mode:
+            return {
+                "ok": False,
+                "error": (
+                    f"dream already active with mode={_current_mode!r}; "
+                    f"cannot switch to mode={dream_mode!r} mid-session"
+                ),
+            }
+        if dream_mode == "scenario":
+            _current_script = (state.get("scenario_core") or {}).get("script_id")
+            if script_id and _current_script and script_id != _current_script:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"scenario already active with script_id={_current_script!r}; "
+                        f"cannot replace with script_id={script_id!r} mid-session"
+                    ),
+                }
+        return {
+            "ok": False,
+            "error": f"dream session still active (status={_current_status!r}); close first",
+        }
+
     allowed = {
         DreamStatus.REALITY_CHAT.value,
         DreamStatus.DREAM_ENTRANCE_AVAILABLE.value,
@@ -262,12 +409,32 @@ async def enter_dream(
     frozen_world = _settings_enter.get("world_layer", "reality_derived")
     lucid_mode_entry = _settings_enter.get("lucid_mode", "lucid_shared")
 
+    # Build scenario_core if entering scenario mode
+    scenario_core_dict: dict | None = None
+    if dream_mode == "sandbox" or dream_mode == "mirror":
+        pass  # no scenario kernel for sandbox/mirror
+    elif dream_mode == "scenario":
+        if not script_id:
+            return {"ok": False, "error": "dream_mode=scenario requires script_id"}
+        try:
+            from core.dream.scenario_loader import load_script
+            from core.dream.scenario_core import ScenarioCore
+            script = load_script(script_id)
+            scenario_core_dict = ScenarioCore.from_script(script).to_dict()
+        except (FileNotFoundError, ValueError) as exc:
+            return {"ok": False, "error": f"scenario load failed: {exc}"}
+
     state["status"] = DreamStatus.DREAM_ACTIVE.value
     state["dream_id"] = dream_id
     state["char_id"] = char_id   # frozen at enter; close/summary/afterglow read from here
+    state["dream_mode"] = dream_mode   # frozen for session lifetime — never overwrite mid-session
     state["context_snapshot"] = snapshot
     state["frozen_world"] = frozen_world
     state["lucid_mode"] = lucid_mode_entry
+    if scenario_core_dict is not None:
+        state["scenario_core"] = scenario_core_dict
+    else:
+        state.pop("scenario_core", None)
     # Clear all volatile local fields at dream start
     state.pop("emotional_tension", None)
     state.pop("scene_state", None)
@@ -279,8 +446,11 @@ async def enter_dream(
     from core.dream.dream_hud import delete_hud_state
     delete_hud_state(uid)
 
-    logger.info(f"[dream_pipeline] entered dream uid={uid} dream_id={dream_id} char_id={char_id}")
-    return {"ok": True, "dream_id": dream_id}
+    logger.info(
+        "[dream_pipeline] entered dream uid=%s dream_id=%s char_id=%s dream_mode=%s",
+        uid, dream_id, char_id, dream_mode,
+    )
+    return {"ok": True, "dream_id": dream_id, "dream_mode": dream_mode}
 
 
 async def _do_close_dream(uid: str, dream_id: str, exit_type: str) -> None:
@@ -289,15 +459,19 @@ async def _do_close_dream(uid: str, dream_id: str, exit_type: str) -> None:
     from core.dream.dream_log import archive_current
     from core.dream.dream_hud import delete_hud_state
 
-    # Read char_id from dream_state before clearing volatile fields.
+    # Read char_id and dream_mode from dream_state before clearing volatile fields.
     # char_id is NOT in clear_local_state's key list, so it survives into REALITY_AFTERGLOW.
+    # dream_mode IS in clear_local_state's key list — must be captured here before clearing.
     state = read_state(uid)
     char_id = _state_char_id(state, "_do_close_dream", uid, dream_id)
+    dream_mode = state.get("dream_mode", "sandbox")
 
     if dream_id:
         archive_current(uid, dream_id, char_id=char_id)
 
-    asyncio.create_task(_generate_summary_bg(uid, dream_id, exit_type, char_id=char_id))
+    asyncio.create_task(
+        _generate_summary_bg(uid, dream_id, exit_type, char_id=char_id, dream_mode=dream_mode)
+    )
 
     state = clear_local_state(state)  # clears body_state + emotional_tension + scene etc.
     state["status"] = DreamStatus.REALITY_AFTERGLOW.value
@@ -310,7 +484,7 @@ async def _do_close_dream(uid: str, dream_id: str, exit_type: str) -> None:
 
 
 async def _generate_summary_bg(
-    uid: str, dream_id: str, exit_type: str, *, char_id: str
+    uid: str, dream_id: str, exit_type: str, *, char_id: str, dream_mode: str = "sandbox"
 ) -> None:
     try:
         from core.dream.dream_summary import generate_summary
@@ -318,19 +492,35 @@ async def _generate_summary_bg(
     except Exception as e:
         logger.error(f"[dream_pipeline] summary failed uid={uid}: {e}")
 
-    # Phase 6: Wire afterglow residue at Dream exit (Reality-side integrator, fail-closed)
-    try:
-        from core.dream.dream_exit_afterglow import wire_afterglow_from_summary
-        wire_afterglow_from_summary(uid, dream_id, exit_type, char_id=char_id)
-    except Exception as e:
-        logger.warning(f"[dream_pipeline] afterglow wiring failed uid={uid}: {e}")
+    # Phase 6: Wire afterglow residue at Dream exit (Reality-side integrator, fail-closed).
+    # Scenario mode is a scripted-story space that must never write to User Hidden State.
+    if dream_mode != "scenario":
+        try:
+            from core.dream.dream_exit_afterglow import wire_afterglow_from_summary
+            wire_afterglow_from_summary(uid, dream_id, exit_type, char_id=char_id)
+        except Exception as e:
+            logger.warning(f"[dream_pipeline] afterglow wiring failed uid={uid}: {e}")
+    else:
+        logger.info(
+            "[dream_pipeline] scenario mode — afterglow wiring skipped uid=%s dream_id=%s",
+            uid, dream_id,
+        )
 
     # Distill impression after summary (failure is warning-only per C7)
-    try:
-        from core.dream.distill_impression import distill_impression
-        await distill_impression(uid, dream_id, exit_type, char_id=char_id)
-    except Exception as e:
-        logger.warning(f"[dream_pipeline] distill_impression failed uid={uid}: {e}")
+    # Scenario mode: scripted story space must not write impression_store — that store
+    # feeds Reality prompt layer 6g_dream_impression, so Scenario content would otherwise
+    # pollute the Reality chat context.  Sandbox / Mirror keep the original behaviour.
+    if dream_mode != "scenario":
+        try:
+            from core.dream.distill_impression import distill_impression
+            await distill_impression(uid, dream_id, exit_type, char_id=char_id)
+        except Exception as e:
+            logger.warning(f"[dream_pipeline] distill_impression failed uid={uid}: {e}")
+    else:
+        logger.info(
+            "[dream_pipeline] scenario mode — distill_impression skipped uid=%s dream_id=%s",
+            uid, dream_id,
+        )
 
 
 def _ensure_dream_id(uid: str, state: dict) -> str:

@@ -233,6 +233,8 @@ def build_dream_prompt(
     lucid_mode: str = "lucid_shared",
     lore_meta: list[dict[str, Any]] | None = None,
     debug: bool = False,
+    dream_mode: str = "sandbox",
+    scenario_core: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     """
     Assemble the complete dream prompt as a D0-D10 layer stack.
@@ -311,28 +313,37 @@ def build_dream_prompt(
     # Injected only when body_intimate / physical_closeness tag is detected in scene.
     # Priority: lower than D4_frozen_reality; prune D4.5 before D4 if budget exceeded.
     # Dream NEVER writes back — DREAM_DIRECT_WRITABLE = frozenset().
+    # Scenario mode is a scripted-story space: never reads User Hidden State.
     _d45_injected = False
-    try:
-        _hs_data = context_snapshot.get("user_hidden_state_snapshot", {})
-        if _should_inject_hidden_state_snapshot(local_state, context_snapshot):
-            _d45_text = _format_hidden_state_snapshot(_hs_data)
-            if _d45_text:
-                _d45 = f"# D4.5·用户隐性状态（只读快照）\n{_d45_text}"
-                system_layers.append(_d45)
-                _records.append(_LayerRec("D4.5_hidden_state", len(_d45), _est_tokens(_d45)))
-                _d45_injected = True
-    except Exception as _d45_exc:
-        logger.warning("[dream_prompt] D4.5 hidden_state_snapshot failed: %s", _d45_exc)
+    if dream_mode != "scenario":
+        try:
+            _hs_data = context_snapshot.get("user_hidden_state_snapshot", {})
+            if _should_inject_hidden_state_snapshot(local_state, context_snapshot):
+                _d45_text = _format_hidden_state_snapshot(_hs_data)
+                if _d45_text:
+                    _d45 = f"# D4.5·用户隐性状态（只读快照）\n{_d45_text}"
+                    system_layers.append(_d45)
+                    _records.append(_LayerRec("D4.5_hidden_state", len(_d45), _est_tokens(_d45)))
+                    _d45_injected = True
+        except Exception as _d45_exc:
+            logger.warning("[dream_prompt] D4.5 hidden_state_snapshot failed: %s", _d45_exc)
     if not _d45_injected:
-        _records.append(_LayerRec("D4.5_hidden_state", flags=["DISABLED"]))
+        _d45_note = "scenario_mode" if dream_mode == "scenario" else ""
+        _records.append(_LayerRec("D4.5_hidden_state", flags=["DISABLED"], note=_d45_note))
 
     # ── D5: body_projection (injected by pipeline, 叶瑄读投影文字) ───────────
-    if body_projection_text:
+    # Scenario mode is a scripted-story space: body/intimate expression is driven by
+    # script stage text and narrative, not the general Dream body_state system.
+    # D5 is always skipped for scenario to prevent style/mode boundary pollution.
+    _d5_injected = False
+    if body_projection_text and dream_mode != "scenario":
         _d5 = f"# D5·她的身体感知\n{body_projection_text}"
         system_layers.append(_d5)
         _records.append(_LayerRec("D5_body_projection", len(_d5), _est_tokens(_d5)))
-    else:
-        _records.append(_LayerRec("D5_body_projection", flags=["DISABLED"]))
+        _d5_injected = True
+    if not _d5_injected:
+        _d5_note = "scenario_mode" if dream_mode == "scenario" else ""
+        _records.append(_LayerRec("D5_body_projection", flags=["DISABLED"], note=_d5_note))
 
     # ── D6: scene_anchors ────────────────────────────────────────────────────
     scene_block = _format_scene_anchors(local_state)
@@ -345,10 +356,10 @@ def build_dream_prompt(
 
     # ── D7: dream_tension ────────────────────────────────────────────────────
     if yexuan_tension > 0.05:
-        tension_pct = int(round(yexuan_tension * 100))
+        _d7_bucket = _bucket_tension(yexuan_tension)
         _d7 = (
             f"# D7·叶瑄情绪张力\n"
-            f"当前情绪张力水位：{tension_pct}%\n"
+            f"当前情绪张力水位：{_d7_bucket}\n"
             f"（这是梦内累积的情绪紧绷程度，影响叶瑄的表达方式和反应灵敏度。）"
         )
         system_layers.append(_d7)
@@ -361,6 +372,25 @@ def build_dream_prompt(
     _d8 = f"# D8·梦境导演注记\n{_d8_text}"
     system_layers.append(_d8)
     _records.append(_LayerRec("D8_dream_director", len(_d8), _est_tokens(_d8)))
+
+    # ── DS: scenario layer (only when dream_mode == "scenario") ─────────────
+    # Injects: script title, current stage name, dramatic_task, entry_pressure,
+    #          not_yet_allowed.
+    # Never injects: subsequent stages, exit_signs, soft-gate logic.
+    _ds_injected = False
+    if dream_mode == "scenario" and scenario_core:
+        try:
+            _ds_text = _format_scenario_layer(scenario_core)
+            if _ds_text:
+                _ds = f"# DS·剧本当前阶段\n{_ds_text}"
+                system_layers.append(_ds)
+                _records.append(_LayerRec("DS_scenario", len(_ds), _est_tokens(_ds)))
+                _ds_injected = True
+        except Exception as _ds_exc:
+            logger.warning("[dream_prompt] DS scenario layer failed: %s", _ds_exc)
+    if not _ds_injected:
+        _ds_note = "non-scenario" if dream_mode != "scenario" else "no_core"
+        _records.append(_LayerRec("DS_scenario", flags=["DISABLED"], note=_ds_note))
 
     # ── Dream lorebook (injected between D4 and D5 conceptually) ─────────────
     if lore_entries:
@@ -427,6 +457,24 @@ def dump_dream_prompt(messages: list[dict[str, str]]) -> str:
     return ""
 
 
+# ── Tension bucket ────────────────────────────────────────────────────────────
+
+
+def _bucket_tension(value: float) -> str:
+    """Map a [0, 1] tension float to a coarse semantic bucket label.
+
+    Clamps out-of-range input: < 0 → 低位, > 1 → 临界.
+    """
+    v = max(0.0, min(1.0, value))
+    if v < 0.25:
+        return "低位"
+    if v < 0.5:
+        return "上升中"
+    if v < 0.75:
+        return "高位"
+    return "临界"
+
+
 # ── Internal formatters ───────────────────────────────────────────────────────
 
 
@@ -470,6 +518,95 @@ def _format_scene_anchors(local_state: dict[str, Any]) -> str:
     if anchors:
         parts.append(f"象征锚点：{', '.join(str(a) for a in anchors)}")
     return "；".join(parts)
+
+
+def _format_scenario_layer(scenario_core: dict[str, Any]) -> str:
+    """
+    Render the current scenario stage as a DS prompt block.
+
+    Only injects current-stage content: title, stage name, dramatic_task,
+    entry_pressure, not_yet_allowed, drift_pressure, and the scenario_control
+    output protocol (v0.6).
+
+    Never injects: subsequent stages, stage-exit judgment, or auto-advance logic.
+    Returns '' on any error (fail-closed).
+    """
+    try:
+        from core.dream.scenario_loader import load_script, get_stage
+        script_id = scenario_core.get("script_id", "")
+        stage_id = scenario_core.get("current_stage_id", "")
+        if not script_id or not stage_id:
+            return ""
+        script = load_script(script_id)
+        stage = get_stage(script, stage_id)
+        if not stage:
+            logger.warning("[dream_prompt] DS stage %r not found in script %r", stage_id, script_id)
+            return ""
+        parts: list[str] = []
+        if scenario_core.get("ending_state") == "completed":
+            parts.append("【剧本状态：所有阶段已完成 — Scenario Completed】")
+        parts.append(f"剧本：{script.get('title', script_id)}")
+        parts.append(f"当前阶段：{stage.get('name', stage_id)}")
+        if task := stage.get("dramatic_task", "").strip():
+            parts.append(f"戏剧任务：\n{task}")
+        if pressure := stage.get("entry_pressure", "").strip():
+            parts.append(f"入场压力：\n{pressure}")
+        not_yet = stage.get("not_yet_allowed") or []
+        if not_yet:
+            parts.append("本阶段不允许：\n" + "\n".join(f"· {item}" for item in not_yet))
+        # Drift pressure: inject only for current stage when stage_turns >= after_turns
+        dp = stage.get("drift_pressure")
+        if dp and isinstance(dp, dict):
+            after_turns = dp.get("after_turns")
+            instruction = (dp.get("instruction") or "").strip()
+            stage_turns = int(scenario_core.get("stage_turns", 0))
+            if isinstance(after_turns, int) and instruction and stage_turns >= after_turns:
+                parts.append(f"漂移压力 / Drift Pressure\n{instruction}")
+        # ── v0.6: scenario_control output protocol ────────────────────────────
+        # Instructs LLM to append a hidden control block after every reply.
+        # System reads and strips the block; user never sees it.
+        exit_signs = stage.get("exit_signs") or []
+        protocol_lines: list[str] = [
+            "---",
+            "内部控制输出协议（系统读取，不对用户解释）：",
+            "在回复末尾附加以下控制块，原文输出标签，不要对用户解释：",
+            '<scenario_control>',
+            '{',
+            '  "progress_signal": "not_close",',
+            '  "matched_exit_signs": [],',
+            '  "blocked_events": []',
+            '}',
+            '</scenario_control>',
+            "",
+            "字段说明：",
+            "progress_signal 取值：",
+            "  not_close — 本轮未靠近任何出口标志",
+            "  approaching — 本轮正在靠近出口，但尚未满足",
+            "  satisfied — 本轮已满足至少一个出口标志",
+        ]
+        if exit_signs:
+            signs_block = "\n".join(f"  · {s}" for s in exit_signs)
+            protocol_lines += [
+                "",
+                "matched_exit_signs：只允许引用以下出口标志中的语义短句，不得自行创造：",
+                signs_block,
+            ]
+        else:
+            protocol_lines.append("matched_exit_signs：本阶段无出口标志，始终为空列表。")
+        protocol_lines += [
+            "",
+            "blocked_events：若用户尝试了本阶段不允许的事件，记录对应短句；否则为空列表。",
+            "",
+            "约束（不可违反）：",
+            "· 不允许输出后续阶段内容",
+            "· 不允许自行宣布进入下一阶段",
+            "· 不允许自行改变 current_stage_id",
+        ]
+        parts.append("\n".join(protocol_lines))
+        return "\n\n".join(parts)
+    except Exception as exc:
+        logger.warning("[dream_prompt] _format_scenario_layer error: %s", exc)
+        return ""
 
 
 def _get_dream_mes_example(char_name: str) -> str:

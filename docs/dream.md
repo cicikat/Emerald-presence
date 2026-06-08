@@ -68,6 +68,84 @@
 - `non_lucid`：叶瑄在虚构内不点破"这是梦"，但系统层 + dream_state 仍标记 dream
 - 全开档污染矩阵测试
 
+**Scenario 模式（v0–v0.8）**
+- `dream_mode=scenario`：三种模式之一（sandbox / scenario / mirror），入梦时冻结，整场不可切
+- `ScenarioCore`：隔离内核，存 `script_id / current_stage_id / stage_turns / ending_state`
+  以及进度信号观察字段（v0.6），存入 `dream_state["scenario_core"]`，梦关即清。
+  **不连接** user_hidden_state / symbolic_anchors / Mirror HUD / impression 写回
+- **Scenario 不读 User Hidden State（v0.8）**：
+  - `build_dream_prompt` 中 D4.5 层有 `dream_mode != "scenario"` 守卫；
+    即使 `scene_state / symbolic_anchors` 含 `body_intimate / physical_closeness` 触发标签，
+    Scenario 也绝不注入 `context_snapshot.user_hidden_state_snapshot`。
+  - User Hidden State 不等于 Mirror Mode；Mirror Mode 才是未来读取 hidden_state snapshot 的候选模式。
+- **Scenario 不写 User Hidden State（v0.8）**：
+  - `_generate_summary_bg()` 增加 `dream_mode` 参数（从 `_do_close_dream` 在 `clear_local_state` 前捕获）；
+    当 `dream_mode == "scenario"` 时，跳过 `wire_afterglow_from_summary()`，不写 `afterglow_residue.json`，
+    不调用 `integrate_afterglow_and_save()`，`hidden_state.json` 保持不变。
+- **Scenario 不写 Reality-facing impression（v0.8.1）**：
+  - `impression_store`（`data/runtime/dreams/{char_id}/impressions/{uid}.json`）被 `impression_loader`
+    读取后注入 Reality prompt 的 `6g_dream_impression` 层。如果 Scenario exit 写入该 store，剧本内容
+    就会通过 6g 层污染现实聊天上下文。
+  - 修复：`_generate_summary_bg()` 在 `dream_mode == "scenario"` 时同时跳过 `distill_impression()`，
+    不写 impression_store。`generate_summary()` 仍正常运行（剧本 summary 保留在梦境日志中供调试，
+    但不进入 Reality 流）。
+  - Sandbox 保持原有 impression 行为（`distill_impression()` 照常调用）。
+  - Mirror 未来如果要写 mirror_impression，必须在 impression entry 上增加独立 `mode/source` 标记，
+    并在 `impression_loader` 侧增加 Reality integrator gate，不得复用 Sandbox 的无标记写入路径。
+  - 旧数据清理：历史上已写入的 Scenario impression 条目在 `decay_after` 到期（30 天）后自动失效；
+    本轮不做迁移。
+- **Scenario 不注入 D5 body_projection（v0.8.2）**：
+  - `build_dream_prompt()` 的 D5 层增加 `dream_mode != "scenario"` 守卫；
+    即使 `body_projection_text` 非空，Scenario prompt 也绝不注入 D5·她的身体感知块。
+  - Scenario 的身体/亲密表现应由 script stage 文字（`dramatic_task` / `entry_pressure` /
+    `not_yet_allowed` / `drift_pressure`）和叙事本身控制，不应由通用 Dream body_state 系统驱动。
+  - 如未来某个 Scenario 剧本确实需要启用身体投影，须通过显式 script-level flag（如
+    `allow_body_projection: true`），而不是默认继承。本轮不实现该 flag。
+  - body_state 本体、body_tracker、body_projection 计算不变；只是 Scenario prompt 不消费 D5 文本。
+  - Sandbox / Mirror 保持原有 D5 注入行为。
+- `ScenarioCore.increment_stage_turns()`：每轮 dream_turn LLM 成功后调用，返回新冻结实例
+- **mid-session 写保护守卫**（v0.5）：DREAM_ACTIVE 状态下 `enter_dream` fail-loud：
+  模式切换错误（`mode=X → mode=Y`）和 script_id 替换错误分别返回独立错误信息
+- `DS_scenario` 层：只注入当前阶段；绝不注入后续阶段、出口判断、软门控
+- `drift_pressure`（v0.5）：剧本 stage 可选字段；`after_turns: int` + `instruction: str`；
+  当 `stage_turns >= after_turns` 时注入 DS 层"漂移压力 / Drift Pressure"块；
+  只注入当前 stage，后续 stage 的 drift_pressure 不泄漏
+- 剧本文件：`data/dream/scenarios/{script_id}.yaml`，authored content，不走 sandbox
+- `prison_demo.yaml`：三阶段示例剧本（arrival / negotiation / fracture），arrival + negotiation 各含 drift_pressure
+- **Progress Signal Skeleton（v0.6）**：软门控观察信号骨架
+  - `ScenarioCore` 新增三字段（frozen dataclass）：
+    - `last_progress_signal: str | None` — `"not_close"` / `"approaching"` / `"satisfied"`
+    - `last_matched_exit_signs: list[str]` — 本轮命中的出口标志语义短句
+    - `last_blocked_events: list[str]` — 用户尝试的 not_yet_allowed 短句
+  - `ScenarioCore.with_progress_signal(signal, matched, blocked)` — 返回新冻结实例
+  - DS 层追加 `<scenario_control>` 输出协议：要求 LLM 在每轮回复末尾附加隐藏控制块；
+    当前 stage.exit_signs 作为 matched_exit_signs 的合法引用列表注入（仅当前 stage）
+  - `_extract_scenario_control(reply)` → `(visible_reply, parsed_control | None)`：
+    strip 控制块（不论合法与否）；非法/缺失时返回 `None`，fail-soft 不崩溃
+  - dream_turn 处理链：先 strip 控制块 → 可见回复送 dream log / 返回值 → 合法时
+    先 `with_progress_signal()`；若本轮发生 stage transition 或 completed，**跳过**
+    `increment_stage_turns()`（过渡轮属旧 stage，新 stage 从 `stage_turns=0` 开始）；
+    否则正常 `increment_stage_turns()`
+- **Stage Transition MVP（v0.7）**：连续 satisfied 两次 → 顺序推进下一 stage
+  - `ScenarioCore` 新增字段：`satisfied_streak: int = 0`（frozen dataclass）
+    - `with_progress_signal("satisfied")` → streak +1；任何其他信号 → streak = 0
+    - control block 缺失/非法 → `reset_satisfied_streak()` 归零（保守策略，防静默推进）
+  - `ScenarioCore.advance_to_stage(next_stage_id)` — 推进到指定 stage：
+    重置 `stage_turns=0 / last_progress_signal=None / last_matched_exit_signs=[] /
+    last_blocked_events=[] / satisfied_streak=0`；`ending_state` 不变
+  - `ScenarioCore.mark_completed()` — 设 `ending_state="completed"`（最后 stage 达成条件时）
+  - `ScenarioCore.reset_satisfied_streak()` — 控制块缺失时调用
+  - `scenario_loader.get_next_stage(script, current_stage_id)` — 按 YAML 顺序取下一 stage；
+    当前已是最后 stage 时返回 `None`；找不到 current_stage_id 时 raise ValueError（fail-loud）
+  - dream_turn 阶段推进逻辑（`satisfied_streak >= 2 且 ending_state != "completed"`）：
+    1. 加载 script，调 `get_next_stage`
+    2. 若有下一 stage → `advance_to_stage(next_stage.id)`
+    3. 若无（已是最后 stage）→ `mark_completed()`
+    4. 任何 transition 失败 → warning-only，不崩溃
+  - DS 层：`ending_state=="completed"` 时在层顶注入"【剧本状态：所有阶段已完成】"
+  - 不做：分支、多结局、新裁判模型、潜意识读写、impression/afterglow 整合、
+    Mirror anchors、dream_depth / dream_stability 共享 HUD、LLM 自行指定 next_stage
+
 ---
 
 ## 三、Prompt 层栈
@@ -81,11 +159,12 @@
 | `D2_world_ruleset` | 今晚世界规则，显式框"从属于叶瑄" | 轴2，world_layer |
 | `D3_dream_mes_example` | 世界对应 few-shot（与现实卡物理分离） | 轴2 |
 | `D4_frozen_reality` | 冻结现实上下文（只读） | memory_access |
-| `D4.5_hidden_state` | 用户隐性状态 bucket 只读快照（tag-gated，Phase 4） | tag: body_intimate / physical_closeness |
-| `D5_body_projection` | 她的身体感知投影 | 轴3，boundary_level + yexuan_tension |
+| `D4.5_hidden_state` | 用户隐性状态 bucket 只读快照（tag-gated，Phase 4）**Scenario Mode 下永远禁用** | tag: body_intimate / physical_closeness；`dream_mode != "scenario"` |
+| `D5_body_projection` | 她的身体感知投影 **Scenario Mode 下永远禁用** | 轴3，boundary_level + yexuan_tension；`dream_mode != "scenario"` |
 | `D6_scene_anchors` | 场景状态 + 临时符号锚点 | dream-local |
-| `D7_dream_tension` | 梦内情绪张力（live，dream-local） | — |
+| `D7_dream_tension` | 梦内情绪张力（粗粒度分桶，dream-local；prompt 不暴露精确数值） | — |
 | `D8_dream_director` | 梦境导演注记（允许动作/环境）+ 逃生协议提醒 | boundary_level |
+| `DS_scenario` | 剧本当前阶段（仅 scenario 模式；script title / stage name / dramatic_task / entry_pressure / not_yet_allowed / drift_pressure） | dream_mode=scenario |
 | `D9_dream_history` | 梦内滚动短上下文（不过现实 sanitizer） | — |
 | `D10_user_message` | 她当前梦内输入 | — |
 
@@ -257,6 +336,7 @@ REALITY_CHAT → DREAM_ENTRANCE_AVAILABLE → DREAM_ACTIVE → DREAM_CLOSING →
 6. **三层回流，各有独立 store**：死 archive / 短 afterglow / 低权印象，现实记忆链都不读。
 7. **反假绿铁律**：凡"X 不在 Y 里"的合同断言，**必配**"X 在 Y 里"的正样本对照，防空库 / stub 伪装成验证。（这条是踩坑踩出来的——空库断言曾两次伪装成洗白验证。）
 8. **有界耦合**：叶瑄情绪耦合 dream-local、单轮封顶（≤0.15）、梦关即清，永不写现实 mood_state。
+9. **D7 粗粒度张力桶**：`yexuan_tension`（float 0–1）在进入 D7 prompt 前经 `_bucket_tension()` 映射为四档语义标签（`< 0.25` → 低位 / `< 0.5` → 上升中 / `< 0.75` → 高位 / `≥ 0.75` → 临界），**绝不向 LLM 暴露精确百分比**，避免过拟合数值细节。HUD / UI 若需显示原始数值，走独立读路径，与 prompt 注入完全解耦。sandbox / mirror / scenario 共享同一分桶逻辑；`yexuan_tension` 本体、HUD 存储、ScenarioCore、hidden_state 均不受影响。
 
 ---
 
