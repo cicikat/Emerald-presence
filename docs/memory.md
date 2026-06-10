@@ -83,6 +83,27 @@
 
 ---
 
+## Reality 输出 Scrub 契约（R6-B，2026-06-10）
+
+> **核心规则：任何写入 short_term / event_log 的现实 assistant 文本必须经过 `scrub_reality_output_text`。**
+> 权威 scrub 点是 `capture_turn`（`core/memory/fixation_pipeline.py`）；上游预清洗（main.py、turn_sink）是 defense-in-depth。
+
+| 路径 | 分类 | 处理 |
+|---|---|---|
+| QQ / desktop / mobile 用户可见输出 | REALITY_VISIBLE | 只用 `strip_render_tags`；**保留**动作描写 |
+| short_term / event_log / mid_term / episodic | REALITY_MEMORY | `scrub_reality_output_text`（由 `capture_turn` 权威执行） |
+| Dream 模式输出 | DREAM_VISIBLE | 不经过任何 reality scrub |
+
+**不变量（由 `tests/test_r6b_reality_scrub_contract.py` 守卫）：**
+- `short_term.append` / `event_log.append` 在 production 代码中只从 `capture_turn` 调用
+- Dream 文件不导入 `reality_output_scrubber`
+- `scrub_reality_output_text` 幂等（双重 scrub 安全）
+- `turn_sink._fanout` 只用 `strip_render_tags`，不用 reality scrub
+
+详见 [docs/assistant-turn-sink.md](assistant-turn-sink.md) §十。
+
+---
+
 ## 记忆层一览
 
 | 记忆类型 | 文件（S6 新路径） | 更新时机 | prompt 位置 |

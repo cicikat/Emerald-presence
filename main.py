@@ -465,9 +465,11 @@ async def handle_message(message: dict):
         logger.info(f"[handle_message] 回复已发送，共 {len(segments)} 段")
 
         # ── 步骤9：await 后处理（N10：关键写入不得丢引用）───────────────────
-        # Memory path: scrub action descriptions before handing off to post_process.
-        # capture_turn, summarize_to_midterm, and the entire consolidation chain receive
-        # dialogue-only text — never raw action/narration content.
+        # QQ memory path pre-scrub (defense-in-depth): strip action/narration before
+        # handing off to post_process.  This is an upstream pre-scrub for the QQ inlet;
+        # the authoritative final scrub is in capture_turn, which will scrub again.
+        # Do not treat this as the only scrub point — and do not remove it either.
+        # (scrub_reality_output_text is idempotent; double-scrub is safe.)
         from core.reality_output_scrubber import scrub_reality_output_text as _scrub_qq
         _raw_join = "\n".join(segments)
         memory_reply = _scrub_qq(_raw_join) or ""
@@ -566,7 +568,9 @@ async def _reply_with_tool_result(
             log_error("main._reply_with_tool_result.send", e)
             return
 
-        # Memory path: scrub action/narration content before post_process.
+        # QQ tool-reply pre-scrub (defense-in-depth): strip action/narration before
+        # post_process.  Same pattern as handle_message — upstream pre-scrub, not the
+        # authority.  capture_turn is the authoritative final scrub point.
         # N10: await instead of create_task — critical writes must not be dropped.
         _raw_join = "\n".join(segments)
         memory_reply = _scrub_qq(_raw_join) or ""

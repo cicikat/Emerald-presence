@@ -338,6 +338,8 @@ R8-D 实测：当前 DLQ 目录无任何 legacy task 文件（`mid_term_append` 
   `data/runtime/memory/{char_id}/{uid}/event_log/{date}.md`，不是 `.jsonl`。
 - scheduler policy 表仍是 scaffold；真实活跃窗口判断仍在 `_pipeline_send()`。
 - Dream 输出协议设计：本轮跳过，等待并行改动稳定后再核。
+- R6-A（reality 输出 scrub 审计）：已完成，4 个调用点全部核对，无高风险遗漏（2026-06-10）。
+- R6-B（scrub 契约固化）：已完成（2026-06-10）。capture_turn 权威注释、3 处预清洗注释、tests/test_r6b_reality_scrub_contract.py（C1–C10，17 门禁）、docs/assistant-turn-sink.md §十、docs/memory.md R6 callout 均已写入。无新现实记忆出口遗漏。
 - `mes_example` 精简、时间联动注入属于 prompt 体感策略，不作为当前小修。
 
 ---

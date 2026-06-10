@@ -314,8 +314,15 @@ def capture_turn(
     if not envelope.can_write_memory:
         return turn_id
 
-    # Scrub reply for both short_term and event_log: keep dialogue only,
-    # discard all action / stage-direction / env content.
+    # REALITY_MEMORY authority scrub — capture_turn is the final, authoritative scrub
+    # point for all REALITY_MEMORY writes (short_term + event_log).  Upstream callers
+    # (main.py QQ paths, turn_sink.record_assistant_turn) may have already pre-scrubbed
+    # the same text, but this call must be kept: it is the defense-in-depth guard that
+    # blocks action/narration from reaching short_term or event_log even when a new
+    # reality outlet is added without upstream pre-scrubbing.
+    # Invariants: (1) scrub_reality_output_text is idempotent — double-scrub is safe.
+    #             (2) Dream output must never reach capture_turn; dream_pipeline does
+    #                 not call this function.
     from core.reality_output_scrubber import scrub_reality_output_text as _scrub
     _scrubbed_reply = _scrub(reply)
 

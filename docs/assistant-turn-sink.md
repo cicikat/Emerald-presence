@@ -276,6 +276,59 @@ Phase 2 设计文档另开，预计文件名 `docs/trigger-decision-layer.md`。
 
 ---
 
+## 十、Reality 输出 Scrub 架构（R6-B，2026-06-10）
+
+> 本节为 R6-A 审计（2026-06-10）结论的权威文档，由 R6-B 固化为契约。
+
+### 三类出口
+
+| 分类 | 说明 | 处理规则 |
+|---|---|---|
+| **REALITY_VISIBLE** | 用户可见的现实回复（QQ / desktop / mobile 发出的文字） | 只用 `strip_render_tags` 移除 `<say>` 等展示标签；**保留**动作描写（括号/斜体）以维持对话质感 |
+| **REALITY_MEMORY** | 写入 short_term / event_log / mid_term / episodic / identity 的文本 | 必须经过 `scrub_reality_output_text`（移除动作行/旁白行） |
+| **DREAM_VISIBLE** | Dream 模式的回复（dream_pipeline 生成） | 不经过任何 reality scrub；dream_pipeline 不导入 `reality_output_scrubber` |
+
+### Scrub 所有权
+
+```
+capture_turn（core/memory/fixation_pipeline.py）
+  └─ REALITY_MEMORY 权威 scrub 点
+     · 上游可能已预清洗，此处必须保留（defense-in-depth）
+     · scrub_reality_output_text 幂等，双重 scrub 安全
+     · Dream 输出不走此路径
+
+main.py handle_message（QQ 主路径）
+  └─ 预清洗 memory_reply → 传给 post_process
+     · defense-in-depth，非唯一 scrub 点
+
+main.py _reply_with_tool_result（QQ 工具确认）
+  └─ 预清洗 memory_reply → 传给 post_process
+     · 同上
+
+turn_sink.record_assistant_turn（desktop/scheduler/sensor/wake）
+  └─ 预清洗 memory_text → 传给 post_process
+     · defense-in-depth，非唯一 scrub 点
+```
+
+### 不变量（由 tests/test_r6b_reality_scrub_contract.py 守卫）
+
+1. `short_term.append` 和 `event_log.append` 在 production core 代码中只从 `capture_turn` 调用。
+2. `pipeline.py post_process` 不直接调 `short_term.append` / `event_log.append`，只调 `capture_turn`。
+3. `main.py` 不直接调 `short_term.append` / `event_log.append`。
+4. Dream 文件（`core/dream/dream_pipeline.py`、`admin/routers/dream.py`）不导入 `reality_output_scrubber`，不调 `capture_turn`。
+5. `scrub_reality_output_text` 幂等：`scrub(scrub(x)) == scrub(x)`。
+6. `turn_sink._fanout`（REALITY_VISIBLE 路径）只调 `strip_render_tags`，不调 `scrub_reality_output_text`。
+
+### 新增现实记忆出口的规范
+
+> **任何新的现实记忆写入路径必须走 `capture_turn` 或等价的权威 scrub 点。**
+> 
+> 不允许：直接调 `short_term.append` / `event_log.append` 而不经过 `capture_turn`。  
+> 允许（推荐）：把生成文本传给 `pipeline.post_process()`，后者调 `capture_turn`。  
+> 允许（备用）：直接调 `capture_turn()`，但必须确保 `reply` 已经过 `scrub_reality_output_text` 或由 `capture_turn` 内部 scrub（默认行为）。
+
+---
+
 ## 附：与 codex 报告的对照
 
 本文档对 codex 报告里指出的"最显著链路缺口"做了如下回应：

@@ -174,8 +174,12 @@ async def record_assistant_turn(
     capture_trigger = "" if source == TurnSource.USER_CHAT else (trigger_name or "")
     behavior = payload.get("behavior") if payload else None
 
-    # Memory / history / event_log must store plain text with no render markup
-    # and no action descriptions.
+    # Non-QQ reality inlet pre-scrub (defense-in-depth): strip render markup then
+    # action/narration content before passing to post_process.  This covers desktop,
+    # scheduler, sensor, and watch paths going through record_assistant_turn.
+    # The authoritative final scrub is in capture_turn — do not remove this call,
+    # but also do not rely on it as the sole scrub guard.
+    # (scrub_reality_output_text is idempotent; double-scrub with capture_turn is safe.)
     from core.response_processor import strip_render_tags as _strip_tags
     from core.reality_output_scrubber import scrub_reality_output_text as _scrub
     memory_text = _scrub(_strip_tags(assistant_text)) or ""
