@@ -129,13 +129,18 @@ Author's Note 放在历史之后、用户消息之前，对模型影响最大，
 3. 硬编码的情感稳定性规则
 4. 硬编码的动作格式规则
 5. 输出风格指令（`chat` 或 `roleplay`，由 config.yaml `chat.style` 决定）
-6. 强制工具规则（read_diary / get_time 必须调）
+6. 条件工具规则（R5）：
+   - 有 `tool_result`：`【工具结果已提供】`，提示层10已注入，禁止再声称调用
+   - 无 `tool_result`：`【无工具结果】`，禁止声称调用工具，禁止编造日记/实时数据
 7. 表达规则（禁止复用对话示例原句）
 8. `style_hint`（从 observations.jsonl 读取，深夜/压力状态提示词）
 9. `author_note_extra`（consistency_check 发现问题时的纠偏，用完即清）
 10. 破限预设 layer=11
 
-注意：这里的 `read_diary` 强制规则目前只是 Author's Note 文本；正式主 LLM 调用没有接入 memory 类 tools schema。`get_time` 等 info/desktop 工具可以由 pre-pipeline 探针触发。
+注意：正式主 LLM 调用没有接入任何 tools schema；`get_time` 等 info/desktop 工具
+由 pre-pipeline 探针触发，结果以 `tool_result` 参数进入层10。memory 类工具
+（`read_diary` / `search_diary` 等）需用户明确触发，主 LLM 不能自行调用。
+R5 修复了旧版 Author's Note 里"必须调用 read_diary"的工具幻觉风险。
 
 ---
 

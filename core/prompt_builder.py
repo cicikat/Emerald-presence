@@ -845,11 +845,20 @@ def build(
     }
     style_instruction = _STYLE_INSTRUCTION.get(_style, _STYLE_INSTRUCTION["roleplay"])
     author_note_lines.append(f"[输出风格：{style_instruction}]")
-    author_note_lines.append(
-        "【强制工具规则】"
-        "如上游工具层已提供时间/日记结果，必须优先依据工具结果回答；"
-        "没有工具结果时，禁止编造日记内容，禁止出现「你的日记里写着……」或任何引用未经工具返回的日记文字的表达。"
-    )
+    if tool_result:
+        author_note_lines.append(
+            "【工具结果已提供】"
+            "本轮层10已注入工具执行结果，直接依据该结果回答；"
+            "禁止声称'我去查一下'或暗示将再次调用工具——结果本轮已在上下文中。"
+        )
+    else:
+        author_note_lines.append(
+            "【无工具结果】"
+            "本轮没有任何工具执行结果。"
+            "禁止声称调用了任何工具；禁止编造日记内容；"
+            "禁止引用任何未经工具返回的日记文字或实时数据。"
+            "如果用户提到日记，可以询问是否希望你读取，或基于用户当前发来的内容回应。"
+        )
     author_note_lines.append(
         "【表达规则】对话示例仅作风格参考，禁止复用原句或近似表达，每次回应必须是全新的措辞。"
     )

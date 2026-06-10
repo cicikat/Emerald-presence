@@ -692,6 +692,22 @@ def get_tools_schema(categories: list[str] | None = None) -> list[dict]:
     return schemas
 
 
+def format_tool_capability_note(categories: list[str] | None = None) -> str:
+    """从 registry 派生已启用工具名称列表，供 prompt 注入。
+    categories: 若提供，仅包含该分类的工具；None 返回全部已启用工具。
+    工具名来自 _TOOL_REGISTRY，不手写，不列出 registry 中不存在的工具。
+    """
+    names = [
+        name
+        for name, info in _TOOL_REGISTRY.items()
+        if _is_tool_enabled(name)
+        and (categories is None or info.get("category") in categories)
+    ]
+    if not names:
+        return ""
+    return "可用工具：" + "、".join(names)
+
+
 def get_probe_prompt(location: str) -> str:
     """动态从注册表构建探针 prompt，新增工具自动同步，无需手动维护。"""
     lines = [
@@ -817,8 +833,5 @@ class ToolDispatcher:
             target_id=target_id,
             is_group=is_group,
             session_state=session_state,
-            origin=origin,
-        )
-state,
             origin=origin,
         )
