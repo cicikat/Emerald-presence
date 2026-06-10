@@ -177,6 +177,29 @@ TXT 导入分支调用 `Path(file.filename).stem`，但文件没有导入 `pathl
 
 ---
 
+### SEC-AUTH-1：多个 admin 端点无鉴权（2026-06-10 核对）
+
+**状态**：`now-safe-to-fix`
+
+**位置**：`admin/routers/chat.py`
+
+以下端点挂载在 admin server（默认 `127.0.0.1:8080`）但没有 Bearer token 校验：
+
+| 端点 | 风险等级 | 影响 |
+|---|---|---|
+| `POST /upload/ingest` | 中 | 写入 `data/inbox/`，触发文件 ingest pipeline（含 LLM vision 调用） |
+| `POST /desktop/activate` | 低 | 修改 desktop channel 活跃状态，不触发 LLM |
+| `POST /desktop/deactivate` | 低 | 修改 desktop channel 活跃状态，不触发 LLM |
+| `POST /desktop/wake` | **高** | 触发完整 LLM 轮（Path B），向 event_log / short_term 写入 assistant turn；任意能到达 admin server 的本地进程均可无鉴权调用 |
+
+`/desktop/wake` 风险高于其他三个：Path B 走 `_pipeline_send()`，完整经历 `fetch_context → run_llm → post_process`，可在无用户参与的情况下写入记忆。
+
+**已缓解**：admin server 默认绑定 `127.0.0.1`，外部网络无法直接访问；但同机进程（含注入攻击）可无障碍调用。
+
+**建议**：给上述端点加统一 Bearer token 依赖（复用现有 `verify_admin_token`）。
+
+---
+
 ### SEC-WS-1：WebSocket query token 仍是过渡方案
 
 **状态**：`refactor-phase`

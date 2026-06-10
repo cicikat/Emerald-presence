@@ -51,15 +51,20 @@ Scheduler       → core/scheduler/loop.py
 5. **`post_process()`** (non-blocking `create_task`): critical path writes under `uid_lock`; slow-queue single-worker handles memory consolidation
 
 **Five memory layers** (all under `data/`, all paths via `core/sandbox.get_paths()`):
-| Layer | File/Dir | Update |
-|---|---|---|
-| Short-term | `history/{uid}.json` | Every turn (last 20 rounds) |
-| Mid-term | `mid_term/{uid}.json` | LLM compression per turn (12h expiry, 3 time buckets) |
-| Episodic | `episodic_memory/{uid}.json` | mid_term eager/sweep promotion, strength decay, max 200 |
-| Character growth | `character_growth/角色_{uid}.md` + `.felt.md` + `.fingerprint.txt` | fixation pipeline consolidation |
-| Event log | `event_log/{uid}/` | Every turn, daily files, 30-day search window |
 
-**Memory consolidation** runs in the slow queue: `capture_turn → mid_term → episodic → character_growth`.
+> S6 layout (current, `_LAYOUT_REALITY="v1"`): per-user files live under
+> `data/runtime/memory/{char_id}/{uid}/`. Legacy paths (`history/{uid}.json` etc.) were
+> the pre-S6 layout; they are **migrated / historical** and must not be used in new code.
+
+| Layer | File/Dir (S6 current) | Update |
+|---|---|---|
+| Short-term | `data/runtime/memory/{char_id}/{uid}/history.json` | Every turn (last 20 rounds) |
+| Mid-term | `data/runtime/memory/{char_id}/{uid}/mid_term.json` | LLM compression per turn (12h expiry, 3 time buckets) |
+| Episodic | `data/runtime/memory/{char_id}/{uid}/episodic.json` | mid_term eager/sweep promotion, strength decay, max 200 |
+| User identity | `data/runtime/memory/{char_id}/{uid}/identity.yaml` | fixation pipeline consolidation (replaces legacy character_growth as primary long-term outlet) |
+| Event log | `data/runtime/memory/{char_id}/{uid}/event_log/{date}.md` | Every turn, daily files, 30-day search window |
+
+**Memory consolidation** runs in the slow queue: `capture_turn → mid_term → episodic → consolidate_to_identity`.
 
 **Tool system**: Tools declared in `_TOOL_REGISTRY` in `core/tool_dispatcher.py`. `info`/`desktop` tools fire via pre-pipeline probe; reply-side desktop intent parsing runs after generation. `memory` tools are registered but are not currently exposed to the main generation call.
 
