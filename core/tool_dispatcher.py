@@ -600,6 +600,55 @@ _TOOL_REGISTRY["water_garden"] = {
 }
 
 
+# ─── N7: 快速路径风险标记 helper ──────────────────────────────────────────────
+#
+# 规则（保守优先）：
+#   高风险 / side_effect=True ：
+#     - 所有 dangerous=True 的工具（device_shutdown / device_sleep）
+#     - desktop 控制类（向外推送动作：minimize / open_url / play_pause / notify / play_song）
+#     - 写状态的工具（add_reminder / water_garden / exit_yandere）
+#   低风险 / side_effect=False：
+#     - 纯读类（get_time / weather / web_search / read_diary /
+#               read_watch / search_diary / get_profile / get_episodic / get_growth）
+
+_SIDE_EFFECT_TOOLS: frozenset[str] = frozenset({
+    # desktop 控制类 —— 会向桌宠端推送外部动作
+    "desktop_minimize",
+    "desktop_open_url",
+    "desktop_play_pause",
+    "desktop_notify",
+    "play_song",
+    # 写状态的工具
+    "add_reminder",
+    "water_garden",
+    "exit_yandere",
+    # system 类（dangerous=True，冗余标注，保证兜底）
+    "device_shutdown",
+    "device_sleep",
+})
+
+
+def is_side_effect_tool(tool_name: str) -> bool:
+    """返回该工具是否有副作用（会写状态或向外部发动作）。
+
+    优先复用 registry 中的 dangerous=True 标记，
+    再对照 _SIDE_EFFECT_TOOLS 白名单兜底。
+    """
+    spec = _TOOL_REGISTRY.get(tool_name, {})
+    if spec.get("dangerous", False):
+        return True
+    return tool_name in _SIDE_EFFECT_TOOLS
+
+
+def tool_fast_path_risk(tool_name: str) -> str:
+    """返回工具在快速路径下的风险等级字符串。
+
+    "high" — 有副作用（写状态 / 控制外部 / 媒体控制 / 提醒 / 花园等）
+    "low"  — 纯读类（时间 / 天气 / 搜索 / 日记阅读等）
+    """
+    return "high" if is_side_effect_tool(tool_name) else "low"
+
+
 # ─── 对外接口 ──────────────────────────────────────────────────────────────────
 
 def _is_tool_enabled(tool_name: str) -> bool:
@@ -768,5 +817,8 @@ class ToolDispatcher:
             target_id=target_id,
             is_group=is_group,
             session_state=session_state,
+            origin=origin,
+        )
+state,
             origin=origin,
         )

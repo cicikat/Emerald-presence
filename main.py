@@ -40,6 +40,23 @@ def get_pipeline():
     return _registry.get("pipeline")
 
 
+def _fast_path_match(user_msg: str) -> tuple[str, str] | None:
+    """快速路径关键词匹配（N7 可观测版）。
+
+    返回 (tool_name, matched_keyword)，未命中返回 None。
+    只扫描 info / desktop 分类工具，行为与原内联版本完全一致。
+    提升为模块级以便单元测试直接引用。
+    """
+    from core import tool_dispatcher as _td
+    for name, spec in _td._TOOL_REGISTRY.items():
+        if spec.get("category") not in ("info", "desktop"):
+            continue
+        for kw in spec.get("keywords", []):
+            if kw in user_msg:
+                return name, kw
+    return None
+
+
 def _init_modules():
     """同步初始化：加载配置、角色卡、世界书、Pipeline"""
     global _pipeline
@@ -330,16 +347,29 @@ async def handle_message(message: dict):
         _profile = _up.load(user_id, char_id=_char_id)
         _location = _profile.get("location", "杭州")
         # 快速路径：关键词命中直接走，不调 LLM；只匹配 trusted_user_text，不含 media span
-        def _fast_path_match(user_msg: str) -> str | None:
-            for name, spec in tool_dispatcher._TOOL_REGISTRY.items():
-                if spec.get("category") not in ("info", "desktop"):
-                    continue
-                if any(kw in user_msg for kw in spec.get("keywords", [])):
-                    return name
-            return None
-
-        _fast_tool = _fast_path_match(_trusted_user_text)
-        if _fast_tool:
+        _fast_match = _fast_path_match(_trusted_user_text)
+        if _fast_match:
+            _fast_tool, _fast_kw = _fast_match
+            # N7: 结构化命中日志（观测用，不影响行为）
+            _fast_spec = tool_dispatcher._TOOL_REGISTRY.get(_fast_tool, {})
+            _fast_requires_args = bool(
+                _fast_spec.get("parameters", {}).get("required", [])
+            )
+            logger.info(
+                "[qq_fast_path_match] event=qq_fast_path_match "
+                "uid=%s is_group=%s matched_tool=%s matched_keyword=%r "
+                "tool_category=%s has_side_effect=%s fast_path_risk=%s "
+                "original_text_preview=%r will_skip_probe=True "
+                "tool_requires_args=%s has_empty_args=%s",
+                user_id, is_group,
+                _fast_tool, _fast_kw,
+                _fast_spec.get("category", ""),
+                tool_dispatcher.is_side_effect_tool(_fast_tool),
+                tool_dispatcher.tool_fast_path_risk(_fast_tool),
+                _trusted_user_text[:80],
+                _fast_requires_args,
+                _fast_requires_args,   # fast path 恒传 {}，若工具要参数则 has_empty_args=True
+            )
             tool_calls = [{"name": _fast_tool, "arguments": {}}]
             logger.info(f"[handle_message] 快速路径命中工具: {_fast_tool}")
         else:
