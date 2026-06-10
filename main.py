@@ -213,10 +213,25 @@ async def handle_message(message: dict):
     )
     from core.memory import group_context
     from core.output import text_output
+    from core.error_handler import log_error as _log_error
 
     # ── 步骤1：群聊记录群消息流 ─────────────────────────────────────────────
     if is_group:
         group_context.append(group_id, sender_name, content)
+
+    # ── 步骤2.5（N1）：现实轮级 scope freeze —————————————————————————————————
+    # _current_reality_scope() 内部调用 _refresh_character_if_needed()，
+    # 做一次性文件读取。本轮余下所有步骤使用这个冻结的 scope / char_id，
+    # 避免管理面板在轮次中切换角色导致 fetch / build / post 读写不同角色桶。
+    if _pipeline is None:
+        logger.error("[handle_message] pipeline 未初始化，跳过本轮")
+        return
+    try:
+        _frozen_scope = _pipeline._current_reality_scope(user_id)
+    except (ValueError, RuntimeError) as _char_err:
+        _log_error("main.handle_message.char_refresh", _char_err)
+        return
+    _char_id = _frozen_scope.character_id
 
     # ── 步骤2：会话状态机（等待确认 / 等待补充参数）──────────────────────────
     state = ss.get(session_key)
@@ -235,7 +250,7 @@ async def handle_message(message: dict):
             )
             state.clear()
             if tool_result:
-                await _reply_with_tool_result(tool_result, user_id, target_id, is_group)
+                await _reply_with_tool_result(tool_result, user_id, target_id, is_group, frozen_scope=_frozen_scope)
         else:
             logger.info("[handle_message] 用户取消了工具执行")
             state.clear()
@@ -260,10 +275,10 @@ async def handle_message(message: dict):
             await text_output.send(target_id, [ask_text], is_group)
             return
         if tool_result:
-            await _reply_with_tool_result(tool_result, user_id, target_id, is_group)
+            await _reply_with_tool_result(tool_result, user_id, target_id, is_group, frozen_scope=_frozen_scope)
         return
 
-    # ── 步骤2.5：处理图片和文件 ─────────────────────────────────────────────
+    # ── 步骤2.6：处理图片和文件 ─────────────────────────────────────────────
     # trusted_user_text 必须在媒体拼接之前捕获：probe 只能消费原始用户输入，
     # 不得混入 media_context（媒体抽取文本只进 prompt，不进 probe）。
     _trusted_user_text = content
@@ -281,8 +296,7 @@ async def handle_message(message: dict):
                 media_context = f"（你发来了一个文件：{fname}，内容如下），回应必须细腻且有分量。回应长度不少于150字，不要因为克制就缩短回应。\n{file_text[:3000]}"
                 logger.info(f"[handle_message] 文件已读取: {fname} {len(file_text)}字")
         except Exception as e:
-            from core.error_handler import log_error
-            log_error("handle_message.file", e)
+            _log_error("handle_message.file", e)
 
     if image_urls and not media_context:
         try:
@@ -292,149 +306,151 @@ async def handle_message(message: dict):
                 media_context = f"（你发来了一张图片，图片内容：{img_desc}，回应必须细腻且有分量）"
                 logger.info(f"[handle_message] 图片已识别: {img_desc[:50]}")
         except Exception as e:
-            from core.error_handler import log_error
-            log_error("handle_message.image", e)
+            _log_error("handle_message.image", e)
 
     if media_context:
         content = media_context + ("\n" + content if content else "")
 
-    # ── 步骤3：工具调用探测 ──────────────────────────────────────────────────
-    from core import llm_client
-    from core.config_loader import get_config
-    cfg = get_config()
+    # ── 步骤3–9：conversation_lock 内串行执行（R1）──────────────────────────
+    # conversation_lock 保证多端（QQ / desktop / mobile）不并行跑同一用户的 pipeline。
+    # 同时保证 scope freeze 的一致性：同一把锁内 char_id 不会被另一轮入侵。
+    from core.conversation_gate import conversation_lock
+    async with conversation_lock(user_id):
+        # ── 步骤3：工具调用探测 ──────────────────────────────────────────────
+        from core import llm_client
+        from core.config_loader import get_config
+        cfg = get_config()
 
-    tool_result_text: str | None = None
-    tool_mode = cfg.get("llm", {}).get("tool_call_mode", "function_calling")
+        tool_result_text: str | None = None
 
-    from datetime import datetime
-    _now = datetime.now()
-    _time_str = _now.strftime("%Y年%m月%d日 %H:%M 星期") + ["一", "二", "三", "四", "五", "六", "日"][_now.weekday()]
-    from core.error_handler import log_error as _log_error_probe
-    try:
-        _pipeline._refresh_character_if_needed()
-    except (ValueError, RuntimeError) as _char_err:
-        _log_error_probe("main.probe.char_refresh", _char_err)
-        return
-    _char_id = _pipeline._active_character_id
-    from core.memory import user_profile as _up
-    _profile = _up.load(user_id, char_id=_char_id)
-    _location = _profile.get("location", "杭州")
-    # 快速路径：关键词命中直接走，不调 LLM；只匹配 trusted_user_text，不含 media span
-    def _fast_path_match(user_msg: str) -> str | None:
-        for name, spec in tool_dispatcher._TOOL_REGISTRY.items():
-            if spec.get("category") not in ("info", "desktop"):
-                continue
-            if any(kw in user_msg for kw in spec.get("keywords", [])):
-                return name
-        return None
+        from core.memory import user_profile as _up
+        _profile = _up.load(user_id, char_id=_char_id)
+        _location = _profile.get("location", "杭州")
+        # 快速路径：关键词命中直接走，不调 LLM；只匹配 trusted_user_text，不含 media span
+        def _fast_path_match(user_msg: str) -> str | None:
+            for name, spec in tool_dispatcher._TOOL_REGISTRY.items():
+                if spec.get("category") not in ("info", "desktop"):
+                    continue
+                if any(kw in user_msg for kw in spec.get("keywords", [])):
+                    return name
+            return None
 
-    _fast_tool = _fast_path_match(_trusted_user_text)
-    if _fast_tool:
-        tool_calls = [{"name": _fast_tool, "arguments": {}}]
-        logger.info(f"[handle_message] 快速路径命中工具: {_fast_tool}")
-    else:
-        tool_detection_messages = [
-            {
-                "role": "system",
-                "content": tool_dispatcher.get_probe_prompt(_location),
-            },
-            {"role": "user", "content": _trusted_user_text},
-        ]
-        tools_schema = tool_dispatcher.get_tools_schema(categories=["info", "desktop"])
+        _fast_tool = _fast_path_match(_trusted_user_text)
+        if _fast_tool:
+            tool_calls = [{"name": _fast_tool, "arguments": {}}]
+            logger.info(f"[handle_message] 快速路径命中工具: {_fast_tool}")
+        else:
+            tool_detection_messages = [
+                {
+                    "role": "system",
+                    "content": tool_dispatcher.get_probe_prompt(_location),
+                },
+                {"role": "user", "content": _trusted_user_text},
+            ]
+            tools_schema = tool_dispatcher.get_tools_schema(categories=["info", "desktop"])
+            try:
+                probe_response = await llm_client.chat(tool_detection_messages, tools=tools_schema, call_category="probe")
+            except Exception:
+                probe_response = ""
+
+            tool_calls = llm_client.parse_tool_call_response(probe_response)
+            logger.info(f"[handle_message] probe_response type={type(probe_response)} tool_calls={tool_calls}")
+        if tool_calls:
+            try:
+                from core.memory.mood_state import update as _update_mood_probe
+                _update_mood_probe("thinking", source="trigger", char_id=_char_id)
+            except Exception:
+                pass
+            for tc in tool_calls:
+                t_name = tc.get("name", "")
+                t_args = tc.get("arguments", {})
+                logger.info(f"[handle_message] 检测到工具调用: {t_name}({t_args})")
+                t_result, ask_text = await tool_dispatcher.execute(
+                    tool_name=t_name,
+                    tool_args=t_args,
+                    user_id=user_id,
+                    target_id=target_id,
+                    is_group=is_group,
+                    session_state=state,
+                    origin="user_live",
+                )
+                if ask_text:
+                    logger.info(f"[handle_message] 高危工具 {t_name}，等待用户确认")
+                    await text_output.send(target_id, [ask_text], is_group)
+                    return
+                if t_result:
+                    tool_result_text = t_result
+                    if t_name == "read_diary":
+                        _pipeline.author_note_extra = (
+                            "【日记回应规则】你刚刚读完了她的日记，这是她真实写下的内心世界。"
+                            "回应必须细腻且有分量：①摘取日记中具体的细节或句子来回应，不要泛泛而谈；"
+                            "②说出你读完之后真实的感受，可以是心疼、好奇、被击中、想多了解；"
+                            "③可以追问日记里没写完的事；"
+                            "④回应长度不少于150字，不要因为克制就缩短回应。"
+                        )
+                    break
+
+        # ── 步骤4：拉取上下文（并发）────────────────────────────────────────
+        logger.debug("[handle_message] 并发拉取上下文...")
+        context = await _pipeline.fetch_context(user_id, content, group_id, frozen_scope=_frozen_scope)
+
+        # ── 步骤5：组装 prompt ───────────────────────────────────────────────
+        logger.debug("[handle_message] 组装 prompt...")
+        messages, _meta = _pipeline.build_prompt(user_id, content, context, tool_result=tool_result_text, channel="qq", char_id=_char_id)
+
+        # ── 步骤6：调用主 LLM ────────────────────────────────────────────────
+        logger.info("[handle_message] 调用主 LLM...")
+        raw_reply = await _pipeline.run_llm(messages)
+        logger.info(
+            f"[handle_message] LLM 回复长度={len(raw_reply) if raw_reply else 0}"
+            f"，预览: {(raw_reply or '')[:60]!r}"
+        )
+
+        # ── 步骤7：后处理回复 ────────────────────────────────────────────────
+        segments = response_processor.process(raw_reply, _pipeline.character.name)
+        logger.info(f"[handle_message] 后处理完成，共 {len(segments)} 段")
+        if not segments:
+            logger.warning("[handle_message] LLM 回复经处理后为空，本轮不发送")
+            return
+        # Visible output (QQ): strip render/NMP tags only — preserve action descriptions
+        # for chat texture.  Heavy scrubbing only happens on the memory path below.
+        from core.response_processor import strip_render_tags as _strip_rt
+        segments = [s for s in (_strip_rt(seg) for seg in segments) if s]
+        if not segments:
+            logger.warning("[handle_message] 回复经处理后为空，本轮不发送")
+            return
+
+        # ── 步骤8：发送回复 ──────────────────────────────────────────────────
+        logger.info(f"[handle_message] 发送到 {'群' if is_group else '私聊'}{target_id}")
         try:
-            probe_response = await llm_client.chat(tool_detection_messages, tools=tools_schema)
-        except Exception:
-            probe_response = ""
+            await text_output.send(target_id, segments, is_group)
+        except Exception as e:
+            _log_error("main.handle_message.send", e)
+            logger.error(f"[handle_message] 发送异常: {type(e).__name__}: {e}")
+            return
+        logger.info(f"[handle_message] 回复已发送，共 {len(segments)} 段")
 
-        tool_calls = llm_client.parse_tool_call_response(probe_response)
-        logger.info(f"[handle_message] probe_response type={type(probe_response)} tool_calls={tool_calls}")
-    if tool_calls:
+        # ── 步骤9：await 后处理（N10：关键写入不得丢引用）───────────────────
+        # Memory path: scrub action descriptions before handing off to post_process.
+        # capture_turn, summarize_to_midterm, and the entire consolidation chain receive
+        # dialogue-only text — never raw action/narration content.
+        from core.reality_output_scrubber import scrub_reality_output_text as _scrub_qq
+        _raw_join = "\n".join(segments)
+        memory_reply = _scrub_qq(_raw_join) or ""
+        from core.write_envelope import stamp_qq
         try:
-            from core.memory.mood_state import update as _update_mood_probe
-            _update_mood_probe("thinking", source="trigger", char_id=_pipeline._active_character_id)
-        except Exception:
-            pass
-        for tc in tool_calls:
-            t_name = tc.get("name", "")
-            t_args = tc.get("arguments", {})
-            logger.info(f"[handle_message] 检测到工具调用: {t_name}({t_args})")
-            t_result, ask_text = await tool_dispatcher.execute(
-                tool_name=t_name,
-                tool_args=t_args,
-                user_id=user_id,
-                target_id=target_id,
-                is_group=is_group,
-                session_state=state,
-                origin="user_live",
+            await _pipeline.post_process(
+                user_id, content, memory_reply, target_id, is_group,
+                pending_paths=_meta.get("pending_paths", []),
+                envelope=stamp_qq(),
+                frozen_scope=_frozen_scope,
             )
-            if ask_text:
-                logger.info(f"[handle_message] 高危工具 {t_name}，等待用户确认")
-                await text_output.send(target_id, [ask_text], is_group)
-                return
-            if t_result:
-                tool_result_text = t_result
-                if t_name == "read_diary":
-                    _pipeline.author_note_extra = (
-                        "【日记回应规则】你刚刚读完了她的日记，这是她真实写下的内心世界。"
-                        "回应必须细腻且有分量：①摘取日记中具体的细节或句子来回应，不要泛泛而谈；"
-                        "②说出你读完之后真实的感受，可以是心疼、好奇、被击中、想多了解；"
-                        "③可以追问日记里没写完的事；"
-                        "④回应长度不少于150字，不要因为克制就缩短回应。"
-                    )
-                break
-
-    # ── 步骤4：拉取上下文（并发）────────────────────────────────────────────
-    logger.debug("[handle_message] 并发拉取上下文...")
-    context = await _pipeline.fetch_context(user_id, content, group_id)
-
-    # ── 步骤5：组装 prompt ───────────────────────────────────────────────────
-    logger.debug("[handle_message] 组装 prompt...")
-    messages, _meta = _pipeline.build_prompt(user_id, content, context, tool_result=tool_result_text, channel="qq")
-
-    # ── 步骤6：调用主 LLM ────────────────────────────────────────────────────
-    logger.info("[handle_message] 调用主 LLM...")
-    raw_reply = await _pipeline.run_llm(messages)
-    logger.info(
-        f"[handle_message] LLM 回复长度={len(raw_reply) if raw_reply else 0}"
-        f"，预览: {(raw_reply or '')[:60]!r}"
-    )
-
-    # ── 步骤7：后处理回复 ────────────────────────────────────────────────────
-    segments = response_processor.process(raw_reply, _pipeline.character.name)
-    logger.info(f"[handle_message] 后处理完成，共 {len(segments)} 段")
-    if not segments:
-        logger.warning("[handle_message] LLM 回复经处理后为空，本轮不发送")
-        return
-    # Visible output (QQ): strip render/NMP tags only — preserve action descriptions
-    # for chat texture.  Heavy scrubbing only happens on the memory path below.
-    from core.response_processor import strip_render_tags as _strip_rt
-    segments = [s for s in (_strip_rt(seg) for seg in segments) if s]
-    if not segments:
-        logger.warning("[handle_message] 回复经处理后为空，本轮不发送")
-        return
-
-    # ── 步骤8：发送回复 ──────────────────────────────────────────────────────
-    logger.info(f"[handle_message] 发送到 {'群' if is_group else '私聊'}{target_id}")
-    try:
-        await text_output.send(target_id, segments, is_group)
-    except Exception as e:
-        from core.error_handler import log_error
-        log_error("main.handle_message.send", e)
-        logger.error(f"[handle_message] 发送异常: {type(e).__name__}: {e}")
-        return
-    logger.info(f"[handle_message] 回复已发送，共 {len(segments)} 段")
-
-    # ── 步骤9：异步后处理（写记忆、TTS 等，不阻塞本轮）──────────────────────
-    # Memory path: scrub action descriptions before handing off to post_process.
-    # capture_turn, summarize_to_midterm, and the entire consolidation chain receive
-    # dialogue-only text — never raw action/narration content.
-    from core.reality_output_scrubber import scrub_reality_output_text as _scrub_qq
-    _raw_join = "\n".join(segments)
-    memory_reply = _scrub_qq(_raw_join) or ""
-    from core.write_envelope import stamp_qq
-    asyncio.create_task(
-        _pipeline.post_process(user_id, content, memory_reply, target_id, is_group, pending_paths=_meta.get("pending_paths", []), envelope=stamp_qq())
-    )
+        except Exception as _pp_err:
+            _log_error("main.handle_message.post_process", _pp_err)
+            logger.error(
+                "[handle_message] post_process 异常（记忆写入可能丢失）uid=%s: %s",
+                user_id, _pp_err,
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -446,8 +462,14 @@ async def _reply_with_tool_result(
     user_id: str,
     target_id: str,
     is_group: bool,
+    frozen_scope=None,
 ):
-    """工具确认流程结束后，用完整 prompt 生成角色语气回复"""
+    """工具确认流程结束后，用完整 prompt 生成角色语气回复。
+
+    frozen_scope: 本轮入口处已冻结的 MemoryScope（N1）。
+      传入时跳过内部 char refresh，使用同一轮的 char_id。
+      不传时退化到老行为（内部自行刷新，兼容直接调用场景）。
+    """
     from core.memory import short_term, user_profile, group_context
     from core import user_relation, response_processor
     from core.output import text_output
@@ -455,17 +477,22 @@ async def _reply_with_tool_result(
     from core.response_processor import strip_render_tags as _strip_rt
     from core.reality_output_scrubber import scrub_reality_output_text as _scrub_qq
     from core.write_envelope import stamp_qq
+    from core.conversation_gate import conversation_lock
 
     group_id = target_id if is_group else None
 
-    # P1-0A: resolve active character before reading any scoped memory;
-    # fail-loud if active_character is missing or unknown — no fallback to yexuan.
-    try:
-        _pipeline._refresh_character_if_needed()
-    except (ValueError, RuntimeError) as _char_err:
-        log_error("main._reply_with_tool_result.char_refresh", _char_err)
-        return
-    _char_id = _pipeline._active_character_id
+    # P1-0A: use frozen_scope char_id if available (N1 scope freeze);
+    # otherwise resolve active character — fail-loud if invalid.
+    if frozen_scope is not None:
+        _char_id = frozen_scope.character_id
+    else:
+        try:
+            _pipeline._refresh_character_if_needed()
+        except (ValueError, RuntimeError) as _char_err:
+            log_error("main._reply_with_tool_result.char_refresh", _char_err)
+            return
+        _char_id = _pipeline._active_character_id
+        frozen_scope = None  # keep as-is; post_process will freeze internally
 
     context = {
         "history":             short_term.load_for_prompt(user_id, char_id=_char_id),
@@ -479,39 +506,49 @@ async def _reply_with_tool_result(
     # Synthetic user-turn label; actual user input ("确认" / supplementary text)
     # is not forwarded here — build_prompt uses the same placeholder.
     _turn_content = "（工具已执行，请告知结果）"
-    messages, _meta = _pipeline.build_prompt(
-        user_id, _turn_content, context, tool_result=tool_result, channel="qq"
-    )
-    try:
-        raw_reply = await _pipeline.run_llm(messages)
-    except Exception as e:
-        log_error("main._reply_with_tool_result.llm", e)
-        return
 
-    segments = response_processor.process(raw_reply, _pipeline.character.name)
-    # Visible output (QQ): strip render/NMP tags — mirrors QQ main message path.
-    segments = [s for s in (_strip_rt(seg) for seg in segments) if s]
-    if not segments:
-        logger.warning("[_reply_with_tool_result] 处理后回复为空，不发送")
-        return
-
-    try:
-        await text_output.send(target_id, segments, is_group)
-    except Exception as e:
-        log_error("main._reply_with_tool_result.send", e)
-        return
-
-    # Memory path: scrub action/narration content before post_process.
-    # post_process runs non-blocking — failure must not prevent the already-sent reply.
-    _raw_join = "\n".join(segments)
-    memory_reply = _scrub_qq(_raw_join) or ""
-    asyncio.create_task(
-        _pipeline.post_process(
-            user_id, _turn_content, memory_reply, target_id, is_group,
-            pending_paths=_meta.get("pending_paths", []),
-            envelope=stamp_qq(),
+    # R1: wrap pipeline steps in conversation_lock for serialisation consistency.
+    async with conversation_lock(user_id):
+        messages, _meta = _pipeline.build_prompt(
+            user_id, _turn_content, context, tool_result=tool_result, channel="qq",
+            char_id=_char_id,
         )
-    )
+        try:
+            raw_reply = await _pipeline.run_llm(messages)
+        except Exception as e:
+            log_error("main._reply_with_tool_result.llm", e)
+            return
+
+        segments = response_processor.process(raw_reply, _pipeline.character.name)
+        # Visible output (QQ): strip render/NMP tags — mirrors QQ main message path.
+        segments = [s for s in (_strip_rt(seg) for seg in segments) if s]
+        if not segments:
+            logger.warning("[_reply_with_tool_result] 处理后回复为空，不发送")
+            return
+
+        try:
+            await text_output.send(target_id, segments, is_group)
+        except Exception as e:
+            log_error("main._reply_with_tool_result.send", e)
+            return
+
+        # Memory path: scrub action/narration content before post_process.
+        # N10: await instead of create_task — critical writes must not be dropped.
+        _raw_join = "\n".join(segments)
+        memory_reply = _scrub_qq(_raw_join) or ""
+        try:
+            await _pipeline.post_process(
+                user_id, _turn_content, memory_reply, target_id, is_group,
+                pending_paths=_meta.get("pending_paths", []),
+                envelope=stamp_qq(),
+                frozen_scope=frozen_scope,
+            )
+        except Exception as _pp_err:
+            log_error("main._reply_with_tool_result.post_process", _pp_err)
+            logger.error(
+                "[_reply_with_tool_result] post_process 异常（记忆写入可能丢失）uid=%s: %s",
+                user_id, _pp_err,
+            )
 
 
 

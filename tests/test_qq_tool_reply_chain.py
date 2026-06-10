@@ -24,6 +24,7 @@ def _make_fake_pipeline(llm_reply: str = "你好") -> MagicMock:
     fake.character = MagicMock()
     fake.character.name = "TestChar"
     fake.author_note_extra = ""
+    fake._active_character_id = "yexuan"
     fake.build_prompt = MagicMock(return_value=([], {"pending_paths": []}))
     fake.run_llm = AsyncMock(return_value=llm_reply)
     fake.post_process = AsyncMock(
@@ -263,8 +264,12 @@ async def test_handle_message_main_path_intact(sandbox, monkeypatch):
     sent = _patch_text_output(monkeypatch)
 
     import main as _main
+    from core.memory.scope import MemoryScope
     fake = _make_fake_pipeline("正常回复内容。")
     fake.fetch_context = AsyncMock(return_value={})
+    fake._current_reality_scope = MagicMock(
+        return_value=MemoryScope.reality_scope(_UID, "yexuan")
+    )
     monkeypatch.setattr(_main, "_pipeline", fake)
 
     await _main.handle_message({

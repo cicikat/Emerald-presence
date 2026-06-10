@@ -38,13 +38,19 @@ def _write_dream_state(sandbox, uid: str, status: str):
     write_state(uid, {"status": status, "user_id": uid})
 
 
-def _patch_pipeline(monkeypatch):
+def _patch_pipeline(monkeypatch, uid: str = _OWNER_ID):
     """Return a fake pipeline and wire it into main._pipeline."""
+    from core.memory.scope import MemoryScope
     import main as _main
     fake = MagicMock()
     fake.character = MagicMock()
     fake.character.name = "叶瑄"
     fake.author_note_extra = ""
+    fake._active_character_id = "yexuan"
+    # N1: _current_reality_scope must return a real MemoryScope so char_id is a string.
+    fake._current_reality_scope = MagicMock(
+        return_value=MemoryScope.reality_scope(str(uid), "yexuan")
+    )
     fake.fetch_context = AsyncMock(return_value={})
     fake.build_prompt = MagicMock(return_value=([], {"pending_paths": []}))
     fake.run_llm = AsyncMock(return_value="回复内容")
@@ -209,9 +215,10 @@ async def test_reality_chat_passes_through(sandbox, monkeypatch):
         pass
 
     # Patch memory / profile lookups needed inside handle_message
+    # N1 fix: user_profile.load is called with char_id kwarg → must accept **kw
     try:
         import core.memory.user_profile as _up
-        monkeypatch.setattr(_up, "load", lambda uid: {"location": "杭州"})
+        monkeypatch.setattr(_up, "load", lambda uid, **kw: {"location": "杭州"})
     except Exception:
         pass
 
@@ -237,11 +244,11 @@ async def test_non_owner_not_blocked_by_dream_guard(sandbox, monkeypatch):
     _patch_tool_dispatcher(monkeypatch)
     _patch_llm_client(monkeypatch)
     _patch_group_context(monkeypatch)
-    fake_pipeline = _patch_pipeline(monkeypatch)
+    fake_pipeline = _patch_pipeline(monkeypatch, uid=_OTHER_ID)
 
     try:
         import core.memory.user_profile as _up
-        monkeypatch.setattr(_up, "load", lambda uid: {"location": "杭州"})
+        monkeypatch.setattr(_up, "load", lambda uid, **kw: {"location": "杭州"})
     except Exception:
         pass
 
@@ -297,19 +304,26 @@ async def test_stamp_qq_used_in_reality_chat(sandbox, monkeypatch):
     _patch_llm_client(monkeypatch)
     _patch_group_context(monkeypatch)
 
+    # N1 fix: user_profile.load is called with char_id kwarg → must accept **kw
     try:
         import core.memory.user_profile as _up
-        monkeypatch.setattr(_up, "load", lambda uid: {"location": "杭州"})
+        monkeypatch.setattr(_up, "load", lambda uid, **kw: {"location": "杭州"})
     except Exception:
         pass
 
     captured_envelopes = []
 
+    from core.memory.scope import MemoryScope
     import main as _main
     fake = MagicMock()
     fake.character = MagicMock()
     fake.character.name = "叶瑄"
     fake.author_note_extra = ""
+    fake._active_character_id = "yexuan"
+    # N1 fix: _current_reality_scope must return a real MemoryScope
+    fake._current_reality_scope = MagicMock(
+        return_value=MemoryScope.reality_scope(_OWNER_ID, "yexuan")
+    )
     fake.fetch_context = AsyncMock(return_value={})
     fake.build_prompt = MagicMock(return_value=([], {"pending_paths": []}))
     fake.run_llm = AsyncMock(return_value="回复内容")
@@ -323,9 +337,7 @@ async def test_stamp_qq_used_in_reality_chat(sandbox, monkeypatch):
 
     await _main.handle_message(_make_msg())
 
-    # Allow the asyncio.create_task to run
-    await asyncio.sleep(0.01)
-
+    # N10 fix: post_process is now awaited directly, no asyncio.sleep needed.
     assert len(captured_envelopes) == 1
     env = captured_envelopes[0]
     expected = stamp_qq()

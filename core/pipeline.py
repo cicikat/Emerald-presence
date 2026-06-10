@@ -167,6 +167,7 @@ class Pipeline:
         user_id: str,
         content: str,
         group_id: str | None = None,
+        frozen_scope: "MemoryScope | None" = None,
     ) -> dict:
         """
         并发拉取所有记忆数据并进行世界书关键词匹配。
@@ -182,9 +183,16 @@ class Pipeline:
             "event_search_result": str,        # 事件日志语义搜索结果
             "lore_entries":       list[str],   # 命中的世界书条目
         }
+
+        frozen_scope: 如果传入，直接使用该 scope，跳过 _current_reality_scope()。
+          入口处已做一次性 scope freeze 时必须传入，保证全轮角色一致性（N1）。
         """
-        # Guard: validates active_character and constructs scope; raises on invalid state.
-        scope = self._current_reality_scope(user_id)
+        # Guard: if frozen_scope provided, use it directly (turn-level scope freeze);
+        # otherwise validate active_character and construct scope.
+        if frozen_scope is not None:
+            scope = frozen_scope
+        else:
+            scope = self._current_reality_scope(user_id)
         uid = scope.uid
         char_id = scope.character_id
         assert char_id is not None
@@ -302,14 +310,21 @@ class Pipeline:
         tool_result: str | None = None,
         tags: set[str] | None = None,
         channel: str | None = None,
+        char_id: "str | None" = None,
     ) -> tuple[list[dict], dict]:
         """
         调用 prompt_builder 组装完整消息列表。
         根据 chat.mode 在 system prompt 末尾追加风格提示。
         author_note_extra 用完后立即清空（只影响本轮）。
+
+        char_id: 如果传入，使用该值作为 _char_id，跳过 _refresh_character_if_needed()。
+          入口处已做一次性 scope freeze 时必须传入（N1）。
         """
-        self._refresh_character_if_needed()
-        _char_id = self._active_character_id
+        if char_id is not None:
+            _char_id = char_id
+        else:
+            self._refresh_character_if_needed()
+            _char_id = self._active_character_id
         from core import prompt_builder
         from core.config_loader import get_config
         from datetime import datetime
@@ -396,10 +411,11 @@ class Pipeline:
         trigger_name: str = "",
         envelope=None,
         audit_extras: dict | None = None,
+        frozen_scope: "MemoryScope | None" = None,
     ):
         """
         关键写入在 uid_lock 内同步完成，慢任务（LLM调用）入 slow_queue 异步执行。
-        应通过 asyncio.create_task() 调用，不阻塞主流程。
+        调用方应 await 此方法，不得用 asyncio.create_task() 丢弃引用（N10）。
 
         关键路径（uid_lock 内，按顺序）：
           short_term.append → event_log(user) → detect_emotion(timeout=8s)
@@ -411,13 +427,19 @@ class Pipeline:
           user_profile_update（条件） / character_growth_update（条件）
 
         side effects（保持 asyncio.create_task）：TTS/表情包 / _parse_and_execute_intent
+
+        frozen_scope: 如果传入，直接使用该 scope，跳过 _current_reality_scope()（N1）。
         """
         from core.write_envelope import WriteEnvelope
         if envelope is None:
             envelope = WriteEnvelope()
 
-        # Guard: validates active_character and constructs scope; raises on invalid state.
-        scope = self._current_reality_scope(user_id)
+        # Guard: if frozen_scope provided, use it directly (turn-level scope freeze);
+        # otherwise validate active_character and construct scope.
+        if frozen_scope is not None:
+            scope = frozen_scope
+        else:
+            scope = self._current_reality_scope(user_id)
         char_id = scope.character_id
         assert char_id is not None
         scope_payload = scope.to_payload()
