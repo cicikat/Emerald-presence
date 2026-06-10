@@ -61,7 +61,7 @@ Scheduler       → core/scheduler/loop.py
 | Short-term | `data/runtime/memory/{char_id}/{uid}/history.json` | Every turn (last 20 rounds) |
 | Mid-term | `data/runtime/memory/{char_id}/{uid}/mid_term.json` | LLM compression per turn (12h expiry, 3 time buckets) |
 | Episodic | `data/runtime/memory/{char_id}/{uid}/episodic.json` | mid_term eager/sweep promotion, strength decay, max 200 |
-| User identity | `data/runtime/memory/{char_id}/{uid}/identity.yaml` | fixation pipeline consolidation (replaces legacy character_growth as primary long-term outlet) |
+| User identity | `data/runtime/memory/{char_id}/{uid}/identity.yaml` | fixation pipeline consolidation (active long-term writer; `character_growth` write path retired R8-E2, now read-only legacy surface) |
 | Event log | `data/runtime/memory/{char_id}/{uid}/event_log/{date}.md` | Every turn, daily files, 30-day search window |
 
 **Memory consolidation** runs in the slow queue: `capture_turn → mid_term → episodic → consolidate_to_identity`.

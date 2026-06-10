@@ -55,6 +55,8 @@ R8-C 已落地（2026-06-10）：`author_note_rotator.get_current_note()` 新增
 
 R8-E2 已落地（2026-06-10）：`character_growth.update()` 已删除，其内部 `trait_state()` 死代码写路径（缺 char_id）随之消除。`character_growth` 现为只读 legacy 接口，写入链完全由 `trait_tracker_update` slow_queue task 承接。
 
+R8-E3 已落地（2026-06-10）：`character_growth.py` 模块 docstring 及 `load()` docstring 已明确标注 read-only legacy compatibility surface，并注明禁止重引入 `update()` / `should_update()`。`get_growth` 工具描述已更新为"只读历史成长摘要，不触发写入"。新增 `tests/test_r8e3_character_growth_readonly_contract.py`（7 个只读契约守卫）。`docs/memory.md` 补充 character_growth 只读声明 callout。
+
 ---
 
 ### F11：memory 工具已注册，但正式探针不会暴露

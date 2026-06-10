@@ -92,7 +92,7 @@
 | 中期记忆 | `data/runtime/memory/{char_id}/{uid}/mid_term.json` | 每轮慢队列压缩 | `mid_term` |
 | 情景记忆 | `data/runtime/memory/{char_id}/{uid}/episodic.json` | mid_term 显著情绪 eager 晋升，或 sweep 老化晋升 | 层6c |
 | 用户稳定行为模式 | `data/runtime/memory/{char_id}/{uid}/identity.yaml` | fixation pipeline 达阈值后固化更新 | 层6a |
-| 角色认知（legacy/兼容） | `data/runtime/characters/{char_id}/character_growth/角色_{uid}.md` | 旧 handler / 工具查询仍保留，当前主链路不自动入队 | 当前主 prompt 不注入 |
+| 角色认知（read-only legacy） | `data/runtime/characters/{char_id}/character_growth/角色_{uid}.md` | **写路径已退役（R8-E2）**；load() 仅供 get_growth 工具只读查询；主链路不自动入队、不注入 prompt | 当前主 prompt 不注入 |
 | 情绪状态 | `data/runtime/characters/{char_id}/inner/mood_state.json` | 每轮 post_process / 工具触发 / 深夜调度 | 层1内嵌软提示 |
 | 用户隐性状态（Phase 6） | `data/runtime/memory/{char_id}/{uid}/hidden_state.json` | Reality-side integrator + WriteEnvelope；调度器 decay/consolidate tick；Dream exit afterglow 已接线（Phase 6：`wire_afterglow_from_summary()`） | Dream D4.5 tag-gated bucket 只读快照（body_intimate / physical_closeness；不含 float） |
 | Afterglow 残差（Phase 6/7） | `data/runtime/memory/{char_id}/{uid}/afterglow_residue.json` | Dream exit 时 `wire_afterglow_from_summary()` 写入（`core/dream/dream_exit_afterglow.py`）；8h TTL | Phase 6 数值层：由 `integrate_afterglow_and_save()` 消费后影响 sensitivity.current / embodied_ease；Phase 7 文本层：由 `_format_afterglow_soft_hint()` 只读注入 Reality prompt `dream_afterglow_soft_hint` 层（非事实，may/可能，TTL 失效不注入）；Dream 无直接写权限 |
@@ -100,6 +100,13 @@
 > **当前 v1 写布局**：per-user 主链统一写入 `get_paths().user_memory_root()`，即
 > `data/runtime/memory/{char_id}/{uid}/`。迁移期 `for_read(new, old)` 仍保留在 event_log
 > 相关读取；event_log 还保留近 30 天 union 读。其余主记忆 loader 已直接读新路径。
+
+> **character_growth 只读声明（R8-E2/R8-E3）**：
+> `core/memory/character_growth.py` 是 **read-only legacy compatibility surface**。
+> 写路径（`update()` / `should_update()`）已于 R8-E2 退役删除。
+> 当前长期认知写链为 `consolidate_to_identity`（→ `identity.yaml`）和 `trait_tracker_update` slow_queue task。
+> `character_growth.load()` 仅保留为 `get_growth` 工具的只读兼容面；主链路 prompt 不注入其内容。
+> **禁止**重新引入任何写方法或 import `safe_write_*` 到该模块。
 
 ---
 

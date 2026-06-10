@@ -1,16 +1,16 @@
 """
-角色对用户的认知文件（read-only legacy surface）
-─────────────────────────────────────────────────────
-角色对每个用户维护一个"认知 Markdown 文件"，
-记录他觉得重要的事情、用户的特点、两人的重要时刻。
+Read-only legacy compatibility surface — character growth snapshot.
+
+This module is read-only legacy compatibility surface.
+Write path was retired in R8-E2; update() and should_update() have been deleted.
+Do NOT reintroduce update() or should_update() — the active write chain is
+consolidate_to_identity (identity.yaml) + trait_tracker_update slow_queue task.
+load() is kept only for get_growth tool compatibility.
+
+角色对每个用户维护一个"认知 Markdown 文件"（历史写入，不再自动更新）。
 
 存储位置：
   data/character_growth/角色_{user_id}.md
-
-当前状态（R8-E2）：
-  写入链 update() / should_update() 已退役删除。
-  load() 保留为 get_growth 工具的只读兼容面。
-  写入链已迁移到 consolidate_to_identity + trait_tracker_update slow_queue task。
 """
 
 from pathlib import Path
@@ -32,8 +32,11 @@ def _growth_file(character_name: str, user_id: str) -> Path:
 
 def load(character_name: str, user_id: str) -> str:
     """
-    读取角色对该用户的认知文件内容。
+    Read legacy growth snapshot only; no mutation; not the current growth writer.
+
+    读取角色对该用户的历史认知文件内容（只读兼容面）。
     文件不存在时返回空字符串，不报错。
+    当前写入链为 consolidate_to_identity + trait_tracker_update，本函数不写任何数据。
 
     参数：
         character_name - 角色名（如"叶瑄"）
@@ -53,8 +56,8 @@ def load(character_name: str, user_id: str) -> str:
 
 class CharacterGrowth:
     """
-    CharacterGrowth 类封装，供外部按类方式导入使用。
-    update() / should_update() 已于 R8-E2 退役。
+    Read-only class wrapper; update() / should_update() retired in R8-E2.
+    Use consolidate_to_identity + trait_tracker_update for writes.
     """
 
     def load(self, character_name: str, user_id: str) -> str:

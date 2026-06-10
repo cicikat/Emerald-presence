@@ -563,7 +563,7 @@ _TOOL_REGISTRY["get_episodic"] = {
 
 _TOOL_REGISTRY["get_growth"] = {
     "func": _get_growth_wrapper,
-    "description": f"获取{_CHAR}对用户的整体认知和印象记录。需要了解用户性格习惯时调用。",
+    "description": f"读取 {_CHAR} 对用户的 legacy growth snapshot（只读历史成长摘要）。不触发写入或更新。如需了解角色历史认知记录时调用。",
     "dangerous": False,
     "category": "memory",
     "parameters": {
