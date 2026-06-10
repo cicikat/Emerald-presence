@@ -1,0 +1,610 @@
+"""
+R2-A 调度器执行面审计 — 守卫测试
+
+目的：精确记录当前存在的双执行面事实，防止误以为已完成重构。
+所有测试均为只读审计，不改变任何行为。
+
+当前已知双执行面：
+  1. Gating/Proposer live 路径（execution.py EXECUTE_MODE="live"）
+  2. Legacy _check_* gather 路径（loop.py asyncio.gather）
+  3. legacy_tick_should_send() 让路垫片（live 模式下让路）
+  4. Watch 独立 WATCH_EXECUTE_MODE（triggers/watch.py）
+  5. sensor_aware output_mode="return" 旁路（triggers/sensor_aware.py）
+  6. policy.py 静态表（无运行时接线，未接 gating/pipeline）
+  7. _pipeline_send 120s active-window 二次拦截（pending R2-B）
+
+标记说明：
+  PENDING_R2B — 本包不修复；R2-B 施工时移除此标记，改为正式断言。
+"""
+
+import ast
+import importlib
+import inspect
+import pathlib
+
+import pytest
+
+ROOT = pathlib.Path(__file__).parent.parent
+
+# ─────────────────────────────────────────────────────────────────────────────
+# A. policy.py 当前未被生产路径调用
+# ─────────────────────────────────────────────────────────────────────────────
+
+POLICY_MODULE = "core.scheduler.policy"
+POLICY_FILE = ROOT / "core" / "scheduler" / "policy.py"
+
+
+class TestPolicyNotWiredToRuntime:
+    """policy.py 未接线守卫：任何生产路径不得 import core.scheduler.policy。"""
+
+    def _all_py_files_except_policy_and_tests(self):
+        skip = {
+            POLICY_FILE.resolve(),
+            (ROOT / "tests").resolve(),
+        }
+        for f in ROOT.rglob("*.py"):
+            if any(f.resolve() == s or str(f.resolve()).startswith(str(s)) for s in skip):
+                continue
+            yield f
+
+    def test_no_production_module_imports_policy(self):
+        """确认没有生产代码 import core.scheduler.policy。"""
+        violators = []
+        for pyfile in self._all_py_files_except_policy_and_tests():
+            try:
+                src = pyfile.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            if "core.scheduler.policy" in src or "scheduler.policy" in src:
+                # 排除注释行和本文件
+                for line in src.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("#"):
+                        continue
+                    if "core.scheduler.policy" in stripped or (
+                        "scheduler.policy" in stripped and "from" in stripped
+                    ):
+                        violators.append(f"{pyfile}: {stripped!r}")
+        assert not violators, (
+            "以下文件 import core.scheduler.policy，违反 R2-A 规定（policy.py 未接线）:\n"
+            + "\n".join(violators)
+        )
+
+    def test_policy_file_docstring_declares_unimported(self):
+        """policy.py 文件头必须声明未被任何运行时模块 import。"""
+        src = POLICY_FILE.read_text(encoding="utf-8")
+        assert "不被任何运行时模块 import" in src, (
+            "policy.py 文件头声明已丢失；"
+            "请保留 '此文件不被任何运行时模块 import' 文档注释。"
+        )
+
+    def test_policy_table_entries_count(self):
+        """POLICY_TABLE 当前有 25 条记录（R2-A 快照）。"""
+        from core.scheduler.policy import POLICY_TABLE
+
+        assert len(POLICY_TABLE) == 25, (
+            f"POLICY_TABLE 条目数变化：期望 25，实际 {len(POLICY_TABLE)}。"
+            "R2-A 期间不应增删条目；如需修改，先更新此测试并记录原因。"
+        )
+
+    def test_policy_validate_all_passes(self):
+        """POLICY_TABLE 内部 4 条不变式全部成立（断言函数本身是正确的）。"""
+        from core.scheduler.policy import _validate_all
+
+        _validate_all()  # 不应抛出
+
+    def test_policy_exempts_hr_critical(self):
+        """hr_critical 必须为 emergency + exempt（最高级别保证）。"""
+        from core.scheduler.policy import POLICY_TABLE
+
+        p = POLICY_TABLE["hr_critical"]
+        assert p.priority == "emergency"
+        assert p.active_window_behavior == "exempt"
+
+    def test_policy_birthday_eve_says_defer_not_exempt(self):
+        """
+        [MISMATCH DOC] policy.py 中 birthday_eve 是 defer，
+        但 loop._HIGH_PRIORITY_TRIGGERS 把它列为豁免（实际行为 exempt）。
+        R2-B 必须对齐：要么改 policy，要么改 _HIGH_PRIORITY_TRIGGERS。
+        """
+        from core.scheduler.policy import POLICY_TABLE
+
+        p = POLICY_TABLE["birthday_eve"]
+        # policy 说 defer
+        assert p.active_window_behavior == "defer", (
+            "policy.py 中 birthday_eve 不再是 defer，请更新此测试和 R2-B 计划。"
+        )
+        # reality 说 exempt（在 _HIGH_PRIORITY_TRIGGERS 里）
+        from core.scheduler.loop import _HIGH_PRIORITY_TRIGGERS
+
+        assert "birthday_eve" in _HIGH_PRIORITY_TRIGGERS, (
+            "birthday_eve 已从 _HIGH_PRIORITY_TRIGGERS 移除，请同步 policy.py。"
+        )
+        # 这两条同时成立 = 已知 mismatch，R2-B 修复
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B. _pipeline_send active-window 二次拦截（PENDING R2-B）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestActiveWindowSplitDecision:
+    """
+    active-window 拦截当前由 _pipeline_send 独立实现，与 gating 决策权分裂。
+    R2-B 应把它并入 policy.POLICY_TABLE + gating，_pipeline_send 退化为纯执行器。
+    本测试仅记录现状，标记 PENDING_R2B，不改变行为。
+    """
+
+    def test_PENDING_R2B_pipeline_send_has_active_window_check(self):
+        """
+        PENDING R2-B：_pipeline_send 仍存在 active-window 二次拦截。
+        当 R2-B 把 active-window 并入 gating/policy 后，移除此检查并更新测试。
+        """
+        from core.scheduler import loop
+
+        src = inspect.getsource(loop._pipeline_send)
+        assert "_user_active_recently" in src, (
+            "_user_active_recently 已从 _pipeline_send 移除——"
+            "请确认 active-window 决策已迁移到 gating/policy，并移除此测试的 PENDING 标记。"
+        )
+
+    def test_PENDING_R2B_active_window_hardcoded_120s(self):
+        """
+        PENDING R2-B：active window 硬编码为 120 秒。
+        R2-B 应把窗口长度迁入 config 或 policy.yaml。
+        """
+        from core.scheduler.loop import _user_active_recently
+
+        src = inspect.getsource(_user_active_recently)
+        assert "120" in src, (
+            "120s 硬编码已被移除——请确认 active-window 长度已迁入配置，并更新此测试。"
+        )
+
+    def test_high_priority_triggers_in_loop_and_policy_partially_overlap(self):
+        """
+        loop._HIGH_PRIORITY_TRIGGERS 与 policy.POLICY_TABLE 的 exempt 集合不完全一致。
+        loop 豁免：birthday_midnight/eve/afternoon/night + period_reminder + hr_critical（6 个）。
+        policy exempt：hr_critical + period_reminder + birthday_midnight（3 个）。
+        这是 R2-B 需要对齐的 mismatch。
+        """
+        from core.scheduler.loop import _HIGH_PRIORITY_TRIGGERS
+        from core.scheduler.policy import POLICY_TABLE
+
+        policy_exempt = {
+            tid for tid, p in POLICY_TABLE.items() if p.active_window_behavior == "exempt"
+        }
+        # loop 豁免但 policy 不是 exempt 的项（已知 mismatch）
+        loop_only_exempt = _HIGH_PRIORITY_TRIGGERS - policy_exempt
+        assert loop_only_exempt == {"birthday_eve", "birthday_afternoon", "birthday_night"}, (
+            f"loop 豁免 vs policy exempt 的差集发生变化：{loop_only_exempt}。"
+            "R2-B 前请先记录此变化。"
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# C. Legacy speaking trigger 列表固定
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 所有调用 legacy_tick_should_send() 且可能调用 _pipeline_send 的 _check_* 函数
+# （garden_water/daily 的 speaking 部分也通过 legacy_send 变量门控）
+LEGACY_SPEAKING_TRIGGERS: frozenset[str] = frozenset({
+    "morning_greeting",
+    "night_reminder",
+    "random_message",
+    "weather_alert",
+    "daily_journal",
+    "spontaneous_recall",
+    "diary_reminder",
+    "diary_share_reminder",
+    "period_reminder",
+    "birthday_midnight",
+    "birthday_eve",
+    "birthday_afternoon",
+    "birthday_night",
+    "timenode",
+    "festival",
+    "holiday_boost",
+    "reminders",
+    # garden 系列通过 legacy_send 变量门控，归入此集
+    "garden_bloom",
+    "garden_harvest_expired",
+    "garden_handle_ask",
+    "garden_handle_gift",
+    "garden_handle_self",
+    "garden_vase_wilted",
+})
+
+MAINTENANCE_TRIGGERS: frozenset[str] = frozenset({
+    "episodic_decay",
+    "dlq_monitor",
+    "log_maintenance",
+    "episodic_sweep",
+    "hidden_state_decay",
+    "hidden_state_consolidate",
+    "diary_inject",   # 维护型：读日记存 diary_context，无 _pipeline_send
+})
+
+
+class TestLegacyTriggerClassification:
+    """legacy _check_* 分类守卫：speaking 与 maintenance 必须分离。"""
+
+    def test_speaking_triggers_check_legacy_tick_should_send(self):
+        """
+        每个 legacy speaking trigger 对应的主触发器文件必须含 legacy_tick_should_send。
+        确保新增 _check_* speaking trigger 不会绕过让路逻辑。
+        """
+        # 按触发器所在模块逐一验证
+        trigger_module_map = {
+            "morning_greeting": "core/scheduler/triggers/time_based.py",
+            "night_reminder": "core/scheduler/triggers/time_based.py",
+            "random_message": "core/scheduler/triggers/time_based.py",
+            "weather_alert": "core/scheduler/triggers/time_based.py",
+            "daily_journal": "core/scheduler/triggers/time_based.py",
+            "spontaneous_recall": "core/scheduler/triggers/time_based.py",
+            "diary_reminder": "core/scheduler/triggers/diary.py",
+            "diary_share_reminder": "core/scheduler/triggers/diary.py",
+            "period_reminder": "core/scheduler/triggers/period.py",
+            "birthday_midnight": "core/scheduler/triggers/birthday.py",
+            "timenode": "core/scheduler/triggers/timenode.py",
+            "festival": "core/scheduler/triggers/festival.py",
+            "holiday_boost": "core/scheduler/triggers/festival.py",
+        }
+        for trigger, relpath in trigger_module_map.items():
+            src = (ROOT / relpath).read_text(encoding="utf-8")
+            assert "legacy_tick_should_send" in src, (
+                f"{trigger} 对应的 {relpath} 不含 legacy_tick_should_send；"
+                "该触发器可能在 live 模式下与 gating 路径双发。"
+            )
+
+    def test_maintenance_triggers_do_not_call_pipeline_send(self):
+        """
+        纯维护型触发器不得调用 _pipeline_send。
+        """
+        maint_files = {
+            "core/scheduler/triggers/hidden_state_decay.py",
+            "core/scheduler/triggers/episodic_sweep.py",
+        }
+        for relpath in maint_files:
+            src = (ROOT / relpath).read_text(encoding="utf-8")
+            assert "_pipeline_send" not in src, (
+                f"{relpath} 含 _pipeline_send 调用——"
+                "维护型触发器不允许直接发言；如需发言，请迁移为 speaking trigger。"
+            )
+
+    def test_legacy_speaking_and_maintenance_sets_disjoint(self):
+        """speaking 与 maintenance trigger 集合不得有重叠。"""
+        overlap = LEGACY_SPEAKING_TRIGGERS & MAINTENANCE_TRIGGERS
+        assert not overlap, (
+            f"触发器分类重叠：{overlap}。"
+            "请在 LEGACY_SPEAKING_TRIGGERS 或 MAINTENANCE_TRIGGERS 中移除。"
+        )
+
+    def test_diary_inject_is_maintenance_no_legacy_tick_check(self):
+        """diary_inject 是纯维护触发器，不调用 legacy_tick_should_send，不发言。"""
+        src = (ROOT / "core/scheduler/triggers/diary.py").read_text(encoding="utf-8")
+        # _check_diary_inject 的定义不含 legacy_tick_should_send
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                if node.name == "_check_diary_inject":
+                    func_src = ast.get_source_segment(src, node) or ""
+                    assert "legacy_tick_should_send" not in func_src, (
+                        "_check_diary_inject 开始检查 legacy_tick_should_send——"
+                        "请更新分类：它是维护型还是 speaking 型？"
+                    )
+                    assert "_pipeline_send" not in func_src, (
+                        "_check_diary_inject 开始调用 _pipeline_send——"
+                        "已从维护型变为 speaking 型，请更新 MAINTENANCE_TRIGGERS 分类。"
+                    )
+                    break
+
+    def test_check_topic_followup_is_legacy_noop(self):
+        """_check_topic_followup 是 legacy no-op stub，proposer 路径已接管。"""
+        from core.scheduler.triggers.memory import _check_topic_followup
+
+        src = inspect.getsource(_check_topic_followup)
+        assert "legacy path" in src or "legacy no-op" in src or "skipped" in src, (
+            "_check_topic_followup 不再是 no-op——"
+            "如果已重新接入 legacy 路径，请从 LEGACY_NOOP_STUBS 移除并重新分类。"
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# D. _mark / safe_write 仍可用（R2-A 不改变）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMarkAndSafeWriteUnchanged:
+    """_mark 和 safe_write 是冷却持久化的唯一渠道，R2-A 不改变其接口。"""
+
+    def test_mark_exists_in_loop(self):
+        from core.scheduler import loop
+
+        assert callable(loop._mark)
+
+    def test_mark_writes_to_last_trigger_dict(self, monkeypatch, tmp_path):
+        """_mark(name) 更新 _last_trigger[name]，并写 scheduler_cooldowns.json。"""
+        from core.scheduler import loop
+        from core.safe_write import safe_write_json
+
+        # patch get_paths().scheduler_cooldowns() 到 tmp
+        cooldown_file = tmp_path / "scheduler_cooldowns.json"
+
+        class _FakePaths:
+            def scheduler_cooldowns(self):
+                return cooldown_file
+
+        monkeypatch.setattr(loop, "get_paths", lambda: _FakePaths())
+        # 清空内存状态
+        old = dict(loop._last_trigger)
+        loop._last_trigger.clear()
+        try:
+            loop._mark("test_trigger")
+            assert "test_trigger" in loop._last_trigger
+            assert loop._last_trigger["test_trigger"] > 0
+        finally:
+            loop._last_trigger.clear()
+            loop._last_trigger.update(old)
+
+    def test_is_ready_exists_in_loop(self):
+        from core.scheduler import loop
+
+        assert callable(loop._is_ready)
+
+    def test_safe_write_json_importable(self):
+        from core.safe_write import safe_write_json
+
+        assert callable(safe_write_json)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# E. Watch 独立 WATCH_EXECUTE_MODE 存在并记录
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestWatchIndependentExecuteMode:
+    """WATCH_EXECUTE_MODE 独立开关存在于 triggers/watch.py，与 execution.EXECUTE_MODE 分离。"""
+
+    def test_watch_execute_mode_constant_exists(self):
+        from core.scheduler.triggers.watch import WATCH_EXECUTE_MODE
+
+        assert WATCH_EXECUTE_MODE in ("live", "dry_run"), (
+            f"WATCH_EXECUTE_MODE={WATCH_EXECUTE_MODE!r} 不是合法值；"
+            "只允许 'live' 或 'dry_run'。"
+        )
+
+    def test_watch_execute_mode_is_live_by_default(self):
+        from core.scheduler.triggers.watch import WATCH_EXECUTE_MODE
+
+        assert WATCH_EXECUTE_MODE == "live", (
+            "WATCH_EXECUTE_MODE 默认值变更——请确认 Watch 事件驱动路径是否仍正常工作。"
+        )
+
+    def test_execution_execute_mode_is_live_by_default(self):
+        from core.scheduler.execution import EXECUTE_MODE
+
+        assert EXECUTE_MODE == "live", (
+            "execution.EXECUTE_MODE 默认值变更——请确认 gating 路径是否仍正常工作。"
+        )
+
+    def test_watch_and_execution_mode_are_independent_symbols(self):
+        """两个 EXECUTE_MODE 是独立常量，不共享同一内存对象。"""
+        from core.scheduler.execution import EXECUTE_MODE as exec_mode
+        from core.scheduler.triggers import watch
+
+        # 改变 execution 模块的变量不影响 watch 模块
+        import core.scheduler.execution as exec_mod
+
+        original = exec_mod.EXECUTE_MODE
+        exec_mod.EXECUTE_MODE = "dry_run"
+        try:
+            assert watch.WATCH_EXECUTE_MODE == "live", (
+                "WATCH_EXECUTE_MODE 跟随了 EXECUTE_MODE 的变化——它们不应共享状态。"
+            )
+        finally:
+            exec_mod.EXECUTE_MODE = original
+
+    def test_watch_event_driven_triggers_excluded_from_gating_tick(self):
+        """hr_critical/hr_high/sleep_end 在 gating.run_shadow_tick 中被排除，不走 gating 执行。"""
+        from core.scheduler.gating import WATCH_EVENT_DRIVEN_TRIGGERS
+
+        assert "hr_critical" in WATCH_EVENT_DRIVEN_TRIGGERS
+        assert "hr_high" in WATCH_EVENT_DRIVEN_TRIGGERS
+        assert "sleep_end" in WATCH_EVENT_DRIVEN_TRIGGERS
+
+    def test_watch_triggers_still_registered_as_proposers(self):
+        """Watch 触发器虽不走 gating 执行，但仍在 proposer_registry（供 shadow log）。"""
+        from core.scheduler.proposer_registry import registered_trigger_names
+
+        names = registered_trigger_names()
+        assert "hr_critical" in names
+        assert "hr_high" in names
+        assert "sleep_end" in names
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# F. sensor_aware output_mode="return" 旁路存在并记录
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSensorAwareReturnModeBypass:
+    """
+    sensor_aware 使用 output_mode="return" + record_turn=False 拿到 LLM 回复，
+    再自行调用 record_assistant_turn(fanout=["desktop", "mobile"])。
+    这是"获取 reply 后自定义 fanout"模式，不是完全绕过 pipeline。
+    """
+
+    def test_sensor_aware_uses_output_mode_return(self):
+        src = (ROOT / "core/scheduler/triggers/sensor_aware.py").read_text(encoding="utf-8")
+        assert 'output_mode="return"' in src, (
+            "sensor_aware 不再使用 output_mode='return'——"
+            "如果已迁移为默认 speak 模式，请更新此测试和 docs。"
+        )
+
+    def test_sensor_aware_uses_record_turn_false(self):
+        src = (ROOT / "core/scheduler/triggers/sensor_aware.py").read_text(encoding="utf-8")
+        assert "record_turn=False" in src, (
+            "sensor_aware 不再使用 record_turn=False——请确认 fanout 路径是否重复写入。"
+        )
+
+    def test_sensor_aware_manually_calls_record_assistant_turn(self):
+        src = (ROOT / "core/scheduler/triggers/sensor_aware.py").read_text(encoding="utf-8")
+        assert "record_assistant_turn" in src, (
+            "sensor_aware 不再手动调用 record_assistant_turn——"
+            "如果已切换为 _pipeline_send 默认 speak 路径，请更新此测试。"
+        )
+
+    def test_sensor_aware_fanout_is_desktop_mobile_only(self):
+        src = (ROOT / "core/scheduler/triggers/sensor_aware.py").read_text(encoding="utf-8")
+        assert '["desktop", "mobile"]' in src or "desktop" in src, (
+            "sensor_aware fanout 不再限制为 desktop/mobile——请确认是否已广播到 QQ。"
+        )
+
+    def test_sensor_aware_still_goes_through_pipeline_send(self):
+        src = (ROOT / "core/scheduler/triggers/sensor_aware.py").read_text(encoding="utf-8")
+        assert "_pipeline_send" in src, (
+            "sensor_aware 不再通过 _pipeline_send——"
+            "如果已彻底绕过 pipeline，需要补充 perceive_event gate 和 conversation_lock。"
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# G. legacy_tick_should_send 让路垫片语义
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestLegacyTickShouldSendShim:
+    """让路垫片：live 模式 = False（让路），dry_run = True（允许 legacy 路径运行）。"""
+
+    def test_live_mode_returns_false(self):
+        from core.scheduler.execution import legacy_tick_should_send
+
+        import core.scheduler.execution as exec_mod
+
+        orig = exec_mod.EXECUTE_MODE
+        exec_mod.EXECUTE_MODE = "live"
+        try:
+            assert legacy_tick_should_send() is False
+        finally:
+            exec_mod.EXECUTE_MODE = orig
+
+    def test_dry_run_mode_returns_true(self):
+        from core.scheduler.execution import legacy_tick_should_send
+
+        import core.scheduler.execution as exec_mod
+
+        orig = exec_mod.EXECUTE_MODE
+        exec_mod.EXECUTE_MODE = "dry_run"
+        try:
+            assert legacy_tick_should_send() is True
+        finally:
+            exec_mod.EXECUTE_MODE = orig
+
+    def test_force_true_always_returns_true(self):
+        from core.scheduler.execution import legacy_tick_should_send
+
+        import core.scheduler.execution as exec_mod
+
+        orig = exec_mod.EXECUTE_MODE
+        exec_mod.EXECUTE_MODE = "live"
+        try:
+            assert legacy_tick_should_send(force=True) is True
+        finally:
+            exec_mod.EXECUTE_MODE = orig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# H. gating MIGRATED_TRIGGERS 快照（记录迁移覆盖范围）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMigratedTriggersSnapshot:
+    """
+    gating.MIGRATED_TRIGGERS 记录哪些触发器已有原生 proposer。
+    本测试固定当前集合，防止无声删减。
+    """
+
+    EXPECTED_MIGRATED: frozenset[str] = frozenset({
+        "hr_critical", "birthday_midnight", "birthday_eve", "birthday_afternoon",
+        "birthday_night", "period_reminder", "morning_greeting", "night_reminder",
+        "daily_journal", "diary_reminder", "diary_share_reminder", "random_message",
+        "hr_high", "sleep_end", "weather_alert", "topic_followup", "timenode",
+        "festival", "holiday_boost", "spontaneous_recall",
+        "garden_bloom", "garden_harvest_expired", "garden_handle_ask",
+        "garden_handle_gift", "garden_handle_self", "garden_vase_wilted",
+        "reminders",
+    })
+
+    def test_migrated_triggers_matches_snapshot(self):
+        from core.scheduler.gating import MIGRATED_TRIGGERS
+
+        assert MIGRATED_TRIGGERS == self.EXPECTED_MIGRATED, (
+            f"MIGRATED_TRIGGERS 发生变化。\n"
+            f"新增：{MIGRATED_TRIGGERS - self.EXPECTED_MIGRATED}\n"
+            f"移除：{self.EXPECTED_MIGRATED - MIGRATED_TRIGGERS}\n"
+            "请同步更新 EXPECTED_MIGRATED 并记录原因。"
+        )
+
+    def test_migrated_triggers_all_have_registered_proposer(self):
+        """每个 MIGRATED_TRIGGERS 成员都必须在 proposer_registry 有对应 proposer。"""
+        from core.scheduler.gating import MIGRATED_TRIGGERS
+        from core.scheduler.proposer_registry import registered_trigger_names
+
+        registered = registered_trigger_names()
+        not_registered = MIGRATED_TRIGGERS - registered
+        assert not not_registered, (
+            f"以下触发器在 MIGRATED_TRIGGERS 中但未注册 proposer：{not_registered}\n"
+            "请补充 register_proposer() 调用，或从 MIGRATED_TRIGGERS 移除。"
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# I. R2-A 不改变发言行为（回归防护）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestR2ANosBehaviorChange:
+    """R2-A 审计包：确认核心发言路径接口未变动。"""
+
+    def test_pipeline_send_signature_unchanged(self):
+        """_pipeline_send 接口签名未变。"""
+        import inspect
+        from core.scheduler.loop import _pipeline_send
+
+        sig = inspect.signature(_pipeline_send)
+        params = list(sig.parameters.keys())
+        assert "prompt" in params
+        assert "trigger_name" in params
+        assert "output_mode" in params
+        assert "record_turn" in params
+        assert "kind" in params
+
+    def test_execute_prompt_signature_unchanged(self):
+        """execution.execute_prompt 接口签名未变。"""
+        import inspect
+        from core.scheduler.execution import execute_prompt
+
+        sig = inspect.signature(execute_prompt)
+        params = list(sig.parameters.keys())
+        assert "trigger_name" in params
+        assert "prompt_factory" in params
+        assert "dry_run" in params
+        assert "would_mark" in params
+
+    def test_run_shadow_tick_still_exists(self):
+        from core.scheduler.gating import run_shadow_tick
+
+        assert callable(run_shadow_tick)
+
+    def test_loop_calls_run_shadow_tick(self):
+        """loop._loop 的源码仍包含对 run_shadow_tick 的调用。"""
+        from core.scheduler import loop
+
+        src = inspect.getsource(loop._loop)
+        assert "run_shadow_tick" in src
+
+    def test_on_watch_event_still_exported_from_loop(self):
+        """loop.py 通过 noqa import 向外暴露 on_watch_event（admin/routers/watch.py 依赖）。"""
+        from core.scheduler.loop import on_watch_event
+
+        assert callable(on_watch_event)
+
+    def test_kind_guard_still_in_pipeline_send(self):
+        """kind guard（_assert_trigger_outlet_kind）仍在 _pipeline_send 中。"""
+        from core.scheduler.loop import _pipeline_send
+
+        src = inspect.getsource(_pipeline_send)
+        assert "_assert_trigger_outlet_kind" in src

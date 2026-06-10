@@ -170,6 +170,113 @@ blocked log 格式：
 
 ---
 
+## R2-A 执行面审计（2026-06-10）
+
+> R2-A 是审计和决策包，不是 R2 的完成包。本节记录当前双执行面的事实，
+> 不改变任何发言行为。后续施工见"R2-B 最小施工边界"。
+
+### 当前双执行面总览
+
+| 编号 | 执行面 | 文件 | 状态 |
+|---|---|---|---|
+| S1 | **Gating/Proposer live 路径** | `gating.py::run_shadow_tick()` → `execute_prompt()` → `_pipeline_send()` | 生产活跃；winner 通过 `execute(dry_run=False)` 真实发送 |
+| S2 | **Legacy `_check_*` gather 路径** | `loop.py::_loop()` → `asyncio.gather(_check_*...)` | 生产活跃；speaking 触发器通过 `legacy_tick_should_send()` 在 live 模式下让路，维护型触发器仍正常运行 |
+| S3 | **`legacy_tick_should_send()` 让路垫片** | `execution.py` | 当前 `EXECUTE_MODE="live"` → 返回 False，阻止 legacy speaking 触发器双发 |
+| S4 | **Watch 独立 `WATCH_EXECUTE_MODE`** | `triggers/watch.py` | 独立于 `execution.EXECUTE_MODE`；watch 事件驱动触发器（hr_critical/hr_high/sleep_end）在 gating.run_shadow_tick 中被 `WATCH_EVENT_DRIVEN_TRIGGERS` 排除，只走 `on_watch_event()` 路径 |
+| S5 | **sensor_aware `output_mode="return"` 旁路** | `triggers/sensor_aware.py` | 调用 `_pipeline_send(output_mode="return", record_turn=False)` 拿 reply，再自行调用 `record_assistant_turn(fanout=["desktop","mobile"])`；不是完整绕过，仍经过 perceive_event gate 和 conversation_lock |
+| S6 | **policy.py 静态表** | `policy.py` | 未接线；25 条配置，无任何运行时 import；断言函数仅供测试层显式调用 |
+| S7 | **`_pipeline_send` 120s active-window 二次拦截** | `loop.py::_pipeline_send()` | gating 决策权（state machine）与 `_pipeline_send` 硬判断分裂；pending R2-B |
+
+### 触发器分类表
+
+**类型一：Live Proposer Speaking Trigger（已迁移，gating 执行）**
+
+| 触发器 | 文件 | 让路逻辑 |
+|---|---|---|
+| morning_greeting, night_reminder, random_message, weather_alert, daily_journal, spontaneous_recall | time_based.py | `legacy_tick_should_send()` 让路 + proposer 接管 |
+| diary_reminder, diary_share_reminder | diary.py | 同上 |
+| period_reminder | period.py | 同上 |
+| birthday_midnight/eve/afternoon/night | birthday.py | 同上 |
+| timenode, festival, holiday_boost | timenode.py / festival.py | 同上 |
+| reminders | reminders.py | 同上（proposer 路径，after_send 才 mark_done）|
+| topic_followup | memory.py | legacy `_check_topic_followup` 是 no-op stub，proposer 接管 |
+| garden_bloom | garden_water.py | legacy 通过 `legacy_send` 变量门控 + proposer 接管 |
+| garden_harvest_expired/handle_ask/handle_gift/handle_self/vase_wilted | garden_daily.py | 同上 |
+
+**类型二：Watch 事件驱动 Speaking Trigger（独立路径）**
+
+| 触发器 | 执行路径 | 备注 |
+|---|---|---|
+| hr_critical, hr_high | `on_watch_event("heart_rate", ...)` → `_execute_watch_event(proposal, dry_run=False)` | WATCH_EXECUTE_MODE="live"；gating tick 跳过 |
+| sleep_end | `on_watch_event("sleep_end", ...)` → 同上 | 同上 |
+
+**类型三：Sensor 实时 Speaking Trigger（独立路径）**
+
+| 触发器 | 执行路径 | 备注 |
+|---|---|---|
+| sensor_aware | `_check_sensor_aware()` → `handle_tick()` → `_pipeline_send(output_mode="return")` → `record_assistant_turn(fanout=["desktop","mobile"])` | 独立 8 分钟冷却；不走 gating |
+
+**类型四：Maintenance Tick（纯状态/清理，不发言）**
+
+| 触发器 | 文件 |
+|---|---|
+| episodic_decay, dlq_monitor | time_based.py |
+| log_maintenance | loop.py 内联 |
+| episodic_sweep | episodic_sweep.py |
+| hidden_state_decay, hidden_state_consolidate | hidden_state_decay.py |
+| diary_inject | diary.py（维护型：读日记存 diary_context，无 legacy_tick_should_send 检查）|
+
+### 决策位置表
+
+| 决策项 | 位置 | 备注 |
+|---|---|---|
+| state（CHATTING/QUIET/RESTLESS）过滤 | `gating._decide()` | 软门 |
+| cooldown 过滤 | `gating._decide()` → `_is_ready()` | 基于 `_COOLDOWNS` + `_last_trigger` |
+| active-window 拦截（120s 硬编码）| `loop._pipeline_send()` | 硬门；与 gating 分裂；**pending R2-B** |
+| 高优先级豁免 | `loop._pipeline_send()` → `_HIGH_PRIORITY_TRIGGERS` | 与 policy.py POLICY_TABLE exempt 集部分重叠但不完全一致 |
+| DND 判断 | 无（`dnd.py` 已实现但未接入）| **未接线**；pending 设计决策 |
+| priority/urgency 排序 | `gating._decide()` → 按 `urgency` 选最高者 | policy.py priority 字段未接入 |
+| defer/drop 语义 | **无实现**（policy.py 有设计但未接线）| pending R2-B |
+
+### 执行与 mark 表
+
+| 路径 | 谁调用 send | 谁调用 _mark | 未发送是否 mark | 异常是否可观测 |
+|---|---|---|---|---|
+| Gating live（execute_prompt）| `execute_prompt()` 调用 `_pipeline_send()` | 仅在 `sent=True` 后调用 `loop._mark()` | 否（write_execute_blocked 记录）| 是（execute_dryrun.jsonl blocked 条目）|
+| Legacy speaking（步退）| N/A（live 模式下不执行）| N/A | N/A | N/A |
+| Watch event-driven | `_execute_watch_event()` → `execute_prompt()` → `_pipeline_send()` | 仅 sent 后 mark | 否 | 是（log_error）|
+| sensor_aware | 手动 `record_assistant_turn()` | 不调用 `_mark()`（无 cooldown 名）| sensor_events.mark_proactive_sent() 8min 冷却 | 是（audit ring buffer）|
+| Maintenance tick | 不 send | 立即 mark（不依赖 send 结果）| N/A | 是（log_error 各步独立）|
+
+### policy.py 命运决断：**选项 A — policy.py 是未来 owner**
+
+**结论**：policy.py 是预先设计好的 R2-B 接线 schema，不是死代码。
+
+**依据**：
+1. `POLICY_TABLE` 已完整定义 active-window 行为（exempt/defer/drop）、mark 语义和 cross-marks 约束；结构设计合理
+2. 现有 `_HIGH_PRIORITY_TRIGGERS` 豁免逻辑可被 `POLICY_TABLE` 的 `active_window_behavior="exempt"` 完全替代
+3. `defer` 语义（birthday_eve/weather_alert/reminders）是 `_pipeline_send` 目前没有实现的能力，policy 已预留字段
+
+**已知 mismatch（R2-B 修复）**：
+- `birthday_eve/afternoon/night`：policy.py 说 `defer`，`_HIGH_PRIORITY_TRIGGERS` 说 `exempt`（实际行为）
+  - 应统一为 `exempt`（生日系列打断用户是预期行为）或改为真正的 defer 队列
+- `hr_high`：policy.py 说 `defer`，watch 路径直接 execute（受 HEART_RATE_PROPOSAL_TTL_SECONDS 限制）
+- 120s active-window 在 `_pipeline_send` 里不经过 policy 路由
+
+**R2-B 不应做的事**：不要删除 policy.py 或让它继续静默不接线。
+
+### R2-B 最小施工边界
+
+1. **修复 birthday_eve/afternoon/night 的 active_window_behavior 对齐**：改 policy.py 为 `exempt` 或实现真 defer 队列（后者代价大，建议改 exempt）
+2. **把 `_pipeline_send` 的 active-window 检查迁移到 gating/policy**：
+   - `gating._decide()` 查询 `POLICY_TABLE[trigger_name].active_window_behavior`
+   - `exempt` → 不过 active-window；`drop` → active 时拦截（等同当前行为）；`defer` → 入队等待
+   - `_pipeline_send` 移除 `_user_active_recently()` 检查，改为纯执行器
+3. **把 `_HIGH_PRIORITY_TRIGGERS` 合并进 `POLICY_TABLE`**，`_pipeline_send` 不再维护独立白名单
+4. **DND 接线**（可选，R2-C）：`_pipeline_send` 或 gating 查询 `dnd.is_dnd()` 决定是否跳过非 exempt 触发器
+
+---
+
 ## Pipeline 注入方式
 
 调度器统一从 `pipeline_registry` 获取 Pipeline 实例（R7-B 后已统一）：
