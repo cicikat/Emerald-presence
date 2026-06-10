@@ -272,3 +272,79 @@ class PromptLayer:
 2. 如果是可裁剪的非核心层，加 `"_drop_priority": N` 字段（数字越小越先丢）；无需修改任何中心列表
 3. 如果是 tagged 层，在 `tag_rules.py` 里确认有对应 tag 规则
 4. 在此文档的层总览表格和裁剪顺序表里补充说明
+
+---
+
+## 新增 layer checklist（R4-C 门禁）
+
+每次新增一个 prompt 层时，必须逐项回答以下问题。测试文件 `tests/test_r4c_prompt_layer_contract.py` 会在 CI 中自动验证标有 ⚙️ 的项。
+
+### 1. 这个 layer 是否可裁？
+
+| 判断依据 | 结论 |
+|---|---|
+| 是辅助/上下文增强层（记忆片段、日记、梦境、世界书等），去掉后不破坏对话基本能力 | **可裁** |
+| 是核心身份层（system_prompt、角色描述、关系、author_note、用户消息等），去掉后对话崩坏 | **不可裁** |
+
+### 2. ⚙️ 可裁层：必须声明 `_drop_priority`
+
+```python
+messages.append({
+    "role": "system",
+    "content": some_text,
+    "_layer": "Nx_new_layer",
+    "_drop_priority": 35,   # 插入已有层之间即可，不需要改任何中心列表
+})
+```
+
+- 数字越小越先丢（lower = dropped first）
+- 同 priority 的消息整批原子性丢弃
+- **不得恢复 `_DROPPABLE` 中心表** — R4-B 已退役
+
+### 3. ⚙️ 不可裁层：说明理由，加入 allowlist
+
+若层名包含以下关键词之一（`dream`、`diary`、`episodic`、`event`、`lore`、`afterglow`、`impression`、`mid_term`），但确实不需要 drop_priority，必须在测试文件的 `NON_DROPPABLE_ALLOWLIST` 中加入理由：
+
+```python
+# 在 tests/test_r4c_prompt_layer_contract.py 中
+NON_DROPPABLE_ALLOWLIST: dict[str, str] = {
+    "9.5_episodic_top": "Single top memory placed after history for recency ...",
+    "Nx_my_new_layer":  "原因：...",   # ← 新增
+}
+```
+
+不含上述关键词的非核心层不需要 allowlist，但建议在此文档中备注不可裁原因。
+
+### 4. ⚙️ `_drop_priority` 只能是 `int`
+
+```python
+"_drop_priority": 35     # ✓ 正确
+"_drop_priority": "35"   # ✗ 禁止字符串
+"_drop_priority": None   # ✗ 不写此字段即等效；显式 None 无意义
+```
+
+### 5. 内部字段会在 LLM 边界剥离
+
+`_layer`、`_drop_priority` 等 `_` 前缀字段由 `sanitize_messages()` 在 `llm_client.chat()` 入口统一剥离，不会发送给供应商。可以放心在内部使用，无需手动清理。
+
+### 6. 不得恢复 `_DROPPABLE` 中心表
+
+R4-B 已完全退役 `_DROPPABLE`。新层的可裁性由 `_drop_priority` 字段自描述，不需要修改任何中心列表。`tests/test_r4c_prompt_layer_contract.py` 的 Rule 1 会持续检测 `_DROPPABLE` 是否重新出现。
+
+### 快速决策树
+
+```
+新增 prompt 层
+    │
+    ├─ 层名含 dream/diary/episodic/event/lore/afterglow/impression/mid_term？
+    │       │
+    │       ├─ 是 → 是否可裁？
+    │       │           ├─ 可裁 → 加 _drop_priority（选合适数字）
+    │       │           └─ 不可裁 → 加入 NON_DROPPABLE_ALLOWLIST + 理由
+    │       │
+    │       └─ 否 → 是否可裁？
+    │                   ├─ 可裁 → 加 _drop_priority
+    │                   └─ 不可裁 → 不加（无需 allowlist）
+    │
+    └─ 在此文档层总览和裁剪顺序表里补充说明
+```
