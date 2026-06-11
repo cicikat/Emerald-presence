@@ -6,10 +6,10 @@ they cannot pollute the next-turn prompt, short_term history, event_log, or any
 downstream memory consolidation (mid_term → episodic → identity).
 
 Correct call sites (memory / context path):
-  - capture_turn          → short_term + event_log write
-  - record_assistant_turn → memory_text passed to post_process
-  - admin/routers/chat    → memory side of desktop_wake
-  - main.py               → memory_reply passed to pipeline.post_process (QQ)
+  - capture_turn                   → short_term + event_log write (authority)
+  - record_assistant_turn          → memory_text passed to post_process
+  - admin/routers/chat             → memory side of desktop_wake
+  - main._qq_reality_reply_adapter → memory_reply passed to pipeline.post_process (QQ)
 
 NOT for visible UI output.  Visible replies should use only strip_render_tags
 (which removes XML/NMP tags) so that action descriptions remain for chat texture.

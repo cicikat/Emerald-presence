@@ -1,7 +1,7 @@
 # docs/known-issues.md — 已知问题与技术债
 
 > 最近核对：2026-06-11
-> 核对范围：R1-B QQ 主入口 full-convergence 审计；perceive_event P0+P1 收口。已落地事项按当前实现同步；未列出的条目保持原审计结论。
+> 核对范围：R1-C QQ adapter 收口；R1-B QQ 主入口 full-convergence 审计；perceive_event P0+P1 收口。已落地事项按当前实现同步；未列出的条目保持原审计结论。
 >
 > 状态标签：
 > - `now-safe-to-fix`：可按小修推进。
@@ -13,13 +13,14 @@
 
 ## 当前仍存在
 
-### B11：QQ 主入口未完全并入 turn_sink（partially converged）
+### B11：QQ 主入口未完全并入 turn_sink（adapter-converged）
 
-**状态**：`refactor-phase`（R1-B 审计完成 2026-06-11；数据安全风险已缓解；结构收口等 R1-C）
+**状态**：`refactor-phase`（R1-C 完成 2026-06-11；两条 LLM 回复出口已统一到 adapter；
+结构收口完成；完整 turn_sink 迁移留待 R1-D）
 
-**位置**：`main.py` → `handle_message()`、`_reply_with_tool_result()`
+**位置**：`main.py` → `_qq_reality_reply_adapter()`（统一出口）
 
-**已完成（R1-B 前各包）**：
+**已完成（含 R1-C）**：
 
 | 修复点 | 包 | 当前状态 |
 |---|---|---|
@@ -28,34 +29,39 @@
 | `conversation_lock` 覆盖 QQ 主路径和工具确认路径 | R1 | ✓ 完成 |
 | pre-scrub（`scrub_reality_output_text`）+ `strip_render_tags` 两条 QQ LLM 路径 | R6-A/B | ✓ 完成 |
 | legacy `/chat` 禁用（410）、`/desktop/trigger` 已删除 | — | ✓ 完成 |
+| `QQChannel.send` 支持 `target_id / is_group`（移除硬编码 False） | R1-C | ✓ 完成 |
+| `_qq_reality_reply_adapter` 统一两条 LLM 回复链路，消除重复代码 | R1-C | ✓ 完成 |
 
 **已收口路径**：desktop/mobile owner chat（`run_owner_chat_turn()`）、`desktop_wake` Path B、
-scheduler `_pipeline_send` 均已走 `record_assistant_turn()` 统一 turn sink。
+scheduler `_pipeline_send` 均已走 `record_assistant_turn()` 统一 turn sink。QQ 两条
+LLM 回复出口已由 `_qq_reality_reply_adapter` 统一，但尚未接入 `record_assistant_turn`。
 
-**R1-B 审计结论 — 剩余收口缺口**（不影响数据安全，影响结构统一性）：
-
-1. **LLM_ASSISTANT_REPLY 仍直发**：`handle_message` 和 `_reply_with_tool_result` 调用
-   `text_output.send` + 手动 `post_process`，未经过 `turn_sink.record_assistant_turn()` 和
-   `channels.registry` fanout。desktop/mobile 用户在 QQ LLM 回复期间不会收到广播。
-2. **`post_process` 签名不一致**：QQ 路径传 `target_id / is_group / pending_paths /
-   frozen_scope`；`turn_sink` 不传这些（使用默认值）。并入 turn_sink 前需对齐或扩展签名。
-3. **`QQChannel.send` 不支持群聊**：`channels/qq.py` 硬编码 `is_group=False`，
-   fanout 接管前必须先修复，否则群聊消息将静默丢失。
-
-**R1-B text_output.send 分类**（全部 main.py 调用点）：
+**text_output.send 分类（R1-C 后全部 main.py 调用点）**：
 
 | 分类 | 数量 | 位置 | 是否写 memory |
 |---|---|---|---|
-| LLM_ASSISTANT_REPLY | 2 | `handle_message` L460、`_reply_with_tool_result` L566 | 是（via post_process） |
-| SYSTEM_SHORT_TEXT | 4 | 梦境 guard ×3、取消确认 ×1 | 否（直接 return） |
+| LLM_ASSISTANT_REPLY | 1 | `_qq_reality_reply_adapter` | 是（via post_process → capture_turn） |
+| SYSTEM_SHORT_TEXT | 3 | 梦境 guard ×3（_to_dg 别名） | 否（直接 return） |
+| SYSTEM_SHORT_TEXT | 1 | 取消确认 `text_output.send` | 否（直接 return） |
 | TOOL_CONFIRMATION_PROMPT | 2 | WAITING_INPUT ask_text、probe ask_text | 否（直接 return） |
 
-**下一步 R1-C**：
-1. 修 `QQChannel.send` 支持 `is_group`；
-2. 抽 `qq_reality_reply_adapter()` 或直接让 QQ LLM 回复走 `record_assistant_turn()`；
-3. 对齐 `post_process` 签名（`target_id / is_group / pending_paths / frozen_scope`）。
+**R1-C 后剩余缺口**（不影响数据安全）：
 
-守卫测试：`tests/test_r1b_qq_convergence_audit.py`（13 项，2026-06-11）。
+1. **QQ 不经 channel fanout**：LLM 回复仍走 `text_output.send` 直发（仅 QQ），
+   desktop/mobile 用户在 QQ LLM 回复期间不会收到广播。
+2. **`post_process` 签名仍与 turn_sink 不同**：QQ 路径传 `target_id / is_group /
+   pending_paths / frozen_scope`；turn_sink 不传这些。并入 turn_sink 前需对齐。
+
+**下一步 R1-D（可选）**：
+1. 对齐 `post_process` 签名 / turn_sink 接受 QQ 专有参数；
+2. 把 `_qq_reality_reply_adapter` 改调 `record_assistant_turn(source=USER_CHAT, ...)`；
+3. QQ LLM 回复进入 channel fanout，desktop/mobile 广播到位。
+
+R6 final（单出口稳态）可在 R1-D 完成后开始。
+
+守卫测试：
+- `tests/test_r1b_qq_convergence_audit.py`（A10 已翻转，13 项 pass，2026-06-11）
+- `tests/test_r1c_qq_reality_reply_adapter.py`（29 项，2026-06-11）
 
 ---
 

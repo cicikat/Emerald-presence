@@ -105,22 +105,25 @@ def _function_body_text(src: str, func_name: str) -> str:
 
 def test_a1a_text_output_send_count():
     """
-    A1a: Exactly 5 text_output.send( calls in main.py non-comment lines.
+    A1a (R1-C updated): Exactly 4 text_output.send( calls in main.py non-comment lines.
+
+    R1-C collapsed the two LLM_ASSISTANT_REPLY direct sends (handle_message + tool-reply)
+    into a single call inside _qq_reality_reply_adapter.
 
     Expected:
-      L274  cancel confirm          SYSTEM_SHORT_TEXT
-      L292  WAITING_INPUT ask_text  TOOL_CONFIRMATION_PROMPT
-      L413  probe ask_text          TOOL_CONFIRMATION_PROMPT
-      L460  handle_message reply    LLM_ASSISTANT_REPLY
-      L566  tool-reply              LLM_ASSISTANT_REPLY
+      cancel confirm          SYSTEM_SHORT_TEXT      (handle_message)
+      WAITING_INPUT ask_text  TOOL_CONFIRMATION_PROMPT (handle_message)
+      probe ask_text          TOOL_CONFIRMATION_PROMPT (handle_message)
+      adapter reply           LLM_ASSISTANT_REPLY    (_qq_reality_reply_adapter)
     """
     hits = [
         (lineno, ln)
         for lineno, ln in _non_comment_lines("main.py")
         if "text_output.send(" in ln
     ]
-    assert len(hits) == 5, (
-        f"Expected 5 text_output.send( calls in main.py, found {len(hits)}:\n"
+    assert len(hits) == 4, (
+        f"Expected 4 text_output.send( calls in main.py (R1-C: 3 direct + 1 in adapter), "
+        f"found {len(hits)}:\n"
         + "\n".join(f"  L{lineno}: {ln.strip()}" for lineno, ln in hits)
     )
 
@@ -151,38 +154,56 @@ def test_a1b_dg_send_count():
 
 def test_a2_llm_reply_sends_use_segments():
     """
-    A2: Exactly 2 text_output.send calls pass `segments` as the content argument
-    (one in handle_message, one in _reply_with_tool_result).
+    A2 (R1-C updated): Exactly 1 text_output.send call passes the `clean` variable
+    (R1-C adapter internal name) or `segments`-derived content inside
+    _qq_reality_reply_adapter.
 
-    A regression here would mean a new LLM path is sending raw text without going
-    through the response_processor.process + strip_render_tags chain.
+    R1-C: both LLM paths route through the adapter, so there is exactly 1 send
+    that moves LLM output to QQ.  The adapter uses `clean` (strip_render_tags output).
     """
-    hits = [
-        (lineno, ln)
-        for lineno, ln in _non_comment_lines("main.py")
-        if "text_output.send(" in ln and "segments" in ln
+    src = _src("main.py")
+    adapter_body = _function_body_text(src, "_qq_reality_reply_adapter")
+    hits_in_adapter = [
+        ln for ln in adapter_body.splitlines()
+        if "text_output.send(" in ln and not ln.strip().startswith("#")
     ]
-    assert len(hits) == 2, (
-        f"Expected exactly 2 LLM_ASSISTANT_REPLY sends (using 'segments'), "
-        f"found {len(hits)}:\n"
-        + "\n".join(f"  L{lineno}: {ln.strip()}" for lineno, ln in hits)
+    assert len(hits_in_adapter) == 1, (
+        f"Expected exactly 1 text_output.send call inside _qq_reality_reply_adapter, "
+        f"found {len(hits_in_adapter)}:\n"
+        + "\n".join(f"  {ln.strip()}" for ln in hits_in_adapter)
     )
 
 
 def test_a2b_llm_reply_sends_in_expected_functions():
     """
-    A2b: The two LLM_ASSISTANT_REPLY sends appear in handle_message and
-    _reply_with_tool_result respectively — not in any new function.
+    A2b (R1-C updated): The LLM_ASSISTANT_REPLY send now lives exclusively inside
+    _qq_reality_reply_adapter, NOT in handle_message or _reply_with_tool_result.
+    Both calling functions delegate to the adapter rather than sending directly.
     """
     src = _src("main.py")
     hm_body = _function_body_text(src, "handle_message")
     tr_body = _function_body_text(src, "_reply_with_tool_result")
+    adapter_body = _function_body_text(src, "_qq_reality_reply_adapter")
 
-    assert "text_output.send(target_id, segments, is_group)" in hm_body, (
-        "handle_message: LLM_ASSISTANT_REPLY send not found in function body"
+    assert "text_output.send(" not in hm_body or all(
+        "segments" not in ln and "clean" not in ln
+        for ln in hm_body.splitlines()
+        if "text_output.send(" in ln and not ln.strip().startswith("#")
+    ), (
+        "handle_message: LLM_ASSISTANT_REPLY send still in function body — "
+        "R1-C should have moved it into _qq_reality_reply_adapter"
     )
-    assert "text_output.send(target_id, segments, is_group)" in tr_body, (
-        "_reply_with_tool_result: LLM_ASSISTANT_REPLY send not found in function body"
+    assert "text_output.send(" not in tr_body or all(
+        "segments" not in ln and "clean" not in ln
+        for ln in tr_body.splitlines()
+        if "text_output.send(" in ln and not ln.strip().startswith("#")
+    ), (
+        "_reply_with_tool_result: LLM_ASSISTANT_REPLY send still in function body — "
+        "R1-C should have moved it into _qq_reality_reply_adapter"
+    )
+    assert "text_output.send(" in adapter_body, (
+        "_qq_reality_reply_adapter: text_output.send missing — "
+        "LLM reply send not wired into adapter"
     )
 
 
@@ -244,23 +265,35 @@ def test_a3b_create_task_calls_are_startup_only():
 
 def test_a4_handle_message_awaits_post_process():
     """
-    A4: handle_message must have `await _pipeline.post_process(` (not create_task).
+    A4 (R1-C updated): handle_message delegates to _qq_reality_reply_adapter,
+    which is the function that awaits post_process.  Both LLM reply paths share
+    the same adapter, which is the single post_process entry point.
     """
     src = _src("main.py")
-    body = _function_body_text(src, "handle_message")
-    assert "await _pipeline.post_process(" in body, (
-        "handle_message: post_process is not awaited — N10 regression or removed call"
+    hm_body = _function_body_text(src, "handle_message")
+    adapter_body = _function_body_text(src, "_qq_reality_reply_adapter")
+    assert "_qq_reality_reply_adapter(" in hm_body, (
+        "handle_message: _qq_reality_reply_adapter call missing — R1-C adapter not wired"
+    )
+    assert "await _pipeline.post_process(" in adapter_body, (
+        "_qq_reality_reply_adapter: post_process not awaited — N10 regression"
     )
 
 
 def test_a4b_tool_reply_awaits_post_process():
     """
-    A4b: _reply_with_tool_result must have `await _pipeline.post_process(`.
+    A4b (R1-C updated): _reply_with_tool_result also delegates to
+    _qq_reality_reply_adapter for its post_process call.
     """
     src = _src("main.py")
-    body = _function_body_text(src, "_reply_with_tool_result")
-    assert "await _pipeline.post_process(" in body, (
-        "_reply_with_tool_result: post_process is not awaited — N10 regression"
+    tr_body = _function_body_text(src, "_reply_with_tool_result")
+    adapter_body = _function_body_text(src, "_qq_reality_reply_adapter")
+    assert "_qq_reality_reply_adapter(" in tr_body, (
+        "_reply_with_tool_result: _qq_reality_reply_adapter call missing — "
+        "R1-C adapter not wired into tool-reply path"
+    )
+    assert "await _pipeline.post_process(" in adapter_body, (
+        "_qq_reality_reply_adapter: post_process not awaited — N10 regression"
     )
 
 
@@ -333,33 +366,39 @@ def test_a6b_handle_message_passes_frozen_scope_to_tool_reply():
 
 def test_a7_handle_message_uses_scrub_and_strip():
     """
-    A7: handle_message must call both scrub_reality_output_text (memory pre-scrub)
-    and strip_render_tags (visible output) — R6-A/B contract.
+    A7 (R1-C updated): scrub_reality_output_text and strip_render_tags both live
+    inside _qq_reality_reply_adapter, which handle_message invokes.  The R6-A/B
+    pre-scrub contract is preserved — it's just consolidated into the adapter.
     """
     src = _src("main.py")
-    body = _function_body_text(src, "handle_message")
-    assert "scrub_reality_output_text" in body, (
-        "handle_message: scrub_reality_output_text missing — QQ memory pre-scrub removed"
+    adapter_body = _function_body_text(src, "_qq_reality_reply_adapter")
+    assert "scrub_reality_output_text" in adapter_body, (
+        "_qq_reality_reply_adapter: scrub_reality_output_text missing — "
+        "QQ memory pre-scrub removed (R6-A/B regression)"
     )
-    assert "strip_render_tags" in body, (
-        "handle_message: strip_render_tags missing — visible output no longer cleaned"
+    assert "strip_render_tags" in adapter_body, (
+        "_qq_reality_reply_adapter: strip_render_tags missing — "
+        "visible output no longer cleaned (R6-A/B regression)"
     )
 
 
 def test_a7b_tool_reply_uses_scrub_and_strip():
     """
-    A7b: _reply_with_tool_result must also call both scrub_reality_output_text
-    and strip_render_tags — same R6-A/B pre-scrub contract as handle_message.
+    A7b (R1-C updated): _reply_with_tool_result routes through
+    _qq_reality_reply_adapter, which provides both scrub_reality_output_text
+    and strip_render_tags.  R6-A/B pre-scrub contract still holds.
     """
     src = _src("main.py")
-    body = _function_body_text(src, "_reply_with_tool_result")
-    assert "scrub_reality_output_text" in body, (
-        "_reply_with_tool_result: scrub_reality_output_text missing — "
-        "tool-reply memory pre-scrub removed"
+    tr_body = _function_body_text(src, "_reply_with_tool_result")
+    adapter_body = _function_body_text(src, "_qq_reality_reply_adapter")
+    assert "_qq_reality_reply_adapter(" in tr_body, (
+        "_reply_with_tool_result: adapter call missing — scrub/strip no longer guaranteed"
     )
-    assert "strip_render_tags" in body, (
-        "_reply_with_tool_result: strip_render_tags missing — "
-        "visible output no longer cleaned on tool-reply path"
+    assert "scrub_reality_output_text" in adapter_body, (
+        "_qq_reality_reply_adapter: scrub_reality_output_text missing — R6-A/B regression"
+    )
+    assert "strip_render_tags" in adapter_body, (
+        "_qq_reality_reply_adapter: strip_render_tags missing — R6-A/B regression"
     )
 
 
@@ -433,23 +472,20 @@ def test_a9_qq_not_yet_using_record_assistant_turn():
 # A10. QQChannel.send group-support gap (R1-C prerequisite)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def test_a10_qq_channel_hardcodes_is_group_false():
+def test_a10_qq_channel_no_longer_hardcodes_is_group_false():
     """
-    A10 (documents R1-C prerequisite): QQChannel.send currently hardcodes
-    is_group=False when calling qq_adapter.send_message.
+    A10 (R1-C: INVERTED from R1-B): QQChannel.send must NOT hardcode is_group=False
+    in the qq_adapter.send_message call.
 
-    This means routing QQ through turn_sink._fanout → QQChannel.send would silently
-    drop group messages.  R1-C must fix QQChannel.send to respect the target_id /
-    is_group context before the migration can be completed.
-
-    When R1-C fixes this, this test should be INVERTED.
+    R1-C fixed QQChannel.send to accept optional target_id and is_group parameters
+    and pass them through, removing the hardcoded is_group=False that would have
+    silently routed group messages as private chats.
     """
     src = _src("channels/qq.py")
-    # Find the send method body
     send_body = _function_body_text(src, "send")
-    assert "is_group=False" in send_body, (
-        "channels/qq.py QQChannel.send: is_group=False hardcode is gone — "
-        "either R1-C fixed it (invert this test) or it was removed accidentally."
+    assert "is_group=False" not in send_body, (
+        "channels/qq.py QQChannel.send: is_group=False hardcode is back — "
+        "R1-C fix was reverted; group messages would be silently routed as private"
     )
 
 

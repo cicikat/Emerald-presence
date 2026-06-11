@@ -446,47 +446,14 @@ async def handle_message(message: dict):
         if not segments:
             logger.warning("[handle_message] LLM 回复经处理后为空，本轮不发送")
             return
-        # Visible output (QQ): strip render/NMP tags only — preserve action descriptions
-        # for chat texture.  Heavy scrubbing only happens on the memory path below.
-        from core.response_processor import strip_render_tags as _strip_rt
-        segments = [s for s in (_strip_rt(seg) for seg in segments) if s]
-        if not segments:
-            logger.warning("[handle_message] 回复经处理后为空，本轮不发送")
-            return
 
-        # ── 步骤8：发送回复 ──────────────────────────────────────────────────
-        logger.info(f"[handle_message] 发送到 {'群' if is_group else '私聊'}{target_id}")
-        try:
-            await text_output.send(target_id, segments, is_group)
-        except Exception as e:
-            _log_error("main.handle_message.send", e)
-            logger.error(f"[handle_message] 发送异常: {type(e).__name__}: {e}")
-            return
-        logger.info(f"[handle_message] 回复已发送，共 {len(segments)} 段")
-
-        # ── 步骤9：await 后处理（N10：关键写入不得丢引用）───────────────────
-        # QQ memory path pre-scrub (defense-in-depth): strip action/narration before
-        # handing off to post_process.  This is an upstream pre-scrub for the QQ inlet;
-        # the authoritative final scrub is in capture_turn, which will scrub again.
-        # Do not treat this as the only scrub point — and do not remove it either.
-        # (scrub_reality_output_text is idempotent; double-scrub is safe.)
-        from core.reality_output_scrubber import scrub_reality_output_text as _scrub_qq
-        _raw_join = "\n".join(segments)
-        memory_reply = _scrub_qq(_raw_join) or ""
-        from core.write_envelope import stamp_qq
-        try:
-            await _pipeline.post_process(
-                user_id, content, memory_reply, target_id, is_group,
-                pending_paths=_meta.get("pending_paths", []),
-                envelope=stamp_qq(),
-                frozen_scope=_frozen_scope,
-            )
-        except Exception as _pp_err:
-            _log_error("main.handle_message.post_process", _pp_err)
-            logger.error(
-                "[handle_message] post_process 异常（记忆写入可能丢失）uid=%s: %s",
-                user_id, _pp_err,
-            )
+        # ── 步骤8+9：QQ reality reply adapter ──────────────────────────────
+        # visible strip → send → memory pre-scrub → post_process → capture_turn (authority)
+        await _qq_reality_reply_adapter(
+            segments, user_id, content, target_id, is_group,
+            frozen_scope=_frozen_scope,
+            pending_paths=_meta.get("pending_paths", []),
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -508,11 +475,7 @@ async def _reply_with_tool_result(
     """
     from core.memory import short_term, user_profile, group_context
     from core import user_relation, response_processor
-    from core.output import text_output
     from core.error_handler import log_error
-    from core.response_processor import strip_render_tags as _strip_rt
-    from core.reality_output_scrubber import scrub_reality_output_text as _scrub_qq
-    from core.write_envelope import stamp_qq
     from core.conversation_gate import conversation_lock
 
     group_id = target_id if is_group else None
@@ -556,38 +519,89 @@ async def _reply_with_tool_result(
             return
 
         segments = response_processor.process(raw_reply, _pipeline.character.name)
-        # Visible output (QQ): strip render/NMP tags — mirrors QQ main message path.
-        segments = [s for s in (_strip_rt(seg) for seg in segments) if s]
         if not segments:
             logger.warning("[_reply_with_tool_result] 处理后回复为空，不发送")
             return
 
-        try:
-            await text_output.send(target_id, segments, is_group)
-        except Exception as e:
-            log_error("main._reply_with_tool_result.send", e)
-            return
+        # QQ tool-reply: visible send + memory pre-scrub → post_process → capture_turn (authority)
+        await _qq_reality_reply_adapter(
+            segments, user_id, _turn_content, target_id, is_group,
+            frozen_scope=frozen_scope,
+            pending_paths=_meta.get("pending_paths", []),
+        )
 
-        # QQ tool-reply pre-scrub (defense-in-depth): strip action/narration before
-        # post_process.  Same pattern as handle_message — upstream pre-scrub, not the
-        # authority.  capture_turn is the authoritative final scrub point.
-        # N10: await instead of create_task — critical writes must not be dropped.
-        _raw_join = "\n".join(segments)
-        memory_reply = _scrub_qq(_raw_join) or ""
-        try:
-            await _pipeline.post_process(
-                user_id, _turn_content, memory_reply, target_id, is_group,
-                pending_paths=_meta.get("pending_paths", []),
-                envelope=stamp_qq(),
-                frozen_scope=frozen_scope,
-            )
-        except Exception as _pp_err:
-            log_error("main._reply_with_tool_result.post_process", _pp_err)
-            logger.error(
-                "[_reply_with_tool_result] post_process 异常（记忆写入可能丢失）uid=%s: %s",
-                user_id, _pp_err,
-            )
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# QQ LLM_ASSISTANT_REPLY 统一出口
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _qq_reality_reply_adapter(
+    segments: list[str],
+    user_id: str,
+    user_content: str,
+    target_id: str,
+    is_group: bool,
+    frozen_scope,
+    pending_paths: list | None = None,
+) -> None:
+    """
+    QQ LLM_ASSISTANT_REPLY 统一出口。
+
+    handle_message（普通 LLM 回复）和 _reply_with_tool_result（工具确认 LLM 回复）
+    共用此 adapter，消除重复链路：
+
+      REALITY_VISIBLE strip → QQ send → REALITY_MEMORY pre-scrub
+        → await post_process → capture_turn（权威 scrub 点）
+
+    只处理 LLM_ASSISTANT_REPLY。Dream guard / SYSTEM_SHORT_TEXT /
+    TOOL_CONFIRMATION_PROMPT 等系统短文本继续直发，不经此 adapter，不写 memory。
+    """
+    from core.response_processor import strip_render_tags as _strip_rt
+    from core.output import text_output
+    from core.reality_output_scrubber import scrub_reality_output_text as _scrub
+    from core.write_envelope import stamp_qq
+    from core.error_handler import log_error as _log_error
+
+    # REALITY_VISIBLE: strip render/NMP tags for QQ visible output; preserve
+    # action descriptions for chat texture (heavy scrub only on memory path below).
+    clean = [s for s in (_strip_rt(seg) for seg in segments) if s]
+    if not clean:
+        logger.warning("[qq_reality_reply_adapter] 回复 strip 后为空，不发送 uid=%s", user_id)
+        return
+
+    logger.info(
+        "[qq_reality_reply_adapter] 发送到 %s%s 共 %d 段",
+        "群" if is_group else "私聊", target_id, len(clean),
+    )
+    try:
+        await text_output.send(target_id, clean, is_group)
+    except Exception as e:
+        _log_error("qq_reality_reply_adapter.send", e)
+        logger.error(
+            "[qq_reality_reply_adapter] 发送异常 uid=%s: %s: %s",
+            user_id, type(e).__name__, e,
+        )
+        return
+
+    # REALITY_MEMORY pre-scrub (defense-in-depth): strip action/narration before
+    # post_process.  capture_turn is the authoritative final scrub point; this
+    # upstream pre-scrub is idempotent and safe to layer on top.
+    _raw_join = "\n".join(clean)
+    memory_reply = _scrub(_raw_join) or ""
+    try:
+        await _pipeline.post_process(
+            user_id, user_content, memory_reply, target_id, is_group,
+            pending_paths=pending_paths or [],
+            envelope=stamp_qq(),
+            frozen_scope=frozen_scope,
+        )
+    except Exception as _pp_err:
+        _log_error("qq_reality_reply_adapter.post_process", _pp_err)
+        logger.error(
+            "[qq_reality_reply_adapter] post_process 異常（記憶寫入可能丟失）uid=%s: %s",
+            user_id, _pp_err,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

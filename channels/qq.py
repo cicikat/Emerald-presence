@@ -25,9 +25,25 @@ class QQChannel(BaseChannel):
     def set_active(self, active: bool) -> None:
         self._active = active
 
-    async def send(self, content: str, user_id: str, behavior: dict | None = None) -> None:
+    async def send(
+        self,
+        content: str,
+        user_id: str,
+        behavior: dict | None = None,
+        *,
+        target_id: str | None = None,
+        is_group: bool = False,
+    ) -> None:
+        """发送 QQ 消息。
+
+        从 turn_sink._fanout 调用时，user_id 为 owner UID（私聊）；target_id /
+        is_group 不传，默认走私聊路由（行为正确）。群聊路由由 main.py
+        _qq_reality_reply_adapter 直接调用 text_output.send(target_id, ...,
+        is_group) 处理，不经过本方法。
+        """
         try:
             from core import qq_adapter
-            await qq_adapter.send_message(user_id, content, is_group=False)
+            _target = target_id if target_id is not None else user_id
+            await qq_adapter.send_message(_target, content, is_group)
         except Exception as e:
             logger.warning(f"[qq_channel] 发送失败: {e}")

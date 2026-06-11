@@ -134,25 +134,45 @@ def test_s1a_scrub_call_site_main_handle_message():
 
 
 def test_s1b_scrub_call_site_main_tool_reply():
-    """S1b: main.py _reply_with_tool_result must use scrub_reality_output_text."""
+    """
+    S1b (R1-C updated): main.py _reply_with_tool_result routes to
+    _qq_reality_reply_adapter, which calls scrub_reality_output_text.
+
+    After R1-C the scrub lives in the adapter rather than directly in
+    _reply_with_tool_result; the R6 contract is still satisfied.
+    """
     src = _source("main.py")
-    # Function definition must exist
     assert "_reply_with_tool_result" in src
-    # Scrubber must be imported inside or near _reply_with_tool_result
+    # _reply_with_tool_result must call the adapter
     lines = src.splitlines()
     in_func = False
-    found_scrub = False
+    found_adapter = False
     for ln in lines:
         if "def _reply_with_tool_result(" in ln:
             in_func = True
-        if in_func and "scrub_reality_output_text" in ln:
-            found_scrub = True
+        if in_func and "_qq_reality_reply_adapter(" in ln:
+            found_adapter = True
             break
         if in_func and ln.startswith("async def ") and "_reply_with_tool_result" not in ln:
             break
+    assert found_adapter, (
+        "main.py _reply_with_tool_result: _qq_reality_reply_adapter not called — "
+        "tool-reply memory path may leak action lines (R6-A/B regression)"
+    )
+    # The adapter itself must call scrub
+    in_adapter = False
+    found_scrub = False
+    for ln in lines:
+        if "def _qq_reality_reply_adapter(" in ln:
+            in_adapter = True
+        if in_adapter and "scrub_reality_output_text" in ln:
+            found_scrub = True
+            break
+        if in_adapter and ln.startswith("async def ") and "_qq_reality_reply_adapter" not in ln:
+            break
     assert found_scrub, (
-        "main.py _reply_with_tool_result: scrub_reality_output_text not called — "
-        "tool-reply memory path may leak action lines"
+        "main.py _qq_reality_reply_adapter: scrub_reality_output_text not called — "
+        "tool-reply memory path may leak action lines (R6-A/B regression)"
     )
 
 
@@ -291,7 +311,10 @@ def test_s4_text_output_send_allowlist():
         '["好的，已取消～"]',
         "[ask_text]",
         # LLM segments — strip_render_tags applied to 'segments' earlier in the function
+        # (R1-B baseline: called with `segments` variable)
         "target_id, segments, is_group",
+        # R1-C: adapter uses `clean` (result of strip_render_tags applied to segments)
+        "target_id, clean, is_group",
     ]
 
     uncovered = []
