@@ -1,7 +1,7 @@
 # docs/known-issues.md — 已知问题与技术债
 
-> 最近核对：2026-06-07
-> 核对范围：perceive_event P0+P1 收口。已落地事项按当前实现同步；未列出的条目保持原审计结论。
+> 最近核对：2026-06-11
+> 核对范围：R1-B QQ 主入口 full-convergence 审计；perceive_event P0+P1 收口。已落地事项按当前实现同步；未列出的条目保持原审计结论。
 >
 > 状态标签：
 > - `now-safe-to-fix`：可按小修推进。
@@ -13,28 +13,49 @@
 
 ## 当前仍存在
 
-### B11：部分现实对话入口仍可能读取旧上下文
+### B11：QQ 主入口未完全并入 turn_sink（partially converged）
 
-**状态**：`now-safe-to-fix`
+**状态**：`refactor-phase`（R1-B 审计完成 2026-06-11；数据安全风险已缓解；结构收口等 R1-C）
 
-**位置**：`main.py` → `handle_message()`；`admin/routers/chat.py` → `/chat`
+**位置**：`main.py` → `handle_message()`、`_reply_with_tool_result()`
 
-**已收口路径**：desktop/mobile owner chat（`run_owner_chat_turn()`）、`desktop_wake` Path B
-（perceive_event gate + `conversation_lock`，P0）、scheduler `_pipeline_send`
-（perceive_event gate + `conversation_lock`，P1）均已用 uid 级锁覆盖
-`fetch_context → build_prompt → run_llm → record_assistant_turn`。
+**已完成（R1-B 前各包）**：
 
-**仍为 legacy**：`main.handle_message()`（QQ 主入口）仍在发送后以
-`asyncio.create_task` 异步调用 `pipeline.post_process()`；`message_queue` 虽然串行调用
-handler，下一条消息仍可能在上一条异步落库完成前进入 `fetch_context()`。
-`_reply_with_tool_result`（QQ 工具确认）同样无 perceive_event gate 和
-`conversation_lock`，已明确排除在 P0/P1 范围之外。
+| 修复点 | 包 | 当前状态 |
+|---|---|---|
+| `handle_message` + `_reply_with_tool_result` 均改为 `await post_process()` | N10 | ✓ 完成 |
+| 轮级 scope freeze（`_frozen_scope`）+ 透传到 `post_process` | N1 | ✓ 完成 |
+| `conversation_lock` 覆盖 QQ 主路径和工具确认路径 | R1 | ✓ 完成 |
+| pre-scrub（`scrub_reality_output_text`）+ `strip_render_tags` 两条 QQ LLM 路径 | R6-A/B | ✓ 完成 |
+| legacy `/chat` 禁用（410）、`/desktop/trigger` 已删除 | — | ✓ 完成 |
 
-冻结管理面板 `/chat` 仍走异步 `post_process()`，未接入统一 turn sink /
-conversation gate。legacy `/desktop/trigger` 已删除，不再属于本条缺口。
+**已收口路径**：desktop/mobile owner chat（`run_owner_chat_turn()`）、`desktop_wake` Path B、
+scheduler `_pipeline_send` 均已走 `record_assistant_turn()` 统一 turn sink。
 
-**建议**：把剩余 QQ 入口收口到 `record_assistant_turn()`；若保留先发送语义，也要保证
-下一轮 `fetch_context()` 前 critical write 已完成。
+**R1-B 审计结论 — 剩余收口缺口**（不影响数据安全，影响结构统一性）：
+
+1. **LLM_ASSISTANT_REPLY 仍直发**：`handle_message` 和 `_reply_with_tool_result` 调用
+   `text_output.send` + 手动 `post_process`，未经过 `turn_sink.record_assistant_turn()` 和
+   `channels.registry` fanout。desktop/mobile 用户在 QQ LLM 回复期间不会收到广播。
+2. **`post_process` 签名不一致**：QQ 路径传 `target_id / is_group / pending_paths /
+   frozen_scope`；`turn_sink` 不传这些（使用默认值）。并入 turn_sink 前需对齐或扩展签名。
+3. **`QQChannel.send` 不支持群聊**：`channels/qq.py` 硬编码 `is_group=False`，
+   fanout 接管前必须先修复，否则群聊消息将静默丢失。
+
+**R1-B text_output.send 分类**（全部 main.py 调用点）：
+
+| 分类 | 数量 | 位置 | 是否写 memory |
+|---|---|---|---|
+| LLM_ASSISTANT_REPLY | 2 | `handle_message` L460、`_reply_with_tool_result` L566 | 是（via post_process） |
+| SYSTEM_SHORT_TEXT | 4 | 梦境 guard ×3、取消确认 ×1 | 否（直接 return） |
+| TOOL_CONFIRMATION_PROMPT | 2 | WAITING_INPUT ask_text、probe ask_text | 否（直接 return） |
+
+**下一步 R1-C**：
+1. 修 `QQChannel.send` 支持 `is_group`；
+2. 抽 `qq_reality_reply_adapter()` 或直接让 QQ LLM 回复走 `record_assistant_turn()`；
+3. 对齐 `post_process` 签名（`target_id / is_group / pending_paths / frozen_scope`）。
+
+守卫测试：`tests/test_r1b_qq_convergence_audit.py`（13 项，2026-06-11）。
 
 ---
 
@@ -219,19 +240,26 @@ TXT 导入分支调用 `Path(file.filename).stem`，但文件没有导入 `pathl
 
 ---
 
-### SEC-WS-1：WebSocket query token 仍是过渡方案
+### SEC-WS-1：WebSocket query token 迁移
 
-**状态**：`refactor-phase`
+**状态**：`partially-fixed`（R9，2026-06-11）
 
-**位置**：`admin/admin_server.py`、`admin/log_filter.py`
+**位置**：`admin/admin_server.py`、`admin/auth.py`、`admin/log_filter.py`
 
-`/ws/desktop?token=...` 已校验 token；`QuerySanitizeFilter` 也已安装到
-`uvicorn.access`，会遮蔽 `token=` / `secret=` 值。原先“uvicorn access log 直接打印完整
-token”的问题已缓解。
+**R9 已完成**：
+- `admin/auth.authenticate_ws()` + `extract_ws_token()` 统一 WS 鉴权，支持 `Authorization: Bearer` header（主路径）和 `?token=` query（废弃 fallback）。
+- `ws_desktop_endpoint` 不再声明 `?token=` query param，不再把 token 暴露给 FastAPI OpenAPI。
+- token 值不出现在任何日志路径（header 路径无记录；query 路径仅记录无 token 值的 deprecated warning）。
+- 20 项守卫测试：`tests/test_sec_ws1_auth.py`。
 
-但 query token 仍可能出现在截图、代理日志、浏览器调试信息或其他日志链路中。
+**残留风险（过渡期）**：`?token=` query fallback 仍启用，供 Emerald-client 过渡。旧客户端
+走 query 路径期间，token 仍可能出现在截图或代理日志。`QuerySanitizeFilter` 保留作 uvicorn
+access log 保护。
 
-**建议**：后续迁移到 header、subprotocol、首包鉴权或配对机制。
+**下一步**：
+1. Emerald-client `client_config.rs` 迁移到 `Authorization: Bearer` header。
+2. 迁移确认后删除 `extract_ws_token()` 中的 query 分支，并移除 `QuerySanitizeFilter` 的 token 规则（或整个 filter 若无其他需求）。
+3. 更新 `docs/channels.md` TODO 标注。
 
 ---
 

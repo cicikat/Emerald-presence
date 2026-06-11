@@ -329,6 +329,81 @@ turn_sink.record_assistant_turn（desktop/scheduler/sensor/wake）
 
 ---
 
+## 十一、QQ 主入口当前状态（R1-B，2026-06-11）
+
+> QQ 入口已完成关键安全修复，但尚未并入统一 turn_sink 路径。
+> full single-exit convergence（R6 最终单出口）依赖后续 R1-C 施工。
+
+### 已完成
+
+| 修复 | 包 |
+|---|---|
+| `await post_process`（不再 create_task） | N10 |
+| 轮级 scope freeze + frozen_scope 透传 | N1 |
+| `conversation_lock` 串行化 | R1 |
+| pre-scrub（`scrub_reality_output_text`）+ `strip_render_tags` | R6-A/B |
+
+### QQ 当前路径图
+
+```
+QQ 消息 → handle_message
+  ├── Dream guard (SYSTEM_SHORT_TEXT，直发 + return，不写 memory)
+  ├── session_state WAITING_CONFIRM/WAITING_INPUT
+  │     ├── tool execute
+  │     ├── TOOL_CONFIRMATION_PROMPT (直发 + return，不写 memory)
+  │     └── → _reply_with_tool_result (LLM_ASSISTANT_REPLY)
+  ├── media processing (trusted_user_text 保持原始)
+  └── conversation_lock(user_id)
+        ├── tool probe / fast path
+        ├── fetch_context (frozen_scope)
+        ├── build_prompt
+        ├── run_llm
+        ├── response_processor.process + strip_render_tags
+        ├── text_output.send → QQ (LLM_ASSISTANT_REPLY，REALITY_VISIBLE)
+        └── scrub_reality_output_text → await post_process(frozen_scope) → capture_turn
+
+_reply_with_tool_result (tool confirm LLM reply):
+  └── conversation_lock(user_id)
+        ├── build_prompt (fetch_context 不重跑)
+        ├── run_llm
+        ├── response_processor.process + strip_render_tags
+        ├── text_output.send → QQ (LLM_ASSISTANT_REPLY，REALITY_VISIBLE)
+        └── scrub_reality_output_text → await post_process(frozen_scope) → capture_turn
+```
+
+### 与 run_owner_chat_turn 的差异
+
+| 特性 | QQ（当前） | desktop（run_owner_chat_turn） |
+|---|---|---|
+| 发送机制 | `text_output.send` 直发 | `turn_sink.record_assistant_turn` → channel fanout |
+| memory 写入 | 直接 `await post_process(...)` | turn_sink 内部 `await post_process(...)` |
+| 其他 channel 广播 | 无（仅 QQ） | 全部注册 channel |
+| QQChannel.send is_group | N/A（绕过） | 硬编码 `False`（gap） |
+| post_process 额外参数 | target_id / is_group / pending_paths / frozen_scope | 不传（使用默认） |
+| R6 scrub | pre-scrub + capture_turn 权威 scrub | turn_sink pre-scrub + capture_turn 权威 scrub |
+
+### R1-C 最小施工路线（推荐方案 A）
+
+**方案 A：抽 `qq_reality_reply_adapter()`**，不强迫全量接入 turn_sink。
+
+1. 修 `channels/qq.py QQChannel.send` 接收 `is_group`，正确路由群/私聊。
+2. 新增 `qq_reality_reply_adapter(segments, user_id, target_id, is_group, frozen_scope, ...)` —
+   封装 `strip_render_tags + text_output.send + scrub + post_process`。
+3. `handle_message` 和 `_reply_with_tool_result` 共用该 adapter 替换重复链路。
+4. adapter 内部可选接入 `record_assistant_turn` 或继续直接调 `post_process`（低风险）。
+
+**方案 B：QQ LLM 回复直接走 `record_assistant_turn`**
+
+- 需先解决 `post_process` 签名对齐（`target_id / is_group / pending_paths / frozen_scope`）。
+- 需先修 `QQChannel.send` is_group 支持。
+- 风险更高，测试覆盖要求更大。
+
+**推荐**：方案 A 先抽 adapter，结构上已收敛；方案 B 可在 adapter 稳定后按需推进。
+
+守卫测试：`tests/test_r1b_qq_convergence_audit.py`（A9/A10 为 inversion 标记，R1-C 完成后翻转）。
+
+---
+
 ## 附：与 codex 报告的对照
 
 本文档对 codex 报告里指出的"最显著链路缺口"做了如下回应：

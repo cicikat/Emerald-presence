@@ -146,34 +146,42 @@ blocked log 格式：
 
 ---
 
-## Policy 表（scaffold）
+## Policy 表（R2-B 已接线）
 
-`core/scheduler/policy.py` 目前是 **documentation-by-code / assertions**：用 `TriggerPolicy`
-静态表记录每个 trigger 的语义归类、active-window 行为、defer 上限、drop/mark 边界和 cross-mark
-约束。
+`core/scheduler/policy.py` 是 **active-window / DND 决策的单一权威来源**（R2-B 后）：
+`gating._decide()` 和 `loop._pipeline_send()` 都通过延迟 import 引用 `POLICY_TABLE`，
+不再维护各自独立的豁免列表。
 
-当前状态：
+R2-B 后的状态：
 
-- `POLICY_TABLE` 已记录 25 条配置，但没有接入 live 决策。
-- `policy.py` 不被运行时模块 import，不参与 `_pipeline_send()`、gating 或 execute 的实际分支。
-- 文件里的断言函数用于后续测试或接入层显式调用；现在不会自动改变调度器行为。
-- 因此不要把该表描述成已上线的 defer/drop 引擎。真实 active-window 拦截仍发生在
-  `loop._pipeline_send()`。
+- `POLICY_TABLE`（25 条）驱动 `gating._decide()` 的 active-window filter 和 DND filter。
+- `loop._legacy_active_window_blocks()` 和 `_legacy_dnd_blocks()` 是 legacy `_check_*` 路径
+  的安全网，同样以 `POLICY_TABLE` 为决策依据；R2-C 迁移完成后可删除。
+- `_pipeline_send()` 中不再有 `_HIGH_PRIORITY_TRIGGERS` inline 检查；
+  `_HIGH_PRIORITY_TRIGGERS` 常量保留用于文档和测试断言，不参与运行时决策。
+- birthday_eve / afternoon / night 由 policy 的 `defer` 对齐为 `exempt`（R2-B 修复已知 mismatch）。
 
-两条当前定性需要保留：
+两条定性保留：
 
-- `sleep_end`：`priority="normal"` + `active_window_behavior="drop"`，`mark_on_drop=False`。
-  `cross_marks=["morning_greeting"]` 只表达“实际 sent 后才联动 mark”；drop 不 cross-mark，
+- `sleep_end`：`priority=”normal”` + `active_window_behavior=”drop”`，`mark_on_drop=False`。
+  `cross_marks=[“morning_greeting”]` 只表达”实际 sent 后才联动 mark”；drop 不 cross-mark，
   避免睡醒关心被拦后又压掉早安。
 - `hr_high`：语义上是 defer，但 Watch proposal 受 `HEART_RATE_PROPOSAL_TTL_SECONDS=10min`
   限制，`max_defer_age_secs` 只能记为 10 分钟；超过 TTL 后 proposal 返回 `None`，等同过期 drop。
 
+未完成范围（R2-C/D）：
+
+- legacy `_check_*` trigger 迁移到 gating proposer 路径（完成后可删 `_legacy_active_window_blocks`
+  和 `_legacy_dnd_blocks`）
+- defer 队列（真正延迟到活跃窗口结束后发送，而非本 tick 丢弃等下次重试）
+- DND 触发词自动检测接线（`dnd.py` 的 `detect_and_set` 已实现，未接入 `main.py`）
+
 ---
 
-## R2-A 执行面审计（2026-06-10）
+## R2-A 执行面审计（2026-06-10）+ R2-B 完成（2026-06-11）
 
-> R2-A 是审计和决策包，不是 R2 的完成包。本节记录当前双执行面的事实，
-> 不改变任何发言行为。后续施工见"R2-B 最小施工边界"。
+> R2-A 是审计和决策包，不是 R2 的完成包。R2-B 已完成"发言决策前移第一段"；
+> legacy trigger 迁移和旧 ready/mark 删除仍留给 R2-C/D。
 
 ### 当前双执行面总览
 
@@ -184,8 +192,8 @@ blocked log 格式：
 | S3 | **`legacy_tick_should_send()` 让路垫片** | `execution.py` | 当前 `EXECUTE_MODE="live"` → 返回 False，阻止 legacy speaking 触发器双发 |
 | S4 | **Watch 独立 `WATCH_EXECUTE_MODE`** | `triggers/watch.py` | 独立于 `execution.EXECUTE_MODE`；watch 事件驱动触发器（hr_critical/hr_high/sleep_end）在 gating.run_shadow_tick 中被 `WATCH_EVENT_DRIVEN_TRIGGERS` 排除，只走 `on_watch_event()` 路径 |
 | S5 | **sensor_aware `output_mode="return"` 旁路** | `triggers/sensor_aware.py` | 调用 `_pipeline_send(output_mode="return", record_turn=False)` 拿 reply，再自行调用 `record_assistant_turn(fanout=["desktop","mobile"])`；不是完整绕过，仍经过 perceive_event gate 和 conversation_lock |
-| S6 | **policy.py 静态表** | `policy.py` | 未接线；25 条配置，无任何运行时 import；断言函数仅供测试层显式调用 |
-| S7 | **`_pipeline_send` 120s active-window 二次拦截** | `loop.py::_pipeline_send()` | gating 决策权（state machine）与 `_pipeline_send` 硬判断分裂；pending R2-B |
+| S6 | **policy.py 決策表** | `policy.py` | **R2-B 接线完成**；gating._decide() + loop legacy 安全网均以 POLICY_TABLE 为单一权威 |
+| S7 | **`_pipeline_send` active-window / DND 安全网** | `loop.py::_pipeline_send()` | **R2-B done**：inline `_HIGH_PRIORITY_TRIGGERS` 检查已替换为 `_legacy_active_window_blocks()` + `_legacy_dnd_blocks()`（policy 委托）；legacy 路径在 R2-C 迁移完成后可删除 |
 
 ### 触发器分类表
 
@@ -226,17 +234,19 @@ blocked log 格式：
 | hidden_state_decay, hidden_state_consolidate | hidden_state_decay.py |
 | diary_inject | diary.py（维护型：读日记存 diary_context，无 legacy_tick_should_send 检查）|
 
-### 决策位置表
+### 决策位置表（R2-B 后）
 
 | 决策项 | 位置 | 备注 |
 |---|---|---|
 | state（CHATTING/QUIET/RESTLESS）过滤 | `gating._decide()` | 软门 |
 | cooldown 过滤 | `gating._decide()` → `_is_ready()` | 基于 `_COOLDOWNS` + `_last_trigger` |
-| active-window 拦截（120s 硬编码）| `loop._pipeline_send()` | 硬门；与 gating 分裂；**pending R2-B** |
-| 高优先级豁免 | `loop._pipeline_send()` → `_HIGH_PRIORITY_TRIGGERS` | 与 policy.py POLICY_TABLE exempt 集部分重叠但不完全一致 |
-| DND 判断 | 无（`dnd.py` 已实现但未接入）| **未接线**；pending 设计决策 |
-| priority/urgency 排序 | `gating._decide()` → 按 `urgency` 选最高者 | policy.py priority 字段未接入 |
-| defer/drop 语义 | **无实现**（policy.py 有设计但未接线）| pending R2-B |
+| active-window 过滤（proposer 路径）| `gating._decide()` → `_policy_active_window_behavior()` | **R2-B done**；以 POLICY_TABLE 为权威 |
+| active-window 过滤（legacy 路径安全网）| `loop._legacy_active_window_blocks()` | policy 委托；R2-C 迁移完成后删除 |
+| DND 过滤（proposer 路径）| `gating._decide()` → `_policy_is_emergency()` | **R2-B done**；emergency 豁免，其余 blocked |
+| DND 过滤（legacy 路径安全网）| `loop._legacy_dnd_blocks()` | policy 委托；R2-C 迁移完成后删除 |
+| 高优先级豁免（exempt） | `POLICY_TABLE.active_window_behavior == "exempt"` | hr_critical / period_reminder / birthday 系列全部 exempt |
+| priority/urgency 排序 | `gating._decide()` → 按 `urgency` 选最高者 | POLICY_TABLE priority 字段未接入 urgency 排序；R2-C 范畴 |
+| defer 队列 | **未实现**；R2-B 中 defer = 本 tick 跳过，下 tick 重试 | 真正的延迟队列为 R2-C/D 范畴 |
 
 ### 执行与 mark 表
 
@@ -248,32 +258,28 @@ blocked log 格式：
 | sensor_aware | 手动 `record_assistant_turn()` | 不调用 `_mark()`（无 cooldown 名）| sensor_events.mark_proactive_sent() 8min 冷却 | 是（audit ring buffer）|
 | Maintenance tick | 不 send | 立即 mark（不依赖 send 结果）| N/A | 是（log_error 各步独立）|
 
-### policy.py 命运决断：**选项 A — policy.py 是未来 owner**
+### R2-B 完成情况（2026-06-11）
 
-**结论**：policy.py 是预先设计好的 R2-B 接线 schema，不是死代码。
+**完成项**：
+1. ✅ birthday_eve/afternoon/night policy 对齐为 `exempt`（与 `_HIGH_PRIORITY_TRIGGERS` 一致）
+2. ✅ `gating._decide()` 接入 POLICY_TABLE active-window filter（proposer 路径主决策）
+3. ✅ `gating._decide()` 接入 DND filter（emergency 豁免）
+4. ✅ `loop._pipeline_send()` active-window 检查替换为 `_legacy_active_window_blocks()`（policy 委托）
+5. ✅ `loop._pipeline_send()` DND 检查添加 `_legacy_dnd_blocks()`（policy 委托）
+6. ✅ `_HIGH_PRIORITY_TRIGGERS` 与 POLICY_TABLE exempt 集对齐（无 mismatch）
 
-**依据**：
-1. `POLICY_TABLE` 已完整定义 active-window 行为（exempt/defer/drop）、mark 语义和 cross-marks 约束；结构设计合理
-2. 现有 `_HIGH_PRIORITY_TRIGGERS` 豁免逻辑可被 `POLICY_TABLE` 的 `active_window_behavior="exempt"` 完全替代
-3. `defer` 语义（birthday_eve/weather_alert/reminders）是 `_pipeline_send` 目前没有实现的能力，policy 已预留字段
+**遗留项（R2-C/D）**：
+- legacy `_check_*` trigger 迁移（迁移完成后可删 `_legacy_active_window_blocks` / `_legacy_dnd_blocks`）
+- `_is_ready` / `_mark` 旧路径清理
+- 120s active window 长度迁入配置
+- `defer` 队列实现（目前 defer = 本 tick 跳过，等下次 60s tick）
+- POLICY_TABLE `priority` 字段接入 urgency 排序
+- `dnd.detect_and_set` 接入 `main.py` 自动检测
 
-**已知 mismatch（R2-B 修复）**：
-- `birthday_eve/afternoon/night`：policy.py 说 `defer`，`_HIGH_PRIORITY_TRIGGERS` 说 `exempt`（实际行为）
-  - 应统一为 `exempt`（生日系列打断用户是预期行为）或改为真正的 defer 队列
-- `hr_high`：policy.py 说 `defer`，watch 路径直接 execute（受 HEART_RATE_PROPOSAL_TTL_SECONDS 限制）
-- 120s active-window 在 `_pipeline_send` 里不经过 policy 路由
-
-**R2-B 不应做的事**：不要删除 policy.py 或让它继续静默不接线。
-
-### R2-B 最小施工边界
-
-1. **修复 birthday_eve/afternoon/night 的 active_window_behavior 对齐**：改 policy.py 为 `exempt` 或实现真 defer 队列（后者代价大，建议改 exempt）
-2. **把 `_pipeline_send` 的 active-window 检查迁移到 gating/policy**：
-   - `gating._decide()` 查询 `POLICY_TABLE[trigger_name].active_window_behavior`
-   - `exempt` → 不过 active-window；`drop` → active 时拦截（等同当前行为）；`defer` → 入队等待
-   - `_pipeline_send` 移除 `_user_active_recently()` 检查，改为纯执行器
-3. **把 `_HIGH_PRIORITY_TRIGGERS` 合并进 `POLICY_TABLE`**，`_pipeline_send` 不再维护独立白名单
-4. **DND 接线**（可选，R2-C）：`_pipeline_send` 或 gating 查询 `dnd.is_dnd()` 决定是否跳过非 exempt 触发器
+**执行层仍存在的安全网（R2-C 前可接受）**：  
+`_pipeline_send` 中的 `_legacy_active_window_blocks` 和 `_legacy_dnd_blocks` 是 legacy 路径
+的二次安全网，不是"execution 层二次拦截决策权"——它们均委托 POLICY_TABLE，与 gating 决策结果一致，
+不会引起分裂。R2-C 迁移完成后删除。
 
 ---
 
@@ -323,19 +329,24 @@ Pipeline 未注入时降级：直接发送 prompt 原文（不经过 LLM）。
 
 ---
 
-## Active Window 与优先级
+## Active Window 与优先级（R2-B 后）
 
-当前 active window 的真实实现仍在 `loop._pipeline_send()`，窗口长度为硬编码 120 秒。
-`mark_user_active()` 会记录最近 owner 输入时间；目前 QQ owner 消息、桌宠 owner chat 和手机
-owner chat 都会更新该时间戳。
+active window 决策已前移到 `gating._decide()`（proposer 路径）和 `loop._legacy_active_window_blocks()`
+（legacy 路径安全网），均以 `POLICY_TABLE.active_window_behavior` 为单一权威。窗口长度仍为
+硬编码 120 秒（迁入配置为 R2-C 范畴）。
 
-发送边界：
+发送边界（R2-B 后）：
 
-- 高优先级白名单用户活跃时也发送：`birthday_midnight` / `birthday_eve` /
+- **exempt**（用户活跃时也发送）：`birthday_midnight` / `birthday_eve` /
   `birthday_afternoon` / `birthday_night` / `period_reminder` / `hr_critical`。
-- 白名单未扩大；`hr_high`、`sleep_end`、`reminders`、普通日程问候、花园事件等仍会被 active
-  window 拦截。
-- 普通主动消息在 `before_send` / `_pipeline_send` 阶段被拦时，`_pipeline_send()` 返回 `None`。
+  policy.py 中 `active_window_behavior="exempt"`，与 `_HIGH_PRIORITY_TRIGGERS` 对齐。
+- **defer**（用户活跃时跳过本 tick，等下次重试）：`hr_high`、`weather_alert`、
+  `topic_followup`、`reminders`、`diary_reminder`、`diary_share_reminder` 等。
+  真正的 defer 队列为 R2-C 范畴，当前行为等价于"等用户不活跃的下一个 tick"。
+- **drop**（用户活跃时跳过）：`random_message`、`spontaneous_recall`、
+  `festival`、`holiday_boost`、`timenode`、`daily_journal`、花园伴生事件等 filler；
+  `sleep_end`（normal + drop，mark_on_drop=False）。
+- 普通主动消息被拦时，`_pipeline_send()` 返回 `None`。
 - execute live 路径里，`execute_prompt()` 收到 `None` 后只写 `execute_dryrun.jsonl` 的
   `blocked=true` 观测，不调用 `after_send`，不执行 `_mark()`，也不 `mark_done()`。
 - reminders proposal 由 `core/scheduler/triggers/reminders.py` 接管；只有 `_pipeline_send()`

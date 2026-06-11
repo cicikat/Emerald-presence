@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _STATIC_DIR = Path(__file__).parent / "static"
 
 # ── 鉴权：从独立模块导入，避免与 routers 的循环导入 ──────────────────────────
-from admin.auth import verify_token, security, get_admin_secret  # noqa: F401 (re-exported for legacy imports)
+from admin.auth import verify_token, security, get_admin_secret, authenticate_ws  # noqa: F401 (re-exported for legacy imports)
 
 # ── FastAPI 应用 ──────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -71,14 +71,16 @@ app.include_router(debug.router,              prefix="", tags=["Debug"])  # DEV-
 app.include_router(hidden_state_debug.router, prefix="", tags=["Debug"])  # DEV-ONLY
 
 # ── 桌宠端 WebSocket 端点 ─────────────────────────────────────────────────────
-from fastapi import WebSocket as _WebSocket, Query as _Query
+from fastapi import WebSocket as _WebSocket
 from channels.desktop_ws import handle_connection as _ws_desktop_handler
 
 
 @app.websocket("/ws/desktop")
-async def ws_desktop_endpoint(websocket: _WebSocket, token: str = _Query("")):
-    secret = get_admin_secret()
-    if not secret or token != secret:
+async def ws_desktop_endpoint(websocket: _WebSocket):
+    # Token is read from Authorization: Bearer header (primary) or
+    # ?token= query param (deprecated — see SEC-WS-1, docs/security_model.md).
+    # Token value is never forwarded to logs regardless of path.
+    if not authenticate_ws(websocket):
         await websocket.close(code=1008)
         return
     await _ws_desktop_handler(websocket)

@@ -81,10 +81,26 @@ MobileChannel 的活跃状态有 120 秒 TTL：手机端持续轮询时保持活
 
 文件：`channels/desktop_ws.py`
 
-端点由管理面板服务提供：`ws://127.0.0.1:8080/ws/desktop?token=<admin.secret_key>`
+端点：`ws://127.0.0.1:8080/ws/desktop`
 
-路由层在 `admin/admin_server.py` 校验 query token；失败时以 code `1008` 关闭。Emerald-client
-由 Rust `client_config.rs` 在公开 WS URL 上追加 token，前端只消费拼好的 URL。
+### 鉴权方式（R9 / SEC-WS-1，2026-06-11 迁移）
+
+服务端鉴权集中在 `admin/auth.authenticate_ws()`，按优先级依次读取：
+
+| 方式 | Header / Param | 状态 |
+|---|---|---|
+| Authorization header | `Authorization: Bearer <secret>` | **推荐**（新客户端必须使用） |
+| query param | `?token=<secret>` | **已废弃**（仍可用，但会触发 WARNING log） |
+
+- token 值在任何情况下均不出现在日志输出中（header 路径无记录；query 路径仅记录无 token 值的 deprecated warning）。
+- uvicorn access log 的 `QuerySanitizeFilter`（`admin/log_filter.py`）仍就位，覆盖其他 query 参数泄漏风险。
+- 失败（无 token / 错 token / 未配置 secret）时以 code `1008` 关闭连接。
+
+**客户端迁移（Emerald-client）**：`client_config.rs` 须停止在 WS URL 上拼接 `?token=`，改为在
+连接头中发送 `Authorization: Bearer <secret>`。旧 query 方式在服务端保留作过渡，但新客户端不应使用。
+
+> **TODO（删除 query fallback）**：query token fallback 计划在下一个客户端强制升级后移除。
+> 届时删除 `extract_ws_token()` 中的 query 分支，并更新此文档。
 
 行为：
 - 单连接：新桌宠连接会替换旧连接。

@@ -173,7 +173,9 @@ def _assert_trigger_outlet_kind(kind: str) -> None:
         )
 
 
-# 高优先级触发器：用户活跃时也强制发送
+# 高优先级触发器（active_window_behavior="exempt"）— 与 POLICY_TABLE 对齐（R2-B）。
+# Runtime 决策由 _legacy_active_window_blocks() 通过 POLICY_TABLE 完成；
+# 此常量保留用于文档和测试断言，R2-C 迁移完成后可删除。
 _HIGH_PRIORITY_TRIGGERS: frozenset[str] = frozenset({
     "birthday_midnight",
     "birthday_eve",
@@ -182,6 +184,38 @@ _HIGH_PRIORITY_TRIGGERS: frozenset[str] = frozenset({
     "period_reminder",
     "hr_critical",
 })
+
+
+# ── Active-window + DND safety-net helpers (R2-B) ────────────────────────────
+# Gating layer (_decide) is the authoritative decision point for proposer-path triggers.
+# These helpers are the fallback safety net for legacy _check_* triggers not yet migrated.
+# Will be removed in R2-C once all legacy speaking triggers are routed through gating.
+
+def _legacy_active_window_blocks(trigger_name: str) -> bool:
+    """Return True when sending should be blocked: user active and trigger is not exempt.
+    Delegates to POLICY_TABLE as single source of truth.
+    """
+    if not _user_active_recently():
+        return False
+    from core.scheduler.policy import POLICY_TABLE
+    policy = POLICY_TABLE.get(trigger_name)
+    if policy is None:
+        return True  # unknown trigger: block conservatively
+    return policy.active_window_behavior != "exempt"
+
+
+def _legacy_dnd_blocks(trigger_name: str, uid: str) -> bool:
+    """Return True when DND is active and trigger is not emergency priority.
+    Delegates to POLICY_TABLE as single source of truth.
+    """
+    from core.scheduler.triggers.dnd import is_dnd
+    if not is_dnd(uid):
+        return False
+    from core.scheduler.policy import POLICY_TABLE
+    policy = POLICY_TABLE.get(trigger_name)
+    if policy is None:
+        return True  # unknown trigger: block when DND
+    return policy.priority != "emergency"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -277,12 +311,22 @@ async def _pipeline_send(
     """
     # Kind guard: reject disallowed / unknown kinds before any work is done.
     _assert_trigger_outlet_kind(kind)
-    if trigger_name not in _HIGH_PRIORITY_TRIGGERS and _user_active_recently():
-        logger.info(f"[scheduler] 用户活跃中，跳过低优先级触发: {trigger_name}")
+
+    # Active-window safety net for legacy paths (R2-B).
+    # Gating layer is the authoritative check for proposer-path triggers;
+    # this check is the fallback for legacy _check_* triggers not yet migrated.
+    if _legacy_active_window_blocks(trigger_name):
+        logger.info("[scheduler] active-window blocked (policy): trigger=%s", trigger_name)
         return None
+
     oid = _owner_id()
     if not oid:
         logger.warning("[scheduler._pipeline_send] owner_id 未配置，跳过")
+        return None
+
+    # DND safety net for legacy paths (R2-B).
+    if _legacy_dnd_blocks(trigger_name, oid):
+        logger.info("[scheduler] DND blocked: trigger=%s uid=%s", trigger_name, oid)
         return None
     try:
         from core.pipeline_registry import get as _get_pipeline

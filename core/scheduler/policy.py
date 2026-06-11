@@ -1,8 +1,8 @@
 """
-TriggerPolicy — 触发策略静态配置表（纯数据骨架）
+TriggerPolicy — 触发策略静态配置表
 
-此文件不被任何运行时模块 import，只作为后续接入的事实来源。
-不引入 loop / execution / gating 的任何符号。
+R2-B 后此文件被 gating.py 和 loop.py 通过延迟 import 引用，是 active-window 决策的单一权威来源。
+不引入 loop / execution / gating 的任何符号（禁止循环导入）。
 """
 
 from __future__ import annotations
@@ -77,27 +77,21 @@ POLICY_TABLE: dict[str, TriggerPolicy] = {
         active_window_behavior="exempt",
     ),
 
-    # ── 生日系列 defer（当天内有效，过期即丢）──────────────────────────────
+    # ── 生日系列 exempt（生日系列打断用户是预期行为；R2-B 与 _HIGH_PRIORITY_TRIGGERS 对齐）──
     "birthday_eve": TriggerPolicy(
         trigger_id="birthday_eve",
         priority="normal",
-        active_window_behavior="defer",
-        max_defer_age_secs=6 * 3600,
-        on_defer_expire="drop",
+        active_window_behavior="exempt",
     ),
     "birthday_afternoon": TriggerPolicy(
         trigger_id="birthday_afternoon",
         priority="normal",
-        active_window_behavior="defer",
-        max_defer_age_secs=6 * 3600,
-        on_defer_expire="drop",
+        active_window_behavior="exempt",
     ),
     "birthday_night": TriggerPolicy(
         trigger_id="birthday_night",
         priority="normal",
-        active_window_behavior="defer",
-        max_defer_age_secs=6 * 3600,
-        on_defer_expire="drop",
+        active_window_behavior="exempt",
     ),
 
     # ── 其他 defer 条目 ────────────────────────────────────────────────────

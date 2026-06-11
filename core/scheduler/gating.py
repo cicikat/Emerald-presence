@@ -129,8 +129,14 @@ def _collect_native_proposals(ctx: dict) -> list[TriggerProposal]:
 
 
 def _decide(uid: str, proposals: list[TriggerProposal]) -> tuple[Optional[TriggerProposal], str, list[dict]]:
+    # Deferred imports to avoid circular dependency (gating ↔ loop / dnd).
+    from core.scheduler.loop import _user_active_recently
+    from core.scheduler.triggers.dnd import is_dnd
+
     state = get_current_state(uid)
-    candidates = [_serialize_candidate(p, state) for p in proposals]
+    user_active = _user_active_recently()
+    dnd_active = is_dnd(uid)
+    candidates = [_serialize_candidate(p, state, user_active=user_active, dnd_active=dnd_active) for p in proposals]
     if not proposals:
         return None, "no_candidates", candidates
 
@@ -141,6 +147,29 @@ def _decide(uid: str, proposals: list[TriggerProposal]) -> tuple[Optional[Trigge
     if not state_allowed:
         return None, "state_filtered", candidates
 
+    # ── Active-window filter (R2-B) ──────────────────────────────────────────
+    # Consult POLICY_TABLE.active_window_behavior before picking a winner.
+    # exempt  → always allow
+    # defer   → skip this tick when user active (natural re-try on next 60s tick)
+    # drop    → skip this tick when user active
+    # unknown → defer by default (conservative)
+    if user_active:
+        aw_allowed = [
+            p for p in state_allowed
+            if _policy_active_window_behavior(p.trigger_name) == "exempt"
+        ]
+        if not aw_allowed:
+            return None, "active_window_filtered", candidates
+        state_allowed = aw_allowed
+
+    # ── DND filter (R2-B) ────────────────────────────────────────────────────
+    # When the owner has set DND, only emergency-priority triggers pass.
+    if dnd_active:
+        dnd_allowed = [p for p in state_allowed if _policy_is_emergency(p.trigger_name)]
+        if not dnd_allowed:
+            return None, "dnd_filtered", candidates
+        state_allowed = dnd_allowed
+
     cooldown_allowed = [p for p in state_allowed if is_trigger_ready(p.trigger_name)]
     if not cooldown_allowed:
         return None, "cooldown_filtered", candidates
@@ -149,10 +178,33 @@ def _decide(uid: str, proposals: list[TriggerProposal]) -> tuple[Optional[Trigge
     return picked, "picked_highest_urgency", candidates
 
 
-def _serialize_candidate(proposal: TriggerProposal, state: TriggerState | str) -> dict:
+def _policy_active_window_behavior(trigger_name: str) -> str:
+    """Return active_window_behavior from POLICY_TABLE, defaulting to 'defer' for unknowns."""
+    from core.scheduler.policy import POLICY_TABLE
+    policy = POLICY_TABLE.get(trigger_name)
+    return policy.active_window_behavior if policy else "defer"
+
+
+def _policy_is_emergency(trigger_name: str) -> bool:
+    """Return True iff POLICY_TABLE marks trigger as emergency priority."""
+    from core.scheduler.policy import POLICY_TABLE
+    policy = POLICY_TABLE.get(trigger_name)
+    return policy is not None and policy.priority == "emergency"
+
+
+def _serialize_candidate(
+    proposal: TriggerProposal,
+    state: TriggerState | str,
+    *,
+    user_active: bool = False,
+    dnd_active: bool = False,
+) -> dict:
     required = [_state_value(s) for s in proposal.requires_state]
     state_allowed = proposal.bypass_state_machine or _state_value(state) in set(required)
     cooldown_ready = is_trigger_ready(proposal.trigger_name)
+    aw_behavior = _policy_active_window_behavior(proposal.trigger_name)
+    aw_blocked = user_active and aw_behavior != "exempt"
+    dnd_blocked = dnd_active and not _policy_is_emergency(proposal.trigger_name)
     return {
         "trigger_name": proposal.trigger_name,
         "urgency": proposal.urgency,
@@ -161,6 +213,9 @@ def _serialize_candidate(proposal: TriggerProposal, state: TriggerState | str) -
         "bypass_state_machine": proposal.bypass_state_machine,
         "state_allowed": state_allowed,
         "cooldown_ready": cooldown_ready,
+        "aw_behavior": aw_behavior,
+        "aw_blocked": aw_blocked,
+        "dnd_blocked": dnd_blocked,
     }
 
 

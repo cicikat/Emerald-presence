@@ -117,15 +117,22 @@ Phase 2 在 Phase 1.5 持久化基础上增加了三个组件，边界如下：
 可以发起对话、上传内容、激活通道或接收桌面广播。legacy `POST /desktop/trigger` 已确认
 零调用方并删除。
 
-### WebSocket query token 仍是过渡方案
+### WebSocket 鉴权（R9 / SEC-WS-1，2026-06-11 已迁移）
 
-`ws://127.0.0.1:8080/ws/desktop?token=<admin.secret_key>` 已在路由层校验 token，失败时关闭
-code `1008`。但当前仍是单连接替换模型，没有设备 id、origin 校验或配对机制；拿到 token
-的伪造连接仍可抢占桌宠通道，并接收 `channel_message` / `message_segments` / `action`。
+WS 鉴权已从 query token 迁移到 `Authorization: Bearer` header。`admin/auth.authenticate_ws()`
+统一处理鉴权逻辑，`admin/admin_server.py` 的 `ws_desktop_endpoint` 不再声明 `?token=`
+query 参数。
 
-token 放在 query string 里有泄漏风险。`admin/log_filter.py` 已给 `uvicorn.access` 安装
-query redaction，隐藏 `token=` / `secret=` 值；截图、代理日志、浏览器调试信息和其他日志链路
-仍应视为敏感。
+- 主路径：`Authorization: Bearer <secret>` header，token 值不会出现在任何日志。
+- 已废弃：`?token=<secret>` query fallback，仍可用但触发 WARNING log（不含 token 值），
+  计划在 Emerald-client 完成迁移后移除。
+- uvicorn access log 的 `QuerySanitizeFilter` 保留，作为 query 路径残留保护。
+
+**残留风险（过渡期）**：旧客户端仍走 query fallback 期间，token 可能出现在截图或代理日志；
+新客户端完成迁移并移除 query fallback 后此风险消除。
+
+> R9 本轮仅处理 SEC-WS-1（WS query token 迁移）。`/upload/ingest` 等无鉴权端点另列安全项
+> `SEC-AUTH-1`，本轮未处理。
 
 ### sandbox 不是安全沙箱
 

@@ -34,61 +34,36 @@ POLICY_MODULE = "core.scheduler.policy"
 POLICY_FILE = ROOT / "core" / "scheduler" / "policy.py"
 
 
-class TestPolicyNotWiredToRuntime:
-    """policy.py 未接线守卫：任何生产路径不得 import core.scheduler.policy。"""
+class TestPolicyWiredToRuntime:
+    """R2-B done: policy.py is wired to gating.py and loop.py as the authoritative source."""
 
-    def _all_py_files_except_policy_and_tests(self):
-        skip = {
-            POLICY_FILE.resolve(),
-            (ROOT / "tests").resolve(),
-        }
-        for f in ROOT.rglob("*.py"):
-            if any(f.resolve() == s or str(f.resolve()).startswith(str(s)) for s in skip):
-                continue
-            yield f
-
-    def test_no_production_module_imports_policy(self):
-        """确认没有生产代码 import core.scheduler.policy。"""
-        violators = []
-        for pyfile in self._all_py_files_except_policy_and_tests():
-            try:
-                src = pyfile.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
-                continue
-            if "core.scheduler.policy" in src or "scheduler.policy" in src:
-                # 排除注释行和本文件
-                for line in src.splitlines():
-                    stripped = line.strip()
-                    if stripped.startswith("#"):
-                        continue
-                    if "core.scheduler.policy" in stripped or (
-                        "scheduler.policy" in stripped and "from" in stripped
-                    ):
-                        violators.append(f"{pyfile}: {stripped!r}")
-        assert not violators, (
-            "以下文件 import core.scheduler.policy，违反 R2-A 规定（policy.py 未接线）:\n"
-            + "\n".join(violators)
+    def test_policy_wired_to_gating(self):
+        """gating.py contains deferred import of core.scheduler.policy (R2-B wiring)."""
+        gating_src = (ROOT / "core" / "scheduler" / "gating.py").read_text(encoding="utf-8")
+        assert "core.scheduler.policy" in gating_src, (
+            "gating.py no longer imports core.scheduler.policy — "
+            "R2-B wiring may have been removed."
         )
 
-    def test_policy_file_docstring_declares_unimported(self):
-        """policy.py 文件头必须声明未被任何运行时模块 import。"""
-        src = POLICY_FILE.read_text(encoding="utf-8")
-        assert "不被任何运行时模块 import" in src, (
-            "policy.py 文件头声明已丢失；"
-            "请保留 '此文件不被任何运行时模块 import' 文档注释。"
+    def test_policy_wired_to_loop(self):
+        """loop.py contains deferred import of core.scheduler.policy (R2-B wiring)."""
+        loop_src = (ROOT / "core" / "scheduler" / "loop.py").read_text(encoding="utf-8")
+        assert "core.scheduler.policy" in loop_src, (
+            "loop.py no longer imports core.scheduler.policy — "
+            "R2-B wiring may have been removed."
         )
 
     def test_policy_table_entries_count(self):
-        """POLICY_TABLE 当前有 25 条记录（R2-A 快照）。"""
+        """POLICY_TABLE 仍有 25 条记录（R2-B 只改值不增删）。"""
         from core.scheduler.policy import POLICY_TABLE
 
         assert len(POLICY_TABLE) == 25, (
             f"POLICY_TABLE 条目数变化：期望 25，实际 {len(POLICY_TABLE)}。"
-            "R2-A 期间不应增删条目；如需修改，先更新此测试并记录原因。"
+            "如需增删，先更新此测试并记录原因。"
         )
 
     def test_policy_validate_all_passes(self):
-        """POLICY_TABLE 内部 4 条不变式全部成立（断言函数本身是正确的）。"""
+        """POLICY_TABLE 内部 4 条不变式全部成立。"""
         from core.scheduler.policy import _validate_all
 
         _validate_all()  # 不应抛出
@@ -101,82 +76,89 @@ class TestPolicyNotWiredToRuntime:
         assert p.priority == "emergency"
         assert p.active_window_behavior == "exempt"
 
-    def test_policy_birthday_eve_says_defer_not_exempt(self):
-        """
-        [MISMATCH DOC] policy.py 中 birthday_eve 是 defer，
-        但 loop._HIGH_PRIORITY_TRIGGERS 把它列为豁免（实际行为 exempt）。
-        R2-B 必须对齐：要么改 policy，要么改 _HIGH_PRIORITY_TRIGGERS。
-        """
+    def test_policy_birthday_eve_aligned_to_exempt(self):
+        """R2-B done: birthday_eve/afternoon/night are exempt in both policy and loop."""
         from core.scheduler.policy import POLICY_TABLE
-
-        p = POLICY_TABLE["birthday_eve"]
-        # policy 说 defer
-        assert p.active_window_behavior == "defer", (
-            "policy.py 中 birthday_eve 不再是 defer，请更新此测试和 R2-B 计划。"
-        )
-        # reality 说 exempt（在 _HIGH_PRIORITY_TRIGGERS 里）
         from core.scheduler.loop import _HIGH_PRIORITY_TRIGGERS
 
-        assert "birthday_eve" in _HIGH_PRIORITY_TRIGGERS, (
-            "birthday_eve 已从 _HIGH_PRIORITY_TRIGGERS 移除，请同步 policy.py。"
-        )
-        # 这两条同时成立 = 已知 mismatch，R2-B 修复
+        for tid in ("birthday_eve", "birthday_afternoon", "birthday_night"):
+            assert POLICY_TABLE[tid].active_window_behavior == "exempt", (
+                f"{tid} should be exempt in policy after R2-B alignment."
+            )
+            assert tid in _HIGH_PRIORITY_TRIGGERS, (
+                f"{tid} should be in _HIGH_PRIORITY_TRIGGERS after R2-B alignment."
+            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # B. _pipeline_send active-window 二次拦截（PENDING R2-B）
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestActiveWindowSplitDecision:
+class TestActiveWindowDecisionMoved:
     """
-    active-window 拦截当前由 _pipeline_send 独立实现，与 gating 决策权分裂。
-    R2-B 应把它并入 policy.POLICY_TABLE + gating，_pipeline_send 退化为纯执行器。
-    本测试仅记录现状，标记 PENDING_R2B，不改变行为。
+    R2-B done: active-window decision moved to gating._decide() + loop helpers.
+    _pipeline_send delegates to _legacy_active_window_blocks (policy-driven),
+    not the former inline _HIGH_PRIORITY_TRIGGERS check.
     """
 
-    def test_PENDING_R2B_pipeline_send_has_active_window_check(self):
-        """
-        PENDING R2-B：_pipeline_send 仍存在 active-window 二次拦截。
-        当 R2-B 把 active-window 并入 gating/policy 后，移除此检查并更新测试。
-        """
+    def test_pipeline_send_delegates_active_window_to_policy(self):
+        """_pipeline_send calls _legacy_active_window_blocks, not inline _HIGH_PRIORITY_TRIGGERS check."""
         from core.scheduler import loop
 
         src = inspect.getsource(loop._pipeline_send)
-        assert "_user_active_recently" in src, (
-            "_user_active_recently 已从 _pipeline_send 移除——"
-            "请确认 active-window 决策已迁移到 gating/policy，并移除此测试的 PENDING 标记。"
+        assert "_legacy_active_window_blocks" in src, (
+            "_legacy_active_window_blocks not found in _pipeline_send — "
+            "R2-B active-window delegation may have been removed."
+        )
+        # Direct _HIGH_PRIORITY_TRIGGERS inline check must be gone from _pipeline_send.
+        assert "_HIGH_PRIORITY_TRIGGERS" not in src, (
+            "_HIGH_PRIORITY_TRIGGERS still referenced inline in _pipeline_send — "
+            "active-window decision should delegate to _legacy_active_window_blocks."
         )
 
-    def test_PENDING_R2B_active_window_hardcoded_120s(self):
-        """
-        PENDING R2-B：active window 硬编码为 120 秒。
-        R2-B 应把窗口长度迁入 config 或 policy.yaml。
-        """
+    def test_active_window_120s_in_user_active_recently(self):
+        """120s window is still in _user_active_recently (config move deferred to R2-C/D)."""
         from core.scheduler.loop import _user_active_recently
 
         src = inspect.getsource(_user_active_recently)
         assert "120" in src, (
-            "120s 硬编码已被移除——请确认 active-window 长度已迁入配置，并更新此测试。"
+            "120s hardcode removed from _user_active_recently — "
+            "if moved to config, update this test and document the config key."
         )
 
-    def test_high_priority_triggers_in_loop_and_policy_partially_overlap(self):
-        """
-        loop._HIGH_PRIORITY_TRIGGERS 与 policy.POLICY_TABLE 的 exempt 集合不完全一致。
-        loop 豁免：birthday_midnight/eve/afternoon/night + period_reminder + hr_critical（6 个）。
-        policy exempt：hr_critical + period_reminder + birthday_midnight（3 个）。
-        这是 R2-B 需要对齐的 mismatch。
-        """
+    def test_high_priority_triggers_aligned_with_policy_exempt(self):
+        """R2-B done: _HIGH_PRIORITY_TRIGGERS exactly matches policy exempt set (no mismatch)."""
         from core.scheduler.loop import _HIGH_PRIORITY_TRIGGERS
         from core.scheduler.policy import POLICY_TABLE
 
         policy_exempt = {
             tid for tid, p in POLICY_TABLE.items() if p.active_window_behavior == "exempt"
         }
-        # loop 豁免但 policy 不是 exempt 的项（已知 mismatch）
-        loop_only_exempt = _HIGH_PRIORITY_TRIGGERS - policy_exempt
-        assert loop_only_exempt == {"birthday_eve", "birthday_afternoon", "birthday_night"}, (
-            f"loop 豁免 vs policy exempt 的差集发生变化：{loop_only_exempt}。"
-            "R2-B 前请先记录此变化。"
+        assert _HIGH_PRIORITY_TRIGGERS == policy_exempt, (
+            f"_HIGH_PRIORITY_TRIGGERS vs policy exempt mismatch after R2-B.\n"
+            f"loop only: {_HIGH_PRIORITY_TRIGGERS - policy_exempt}\n"
+            f"policy only: {policy_exempt - _HIGH_PRIORITY_TRIGGERS}\n"
+            "Update policy.py or _HIGH_PRIORITY_TRIGGERS to re-align."
+        )
+
+    def test_gating_decide_applies_active_window_filter(self):
+        """gating._decide source contains active_window_filtered reason (R2-B filter wired)."""
+        from core.scheduler import gating
+
+        src = inspect.getsource(gating._decide)
+        assert "active_window_filtered" in src, (
+            "active_window_filtered reason missing from gating._decide — "
+            "R2-B active-window filter may have been removed."
+        )
+
+    def test_gating_decide_applies_dnd_filter(self):
+        """gating._decide source contains dnd_filtered reason (R2-B DND wired)."""
+        from core.scheduler import gating
+
+        src = inspect.getsource(gating._decide)
+        assert "dnd_filtered" in src, (
+            "dnd_filtered reason missing from gating._decide — "
+            "R2-B DND filter may have been removed."
         )
 
 
