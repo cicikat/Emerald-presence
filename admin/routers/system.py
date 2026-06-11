@@ -133,8 +133,8 @@ async def group_distill(body: dict, auth=Depends(verify_token)):
     return {"group_id": group_id, "summary": result}
 
 
-@router.get("/system/data-path", summary="暴露数据根目录路径给桌宠端（无鉴权）")
-async def get_data_path():
+@router.get("/system/data-path", summary="获取数据根目录路径")
+async def get_data_path(auth=Depends(verify_token)):
     cfg = get_config()
     prefix = cfg.get("data_prefix", "data")
     return {"data_prefix": prefix}

@@ -13,6 +13,7 @@ Endpoints protected:
   GET  /dream/settings     (SEC-AUTH-1 fix)
   PATCH /dream/settings    (SEC-AUTH-1 fix)
   POST /agent/think        (SEC-AUTH-1 fix)
+  GET  /system/data-path   (SEC-AUTH-1B fix)
 
 Coverage matrix per endpoint:
   - no token           → 401/403, no side-effects
@@ -37,6 +38,7 @@ from fastapi.testclient import TestClient
 from admin.routers.chat import router as chat_router
 from admin.routers.dream import router as dream_router
 from admin.routers.agent import router as agent_router
+from admin.routers.system import router as system_router
 from admin.auth import verify_token
 
 VALID_TOKEN = "test-secret-sec-auth1"
@@ -48,6 +50,7 @@ _app = FastAPI()
 _app.include_router(chat_router)
 _app.include_router(dream_router)
 _app.include_router(agent_router)
+_app.include_router(system_router)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -439,6 +442,38 @@ class TestAgentThink:
     def test_token_not_in_error_response(self, wrong_token):
         resp = wrong_token.post("/agent/think", json={"messages": []})
         assert WRONG_TOKEN not in resp.text
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# /system/data-path
+# ════════════════════════════════════════════════════════════════════════════════
+
+class TestSystemDataPath:
+    def test_no_token_rejected(self, no_token):
+        resp = no_token.get("/system/data-path")
+        assert resp.status_code in (401, 403)
+
+    def test_wrong_token_rejected(self, wrong_token):
+        resp = wrong_token.get("/system/data-path")
+        assert resp.status_code in (401, 403)
+
+    def test_correct_token_returns_original_response(self, authed, monkeypatch):
+        monkeypatch.setattr(
+            "admin.routers.system.get_config",
+            lambda: {"data_prefix": "data/test_sandbox/sec-auth-1b"},
+        )
+        resp = authed.get("/system/data-path")
+        assert resp.status_code == 200
+        assert resp.json() == {"data_prefix": "data/test_sandbox/sec-auth-1b"}
+
+    def test_token_not_in_error_response_or_logs(self, wrong_token, caplog):
+        with caplog.at_level(logging.DEBUG):
+            resp = wrong_token.get("/system/data-path")
+        assert WRONG_TOKEN not in resp.text
+        for record in caplog.records:
+            assert WRONG_TOKEN not in record.getMessage(), (
+                f"Token leaked in log record: {record.getMessage()!r}"
+            )
 
 
 # ════════════════════════════════════════════════════════════════════════════════

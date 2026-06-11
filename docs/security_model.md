@@ -16,10 +16,12 @@ LLM 不能直接执行系统能力。所有工具都必须在 `core/tool_dispatc
 - 工具开关来自 `config.yaml tools:`，默认启用，危险工具通常配置为关闭
 - 桌面动作先走 WebSocket ack，失败才降级文件队列
 
-### 管理接口 Bearer token（SEC-AUTH-1，2026-06-11 收口）
+### 管理接口 Bearer token（SEC-AUTH-1 / SEC-AUTH-1B，2026-06-11 收口）
 
 `admin/auth.py` 使用简单 Bearer token，密钥来自 `config.admin.secret_key`（或环境变量
-`YEXUAN_ADMIN_SECRET`）。所有管理路由均依赖 `verify_token()`，无例外。
+`YEXUAN_ADMIN_SECRET`）。SEC-AUTH-1B 已完成：`GET /system/data-path` 也依赖
+`verify_token()`。当前 HTTP 管理面全部需要 Bearer token，除非未来另有明确声明并审查的
+public endpoint。
 
 受保护端点（全量）：
 - `/characters/*` / `/scheduler/*` / `/lorebook/*` / `/jailbreak-entries/*`
@@ -31,16 +33,13 @@ LLM 不能直接执行系统能力。所有工具都必须在 `core/tool_dispatc
 - `/agent/think`
 - `/sensor/*` / `/watch/*` / `/garden/*` / `/mood/*` / `/diary/*`
 - `/memory/*` / `/users/*` / `/relations/*`
+- `GET /system/data-path`
 - 所有 LLM/settings 路由
 
 **鉴权失败行为**：`verify_token()` 抛出 HTTP 401/403，FastAPI 在函数体执行前拒绝请求。
 因此鉴权失败时：不触发 LLM、不写磁盘、不创建 runtime state。
 
 **token 安全**：token 值不会出现在任何错误响应或日志记录中。
-
-**例外（设计上无鉴权）**：
-- `GET /system/data-path` — 只读返回 `data_prefix` 配置字符串，供桌宠端自动发现路径；
-  不含私密数据。
 
 **客户端调用方式**：所有受保护端点均需 `Authorization: Bearer <YEXUAN_ADMIN_SECRET>` header。
 
@@ -121,10 +120,10 @@ Phase 2 在 Phase 1.5 持久化基础上增加了三个组件，边界如下：
 
 ## 二、当前明确的缺口
 
-### 无鉴权本地入口（SEC-AUTH-1，2026-06-11 已收口）
+### 无鉴权本地入口（SEC-AUTH-1 / SEC-AUTH-1B，2026-06-11 已收口）
 
-所有高风险写入/动作端点已接入 Bearer token 鉴权（见上方"管理接口 Bearer token"一节）。
-此项已关闭。
+所有 HTTP 管理端点（包括只读的 `GET /system/data-path`）均已接入 Bearer token 鉴权
+（见上方"管理接口 Bearer token"一节）。SEC-AUTH-1B 已完成，此项已关闭。
 
 **客户端影响**：旧版 Emerald-client 若调用以下端点时未带 `Authorization: Bearer <token>`
 header，将收到 401/403 拒绝：
