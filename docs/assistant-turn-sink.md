@@ -433,3 +433,77 @@ _reply_with_tool_result (tool confirm LLM reply):
 | garden 事件冷却名挂着但未节流 | 列入开放问题 #2 等决议 |
 
 codex 报告里维护型任务（diary_inject / episodic_decay / episodic_sweep / dlq_monitor / activity_switch / dnd / sleep_report / activity_remind）**不在本 Phase 1 范围**，因为它们不是 assistant turn。
+
+---
+
+## 十二、R6 final — Reality 输出 Scrub 单出口稳态（2026-06-11）
+
+> **状态：final / stable**。R6 full single-exit convergence 于 R1-C 完成后确立（2026-06-11）。
+
+### REALITY_MEMORY authority 链（当前完整路径）
+
+```
+QQ 消息（普通 LLM 回复）:
+  handle_message
+    └─ conversation_lock(user_id)
+         └─ run_llm → response_processor.process
+              └─ _qq_reality_reply_adapter(frozen_scope)
+                   ├─ strip_render_tags → text_output.send      (REALITY_VISIBLE)
+                   └─ scrub_reality_output_text
+                       → await _pipeline.post_process(frozen_scope)
+                           → capture_turn                        (REALITY_MEMORY authority)
+
+QQ 工具确认回复（tool-result LLM 回复）:
+  _reply_with_tool_result
+    └─ conversation_lock(user_id)
+         └─ run_llm → response_processor.process
+              └─ _qq_reality_reply_adapter(frozen_scope)
+                   ├─ strip_render_tags → text_output.send      (REALITY_VISIBLE)
+                   └─ scrub_reality_output_text
+                       → await _pipeline.post_process(frozen_scope)
+                           → capture_turn                        (REALITY_MEMORY authority)
+
+desktop / mobile / scheduler / sensor / wake:
+  record_assistant_turn (turn_sink)
+    ├─ strip_render_tags → channel fanout                       (REALITY_VISIBLE)
+    └─ scrub_reality_output_text
+        → await _pipeline.post_process
+            → capture_turn                                       (REALITY_MEMORY authority)
+```
+
+### 系统短文本（不写 memory，已确认安全）
+
+| 分类 | 位置 | 是否写 memory |
+|---|---|---|
+| SYSTEM_SHORT_TEXT — Dream guard ×3 | main.py `handle_message` | 否（`_to_dg.send` 直发 + return） |
+| SYSTEM_SHORT_TEXT — 取消确认 | main.py `handle_message` | 否（直发 + return） |
+| TOOL_CONFIRMATION_PROMPT — ask_text ×2 | main.py WAITING_INPUT / probe | 否（直发 + return） |
+
+这些均为硬编码系统短文本，不是 LLM 生成，不需要 scrub，不写 memory。
+
+### QQ adapter 是当前稳定收口点
+
+`_qq_reality_reply_adapter` 是 QQ 侧 LLM_ASSISTANT_REPLY 的唯一出口：
+- `handle_message`（普通回复）和 `_reply_with_tool_result`（工具确认回复）均调用此 adapter；
+- adapter 内部完成 visible strip → QQ send → memory pre-scrub → post_process 全链；
+- 不存在绕过 adapter 的第三条 LLM 回复出口。
+
+### R1-D / turn_sink 全量化（可选后续，不影响 scrub 安全）
+
+当前 QQ 路径直接调 `_pipeline.post_process`，未接入 `record_assistant_turn`。
+这意味着 QQ LLM 回复不经 channel fanout（desktop/mobile 不收到广播）。
+
+**scrub 安全性不依赖 R1-D**：`capture_turn` 是 REALITY_MEMORY authority scrub 点，
+R1-D 完成前后 scrub 行为不变。
+
+R1-D 施工前置条件：对齐 `post_process` 签名（QQ 路径传 `target_id / is_group /
+pending_paths / frozen_scope`；turn_sink 目前不透传这些）。
+
+### 守卫测试
+
+| 测试文件 | 范围 |
+|---|---|
+| `tests/test_r6_reality_scrub_audit.py` | R6-A 审计（25 项） |
+| `tests/test_r6b_reality_scrub_contract.py` | R6-B 契约门禁（17 项） |
+| `tests/test_r1c_qq_reality_reply_adapter.py` | R1-C adapter 合约（29 项） |
+| `tests/test_r6c_reality_scrub_final.py` | R6-final 稳态确认 |

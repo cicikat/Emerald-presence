@@ -57,11 +57,15 @@ LLM 回复出口已由 `_qq_reality_reply_adapter` 统一，但尚未接入 `rec
 2. 把 `_qq_reality_reply_adapter` 改调 `record_assistant_turn(source=USER_CHAT, ...)`；
 3. QQ LLM 回复进入 channel fanout，desktop/mobile 广播到位。
 
-R6 final（单出口稳态）可在 R1-D 完成后开始。
+**R6 final（单出口稳态）已完成（2026-06-11）**：两条 QQ LLM 回复出口均经过
+`_qq_reality_reply_adapter` → `scrub_reality_output_text` → `post_process` → `capture_turn` 链路。
+单出口稳态确立。剩余 R1-D 项目（turn_sink 全量化、channel fanout）为后续架构统一可选项，
+不影响 scrub 安全性。守卫测试：`tests/test_r6c_reality_scrub_final.py`。
 
 守卫测试：
 - `tests/test_r1b_qq_convergence_audit.py`（A10 已翻转，13 项 pass，2026-06-11）
 - `tests/test_r1c_qq_reality_reply_adapter.py`（29 项，2026-06-11）
+- `tests/test_r6c_reality_scrub_final.py`（R6-final，2026-06-11）
 
 ---
 
@@ -391,6 +395,7 @@ R8-D 实测：当前 DLQ 目录无任何 legacy task 文件（`mid_term_append` 
 - Dream 输出协议设计：本轮跳过，等待并行改动稳定后再核。
 - R6-A（reality 输出 scrub 审计）：已完成，4 个调用点全部核对，无高风险遗漏（2026-06-10）。
 - R6-B（scrub 契约固化）：已完成（2026-06-10）。capture_turn 权威注释、3 处预清洗注释、tests/test_r6b_reality_scrub_contract.py（C1–C10，17 门禁）、docs/assistant-turn-sink.md §十、docs/memory.md R6 callout 均已写入。无新现实记忆出口遗漏。
+- R6-final（单出口稳态确认）：已完成（2026-06-11）。QQ adapter 作为稳定收口点，全部 LLM_ASSISTANT_REPLY 均经 scrub 链。剩余问题（R1-D channel fanout 等）为架构统一债，不影响 scrub 安全。守卫：`tests/test_r6c_reality_scrub_final.py`。
 - `mes_example` 精简、时间联动注入属于 prompt 体感策略，不作为当前小修。
 
 ---
