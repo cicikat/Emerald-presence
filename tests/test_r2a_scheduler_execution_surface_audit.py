@@ -46,11 +46,17 @@ class TestPolicyWiredToRuntime:
         )
 
     def test_policy_wired_to_loop(self):
-        """loop.py contains deferred import of core.scheduler.policy (R2-B wiring)."""
+        """R2-C: loop.py delegates to gating (which owns policy); no direct policy import."""
         loop_src = (ROOT / "core" / "scheduler" / "loop.py").read_text(encoding="utf-8")
-        assert "core.scheduler.policy" in loop_src, (
-            "loop.py no longer imports core.scheduler.policy — "
-            "R2-B wiring may have been removed."
+        # R2-C: direct policy import removed from loop.py; policy access is via gating only.
+        assert "core.scheduler.policy" not in loop_src, (
+            "loop.py imports core.scheduler.policy directly — "
+            "R2-C requires policy access to go through gating._decide() only."
+        )
+        # loop.py must still import gating to call run_shadow_tick.
+        assert "core.scheduler.gating" in loop_src, (
+            "loop.py no longer imports core.scheduler.gating — "
+            "active-window/DND decisions must be delegated to gating."
         )
 
     def test_policy_table_entries_count(self):
@@ -91,29 +97,32 @@ class TestPolicyWiredToRuntime:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# B. _pipeline_send active-window 二次拦截（PENDING R2-B）
+# B. _pipeline_send active-window 决策（R2-C: 完全移入 gating._decide()）
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestActiveWindowDecisionMoved:
     """
-    R2-B done: active-window decision moved to gating._decide() + loop helpers.
-    _pipeline_send delegates to _legacy_active_window_blocks (policy-driven),
-    not the former inline _HIGH_PRIORITY_TRIGGERS check.
+    R2-C done: _legacy_active_window_blocks/_legacy_dnd_blocks deleted from loop.py.
+    _pipeline_send is execution-only; active-window/DND decisions are in gating._decide().
     """
 
     def test_pipeline_send_delegates_active_window_to_policy(self):
-        """_pipeline_send calls _legacy_active_window_blocks, not inline _HIGH_PRIORITY_TRIGGERS check."""
+        """R2-C: _pipeline_send must NOT contain _legacy_active_window_blocks (deleted)."""
         from core.scheduler import loop
 
         src = inspect.getsource(loop._pipeline_send)
-        assert "_legacy_active_window_blocks" in src, (
-            "_legacy_active_window_blocks not found in _pipeline_send — "
-            "R2-B active-window delegation may have been removed."
+        # R2-C: legacy helpers deleted; gating._decide is the sole authority.
+        assert "_legacy_active_window_blocks" not in src, (
+            "_legacy_active_window_blocks found in _pipeline_send — "
+            "R2-C requires this helper to be removed; gating._decide is the authority."
         )
-        # Direct _HIGH_PRIORITY_TRIGGERS inline check must be gone from _pipeline_send.
+        assert "_legacy_dnd_blocks" not in src, (
+            "_legacy_dnd_blocks found in _pipeline_send — "
+            "R2-C requires this helper to be removed."
+        )
+        # _HIGH_PRIORITY_TRIGGERS must not be inlined in _pipeline_send.
         assert "_HIGH_PRIORITY_TRIGGERS" not in src, (
-            "_HIGH_PRIORITY_TRIGGERS still referenced inline in _pipeline_send — "
-            "active-window decision should delegate to _legacy_active_window_blocks."
+            "_HIGH_PRIORITY_TRIGGERS still referenced inline in _pipeline_send."
         )
 
     def test_active_window_120s_in_user_active_recently(self):

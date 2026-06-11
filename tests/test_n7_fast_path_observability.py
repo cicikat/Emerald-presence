@@ -49,7 +49,7 @@ class TestFastPathMatchReturn:
 
     def test_preview_within_80_chars(self):
         """即使原始文本超长，preview 切片后不超过 80 字。"""
-        long_text = "今天天气怎么样" + "甲" * 300   # 307 字，含天气关键词
+        long_text = "现在几点了" + "甲" * 300   # 含 get_time 关键词（N7-B: 只有 allowlist 工具能命中）
         result = _fast_path_match(long_text)
         assert result is not None
         # 验证 main.py 里 trusted_user_text[:80] 的切片逻辑
@@ -139,18 +139,13 @@ class TestReadOnlyToolsAreLowRisk:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestFastPathBehaviorUnchanged:
-    """N7 不应改变快速路径的匹配行为。"""
+    """N7-B: 只有 FAST_PATH_TOOL_ALLOWLIST 内的工具走快速路径。"""
 
     @pytest.mark.parametrize("trigger_text,expected_tool", [
         ("现在几点了", "get_time"),
-        ("今天天气怎么样", "weather"),
-        ("快去浇花", "water_garden"),
-        ("播放稻香", "play_song"),
-        ("帮我提醒我8点吃药", "add_reminder"),
-        ("帮我搜一下最新消息", "web_search"),
-        ("最小化微信窗口", "desktop_minimize"),
     ])
-    def test_keyword_still_matches_expected_tool(self, trigger_text, expected_tool):
+    def test_allowlist_tool_still_matches(self, trigger_text, expected_tool):
+        """allowlist 内的工具仍能被 fast path 命中。"""
         result = _fast_path_match(trigger_text)
         assert result is not None, (
             f"文本 {trigger_text!r} 应命中工具 {expected_tool}，但未命中"
@@ -159,6 +154,23 @@ class TestFastPathBehaviorUnchanged:
         assert matched_tool == expected_tool, (
             f"期望命中 {expected_tool}，实际命中 {matched_tool!r}（关键词: {matched_kw!r}）"
         )
+
+    def test_non_allowlist_tools_no_longer_fast_path(self):
+        """N7-B: weather/water_garden/play_song/add_reminder/web_search/desktop_* 不再走快速路径。"""
+        from main import FAST_PATH_TOOL_ALLOWLIST
+        cases = [
+            ("今天天气怎么样", "weather"),
+            ("快去浇花", "water_garden"),
+            ("播放稻香", "play_song"),
+            ("帮我提醒我8点吃药", "add_reminder"),
+            ("帮我搜一下最新消息", "web_search"),
+            ("最小化微信窗口", "desktop_minimize"),
+        ]
+        for text, tool in cases:
+            result = _fast_path_match(text)
+            assert result is None or result[0] in FAST_PATH_TOOL_ALLOWLIST, (
+                f"N7-B: 文本 {text!r} 不应 fast path 命中非 allowlist 工具 {tool!r}"
+            )
 
     def test_only_info_and_desktop_categories_matched(self):
         """memory / system 类工具不应被快速路径命中。"""

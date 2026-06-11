@@ -40,16 +40,23 @@ def get_pipeline():
     return _registry.get("pipeline")
 
 
+# N7-B: 只有零参数、零副作用、低误触风险的工具才允许走快速路径。
+# 排除在此 allowlist 之外 ≠ 禁用工具；排除的工具继续由 LLM probe 识别。
+FAST_PATH_TOOL_ALLOWLIST: frozenset[str] = frozenset({
+    "get_time",  # 零参数，零副作用，关键词（"几点"/"时间"/"几号"/"星期"）低误触
+})
+
+
 def _fast_path_match(user_msg: str) -> tuple[str, str] | None:
     """快速路径关键词匹配（N7 可观测版）。
 
     返回 (tool_name, matched_keyword)，未命中返回 None。
-    只扫描 info / desktop 分类工具，行为与原内联版本完全一致。
-    提升为模块级以便单元测试直接引用。
+    N7-B: 只扫描 FAST_PATH_TOOL_ALLOWLIST 内的工具，避免副作用工具或高误触风险
+    工具绕过 LLM probe 直接进入工具流程。排除 ≠ 禁用。
     """
     from core import tool_dispatcher as _td
     for name, spec in _td._TOOL_REGISTRY.items():
-        if spec.get("category") not in ("info", "desktop"):
+        if name not in FAST_PATH_TOOL_ALLOWLIST:
             continue
         for kw in spec.get("keywords", []):
             if kw in user_msg:

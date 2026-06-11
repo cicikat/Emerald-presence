@@ -336,40 +336,41 @@ class TestMaintenanceTriggerIsolation:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# E. _pipeline_send legacy safety net (policy delegation, no inline check)
+# E. _pipeline_send: R2-C — safety-net helpers removed, gating is sole authority
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestPipelineSendPolicyDelegation:
-    """_pipeline_send active-window check delegates to _legacy_active_window_blocks (policy-driven)."""
+class TestPipelineSendR2C:
+    """R2-C: _pipeline_send no longer re-gates triggers; gating._decide is the sole authority."""
 
-    def test_pipeline_send_has_legacy_active_window_blocks_call(self):
-        """_pipeline_send calls _legacy_active_window_blocks for active-window check."""
+    def test_pipeline_send_has_no_legacy_active_window_blocks_call(self):
+        """R2-C: _pipeline_send must NOT call _legacy_active_window_blocks (deleted)."""
         import core.scheduler.loop as loop
         src = inspect.getsource(loop._pipeline_send)
-        assert "_legacy_active_window_blocks" in src
+        assert "_legacy_active_window_blocks" not in src
 
-    def test_pipeline_send_has_legacy_dnd_blocks_call(self):
-        """_pipeline_send calls _legacy_dnd_blocks for DND check."""
+    def test_pipeline_send_has_no_legacy_dnd_blocks_call(self):
+        """R2-C: _pipeline_send must NOT call _legacy_dnd_blocks (deleted)."""
         import core.scheduler.loop as loop
         src = inspect.getsource(loop._pipeline_send)
-        assert "_legacy_dnd_blocks" in src
+        assert "_legacy_dnd_blocks" not in src
 
-    def test_legacy_active_window_blocks_uses_policy_table(self):
-        """_legacy_active_window_blocks delegates to POLICY_TABLE, not _HIGH_PRIORITY_TRIGGERS."""
+    def test_legacy_active_window_blocks_does_not_exist(self):
+        """R2-C: _legacy_active_window_blocks has been removed from loop module."""
         import core.scheduler.loop as loop
-        src = inspect.getsource(loop._legacy_active_window_blocks)
-        assert "POLICY_TABLE" in src
-        assert "_HIGH_PRIORITY_TRIGGERS" not in src
+        assert not hasattr(loop, "_legacy_active_window_blocks"), (
+            "_legacy_active_window_blocks still exists in loop — R2-C requires removal"
+        )
 
-    def test_legacy_dnd_blocks_uses_policy_table(self):
-        """_legacy_dnd_blocks delegates to POLICY_TABLE."""
+    def test_legacy_dnd_blocks_does_not_exist(self):
+        """R2-C: _legacy_dnd_blocks has been removed from loop module."""
         import core.scheduler.loop as loop
-        src = inspect.getsource(loop._legacy_dnd_blocks)
-        assert "POLICY_TABLE" in src
+        assert not hasattr(loop, "_legacy_dnd_blocks"), (
+            "_legacy_dnd_blocks still exists in loop — R2-C requires removal"
+        )
 
     @pytest.mark.asyncio
     async def test_exempt_trigger_sends_when_user_active(self, monkeypatch):
-        """hr_critical (exempt) sends even when user is active — legacy safety net agrees."""
+        """hr_critical (exempt) sends via gating path even when user is active."""
         import core.scheduler.loop as loop
 
         recorded = []
@@ -389,28 +390,40 @@ class TestPipelineSendPolicyDelegation:
         assert recorded and recorded[0]["trigger_name"] == "hr_critical"
 
     @pytest.mark.asyncio
-    async def test_filler_trigger_blocked_when_user_active(self, monkeypatch):
-        """random_message (filler/drop) is blocked by legacy safety net when user active."""
+    async def test_pipeline_send_does_not_block_filler_directly(self, monkeypatch):
+        """R2-C: _pipeline_send no longer blocks filler triggers — that is gating's job."""
         import core.scheduler.loop as loop
 
+        recorded = []
+
+        async def fake_record_assistant_turn(**kwargs):
+            recorded.append(kwargs)
+            return SimpleNamespace(fanout_failures={})
+
+        monkeypatch.setattr("core.pipeline_registry.get", lambda: _FakePipeline())
         monkeypatch.setattr(loop, "_owner_id", lambda: "u1")
         monkeypatch.setattr(loop, "_last_user_message_time", time.time())  # user active
+        monkeypatch.setattr("core.scheduler.triggers.birthday._is_birthday_period", lambda: False)
+        monkeypatch.setattr("core.turn_sink.record_assistant_turn", fake_record_assistant_turn)
 
+        # random_message (filler/drop) is no longer blocked by _pipeline_send;
+        # gating already filtered it before execute() was called.
         result = await loop._pipeline_send("prompt", trigger_name="random_message")
-        assert result is None
+        assert result == "reply"
 
     @pytest.mark.asyncio
-    async def test_blocked_trigger_not_marked_in_execute_prompt(self, monkeypatch):
-        """When _pipeline_send returns None (active-window blocked), _mark is not called."""
-        from core.scheduler import execution, loop
+    async def test_execute_prompt_does_not_mark_when_pipeline_returns_none(self, monkeypatch):
+        """execute_prompt does not call _mark when _pipeline_send returns None."""
+        from core.scheduler import execution
+        import core.scheduler.loop as _loop
 
         marks = []
 
-        async def active_window_blocked(prompt, search_query="", trigger_name="", **kwargs):
-            return None  # simulate active-window block
+        async def blocked_pipeline(prompt, **kwargs):
+            return None
 
-        monkeypatch.setattr(loop, "_pipeline_send", active_window_blocked)
-        monkeypatch.setattr(loop, "_mark", lambda name: marks.append(name))
+        monkeypatch.setattr(_loop, "_pipeline_send", blocked_pipeline)
+        monkeypatch.setattr(_loop, "_mark", lambda name: marks.append(name))
 
         result = await execution.execute_prompt(
             trigger_name="random_message",
@@ -423,21 +436,8 @@ class TestPipelineSendPolicyDelegation:
         assert marks == []
 
     @pytest.mark.asyncio
-    async def test_dnd_blocks_normal_via_pipeline_send(self, monkeypatch):
-        """_pipeline_send DND safety net blocks normal trigger when DND is active."""
-        import core.scheduler.loop as loop
-        import core.scheduler.triggers.dnd as _dnd
-
-        monkeypatch.setattr(loop, "_owner_id", lambda: "u1")
-        monkeypatch.setattr(loop, "_last_user_message_time", 0.0)  # user NOT active
-        monkeypatch.setattr(_dnd, "is_dnd", lambda uid: True)       # DND on
-
-        result = await loop._pipeline_send("prompt", trigger_name="morning_greeting")
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_dnd_allows_emergency_via_pipeline_send(self, monkeypatch):
-        """_pipeline_send DND safety net allows hr_critical (emergency) even when DND active."""
+    async def test_pipeline_send_passes_through_with_dnd_on(self, monkeypatch):
+        """R2-C: _pipeline_send does not check DND — gating handles it before execute()."""
         import core.scheduler.loop as loop
         import core.scheduler.triggers.dnd as _dnd
 
@@ -449,60 +449,14 @@ class TestPipelineSendPolicyDelegation:
 
         monkeypatch.setattr("core.pipeline_registry.get", lambda: _FakePipeline())
         monkeypatch.setattr(loop, "_owner_id", lambda: "u1")
-        monkeypatch.setattr(loop, "_last_user_message_time", 0.0)   # user NOT active
-        monkeypatch.setattr(_dnd, "is_dnd", lambda uid: True)        # DND on
+        monkeypatch.setattr(loop, "_last_user_message_time", 0.0)
+        monkeypatch.setattr(_dnd, "is_dnd", lambda uid: True)
         monkeypatch.setattr("core.scheduler.triggers.birthday._is_birthday_period", lambda: False)
         monkeypatch.setattr("core.turn_sink.record_assistant_turn", fake_record_assistant_turn)
 
-        result = await loop._pipeline_send("prompt", trigger_name="hr_critical")
+        # _pipeline_send itself no longer checks DND; gating already did.
+        result = await loop._pipeline_send("prompt", trigger_name="morning_greeting")
         assert result == "reply"
-
-    def test_legacy_active_window_blocks_returns_false_when_user_inactive(self, monkeypatch):
-        """_legacy_active_window_blocks returns False when user is not active."""
-        import core.scheduler.loop as loop
-
-        monkeypatch.setattr(loop, "_last_user_message_time", 0.0)
-        assert loop._legacy_active_window_blocks("random_message") is False
-
-    def test_legacy_active_window_blocks_unknown_trigger(self, monkeypatch):
-        """Unknown trigger defaults to blocked (conservative) when user active."""
-        import core.scheduler.loop as loop
-
-        monkeypatch.setattr(loop, "_last_user_message_time", time.time())
-        assert loop._legacy_active_window_blocks("__unknown_trigger__") is True
-
-    def test_legacy_active_window_blocks_exempt_returns_false(self, monkeypatch):
-        """Exempt trigger (_HIGH_PRIORITY_TRIGGERS) not blocked even when user active."""
-        import core.scheduler.loop as loop
-
-        monkeypatch.setattr(loop, "_last_user_message_time", time.time())
-        assert loop._legacy_active_window_blocks("hr_critical") is False
-        assert loop._legacy_active_window_blocks("period_reminder") is False
-        assert loop._legacy_active_window_blocks("birthday_midnight") is False
-
-    def test_legacy_dnd_blocks_returns_false_when_no_dnd(self, monkeypatch):
-        """_legacy_dnd_blocks returns False when DND is not active."""
-        import core.scheduler.triggers.dnd as _dnd
-        import core.scheduler.loop as loop
-
-        monkeypatch.setattr(_dnd, "is_dnd", lambda uid: False)
-        assert loop._legacy_dnd_blocks("morning_greeting", "u1") is False
-
-    def test_legacy_dnd_blocks_emergency_passes(self, monkeypatch):
-        """_legacy_dnd_blocks returns False for emergency trigger even with DND."""
-        import core.scheduler.triggers.dnd as _dnd
-        import core.scheduler.loop as loop
-
-        monkeypatch.setattr(_dnd, "is_dnd", lambda uid: True)
-        assert loop._legacy_dnd_blocks("hr_critical", "u1") is False
-
-    def test_legacy_dnd_blocks_normal_trigger(self, monkeypatch):
-        """_legacy_dnd_blocks returns True for normal trigger when DND active."""
-        import core.scheduler.triggers.dnd as _dnd
-        import core.scheduler.loop as loop
-
-        monkeypatch.setattr(_dnd, "is_dnd", lambda uid: True)
-        assert loop._legacy_dnd_blocks("morning_greeting", "u1") is True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
