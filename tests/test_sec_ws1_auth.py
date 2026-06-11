@@ -1,28 +1,27 @@
 """
-tests/test_sec_ws1_auth.py — R9 / SEC-WS-1: WebSocket auth migration contract
+tests/test_sec_ws1_auth.py — R9 / SEC-WS-1: final WebSocket auth contract
 
 Coverage:
-  U1: extract_ws_token parses Authorization: Bearer header → (token, False)
-  U2: extract_ws_token parses ?token= query fallback → (token, True)
-  U3: extract_ws_token returns (None, False) when both header and query absent
-  U4: extract_ws_token header takes priority over query when both present
+  U1: extract_ws_token parses Authorization: Bearer header
+  U2: extract_ws_token ignores ?token= query parameters
+  U3: extract_ws_token returns None when header is absent
+  U4: extract_ws_token ignores query when a valid header is present
   U5: extract_ws_token is header-case-insensitive
 
   A1: header Bearer token correct → WS accepted
   A2: header Bearer token wrong → WS rejected (code 1008)
   A3: no token at all → WS rejected (code 1008)
   A4: empty-string token → WS rejected (code 1008)
-  A5: query token fallback correct → WS accepted (deprecated path)
-  A6: query token fallback wrong → WS rejected (code 1008)
+  A5: correct query token → WS rejected (code 1008)
+  A6: wrong query token → WS rejected (code 1008)
 
   C1: empty admin secret → authenticate_ws returns False regardless of token
   C2: token is not logged (header path) — no token value in log records
-  C3: deprecated query path emits warning without token value
+  C3: rejected query token is absent from logs and close error
   C4: rejection log does not contain token value
 
-  D1: deprecated query path calls authenticate_ws with is_deprecated=True
-      and the warning text references SEC-WS-1 migration guidance
-  D2: ws_desktop_endpoint no longer declares ?token= as an OpenAPI query param
+  D1: query-token rejection emits no deprecated fallback warning
+  D2: ws_desktop_endpoint does not declare ?token= as an OpenAPI query param
       (schema does not document it)
 """
 
@@ -88,41 +87,31 @@ def _assert_rejected(client, url, **kwargs):
 
 def test_U1_bearer_header_parsed():
     ws = _mock_ws({"authorization": f"Bearer {VALID}"})
-    token, deprecated = extract_ws_token(ws)
-    assert token == VALID
-    assert deprecated is False
+    assert extract_ws_token(ws) == VALID
 
 
-def test_U2_query_fallback_parsed():
+def test_U2_query_token_ignored():
     ws = _mock_ws(query_string=f"token={VALID}")
-    token, deprecated = extract_ws_token(ws)
-    assert token == VALID
-    assert deprecated is True
+    assert extract_ws_token(ws) is None
 
 
 def test_U3_no_token_returns_none():
     ws = _mock_ws()
-    token, deprecated = extract_ws_token(ws)
-    assert token is None
-    assert deprecated is False
+    assert extract_ws_token(ws) is None
 
 
-def test_U4_header_priority_over_query():
+def test_U4_header_accepted_when_query_also_present():
     other = "other-token"
     ws = _mock_ws(
         headers={"authorization": f"Bearer {VALID}"},
         query_string=f"token={other}",
     )
-    token, deprecated = extract_ws_token(ws)
-    assert token == VALID
-    assert deprecated is False
+    assert extract_ws_token(ws) == VALID
 
 
 def test_U5_bearer_prefix_case_insensitive():
     ws = _mock_ws({"authorization": f"BEARER {VALID}"})
-    token, deprecated = extract_ws_token(ws)
-    assert token == VALID
-    assert deprecated is False
+    assert extract_ws_token(ws) == VALID
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -158,14 +147,11 @@ def test_A4_empty_bearer_rejected(client):
     )
 
 
-def test_A5_query_fallback_accepted(client):
-    """Deprecated ?token= path still works (backwards compat)."""
-    with client.websocket_connect(f"/ws/desktop?token={VALID}") as ws:
-        data = ws.receive_text()
-    assert data == "connected"
+def test_A5_query_token_rejected(client):
+    _assert_rejected(client, f"/ws/desktop?token={VALID}")
 
 
-def test_A6_query_fallback_wrong_rejected(client):
+def test_A6_query_wrong_token_rejected(client):
     _assert_rejected(client, "/ws/desktop?token=bad-token")
 
 
@@ -194,15 +180,15 @@ def test_C2_header_token_not_logged(caplog):
         assert VALID not in record.getMessage()
 
 
-def test_C3_deprecated_query_emits_warning_without_token(caplog):
-    """Deprecated query path warns and does NOT log the token value."""
-    ws = _mock_ws(query_string=f"token={VALID}")
-    with caplog.at_level(logging.WARNING, logger="admin.auth"):
-        authenticate_ws(ws)
-    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-    assert warnings, "expected at least one warning on deprecated path"
-    for r in warnings:
-        assert VALID not in r.getMessage()
+def test_C3_query_token_not_in_logs_or_close_error(client, caplog):
+    query_secret = "query-secret-must-not-leak"
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(f"/ws/desktop?token={query_secret}") as ws:
+                ws.receive_text()
+    assert query_secret not in str(exc_info.value)
+    for record in caplog.records:
+        assert query_secret not in record.getMessage()
 
 
 def test_C4_rejection_log_no_token(caplog):
@@ -217,18 +203,15 @@ def test_C4_rejection_log_no_token(caplog):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Deprecation contract
+# Finalization contract
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def test_D1_deprecated_path_warning_mentions_sec_ws1(caplog):
-    """Warning on deprecated query path must reference migration guidance."""
+def test_D1_query_rejection_emits_no_deprecated_warning(caplog):
     ws = _mock_ws(query_string=f"token={VALID}")
     with caplog.at_level(logging.WARNING, logger="admin.auth"):
-        authenticate_ws(ws)
+        assert authenticate_ws(ws) is False
     msgs = " ".join(r.getMessage() for r in caplog.records)
-    assert "SEC-WS-1" in msgs or "Authorization" in msgs, (
-        "deprecated warning must mention SEC-WS-1 or Authorization header"
-    )
+    assert "query token fallback used" not in msgs
 
 
 def test_D2_ws_endpoint_no_query_param_in_openapi():
@@ -242,5 +225,5 @@ def test_D2_ws_endpoint_no_query_param_in_openapi():
         params = method_data.get("parameters", [])
         token_params = [p for p in params if p.get("name") == "token"]
         assert not token_params, (
-            "/ws/desktop OpenAPI schema must not document the deprecated ?token= parameter"
+            "/ws/desktop OpenAPI schema must not document a ?token= parameter"
         )

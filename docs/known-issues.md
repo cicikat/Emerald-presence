@@ -255,24 +255,18 @@ TXT 导入分支调用 `Path(file.filename).stem`，但文件没有导入 `pathl
 
 ### SEC-WS-1：WebSocket query token 迁移
 
-**状态**：`partially-fixed`（R9，2026-06-11）
+**状态**：`fixed`（R9 final，2026-06-11）
 
 **位置**：`admin/admin_server.py`、`admin/auth.py`、`admin/log_filter.py`
 
-**R9 已完成**：
-- `admin/auth.authenticate_ws()` + `extract_ws_token()` 统一 WS 鉴权，支持 `Authorization: Bearer` header（主路径）和 `?token=` query（废弃 fallback）。
+**R9 final 已完成**：
+- `admin/auth.authenticate_ws()` + `extract_ws_token()` 统一 WS 鉴权，只接受 `Authorization: Bearer` header。
+- `?token=` query fallback 已删除；即使 token 正确也拒绝连接。
 - `ws_desktop_endpoint` 不再声明 `?token=` query param，不再把 token 暴露给 FastAPI OpenAPI。
-- token 值不出现在任何日志路径（header 路径无记录；query 路径仅记录无 token 值的 deprecated warning）。
-- 20 项守卫测试：`tests/test_sec_ws1_auth.py`。
-
-**残留风险（过渡期）**：`?token=` query fallback 仍启用，供 Emerald-client 过渡。旧客户端
-走 query 路径期间，token 仍可能出现在截图或代理日志。`QuerySanitizeFilter` 保留作 uvicorn
-access log 保护。
-
-**下一步**：
-1. Emerald-client `client_config.rs` 迁移到 `Authorization: Bearer` header。
-2. 迁移确认后删除 `extract_ws_token()` 中的 query 分支，并移除 `QuerySanitizeFilter` 的 token 规则（或整个 filter 若无其他需求）。
-3. 更新 `docs/channels.md` TODO 标注。
+- token 值不出现在任何日志路径或错误响应；deprecated fallback warning 已移除。
+- Emerald-client 已通过 Tauri Rust native bridge 完成 header 迁移。
+- `QuerySanitizeFilter` 保留，覆盖被拒绝请求及其他敏感 query 参数的 access log 泄漏风险。
+- 守卫测试：`tests/test_sec_ws1_auth.py`。
 
 ---
 
@@ -415,6 +409,6 @@ R8-D 实测：当前 DLQ 目录无任何 legacy task 文件（`mid_term_append` 
 | HANDOFF Step 3 shadow 卡点 | 已过时。原生 proposer 与 `EXECUTE_MODE="live"` winner 已落地。 |
 | D9 Watch 即时路径与 execute live 边界 | 已核对。Watch 由独立 `WATCH_EXECUTE_MODE="live"` 执行 proposal；rollback 分支保留。 |
 | short_term 加权裁剪未开 | 已修复。`load_for_prompt()` 使用近场保留和远场加权择优。 |
-| SEC-LOG-001 uvicorn access log 直接泄露 token | 已缓解。access log sanitizer 已安装；残余 query 风险转为 SEC-WS-1。 |
+| SEC-LOG-001 uvicorn access log 直接泄露 token | 已关闭。access log sanitizer 已安装；SEC-WS-1 final 已拒绝 WS query token。 |
 
 历史已修复项继续以 git 历史和相关测试为准，不再在本文重复堆叠。

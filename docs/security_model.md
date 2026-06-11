@@ -136,19 +136,18 @@ header，将收到 401/403 拒绝：
 
 这是预期的 fail-closed 安全变化。所有调用方需补充 `Authorization: Bearer <token>` header。
 
-### WebSocket 鉴权（R9 / SEC-WS-1，2026-06-11 已迁移）
+### WebSocket 鉴权（R9 / SEC-WS-1 final，2026-06-11）
 
 WS 鉴权已从 query token 迁移到 `Authorization: Bearer` header。`admin/auth.authenticate_ws()`
 统一处理鉴权逻辑，`admin/admin_server.py` 的 `ws_desktop_endpoint` 不再声明 `?token=`
 query 参数。
 
-- 主路径：`Authorization: Bearer <secret>` header，token 值不会出现在任何日志。
-- 已废弃：`?token=<secret>` query fallback，仍可用但触发 WARNING log（不含 token 值），
-  计划在 Emerald-client 完成迁移后移除。
-- uvicorn access log 的 `QuerySanitizeFilter` 保留，作为 query 路径残留保护。
+- 唯一路径：`Authorization: Bearer <secret>` header，token 值不会出现在任何日志或错误响应。
+- `?token=<secret>` query fallback 已移除，即使 token 正确也以 code `1008` 拒绝。
+- uvicorn access log 的 `QuerySanitizeFilter` 保留，防止被拒绝请求或其他敏感 query 参数泄漏。
 
-**残留风险（过渡期）**：旧客户端仍走 query fallback 期间，token 可能出现在截图或代理日志；
-新客户端完成迁移并移除 query fallback 后此风险消除。
+Emerald-client 已完成 Tauri Rust native bridge header 迁移；SEC-WS-1 已 final，query token
+过渡风险关闭。
 
 > R9 / SEC-WS-1 处理 WS query token 迁移；`SEC-AUTH-1`（HTTP endpoint 鉴权收口）已于
 > 同日完成（2026-06-11），见上方"无鉴权本地入口"一节。
@@ -198,7 +197,7 @@ query 参数。
 3. 路径穿越检查和嵌套压缩包拒绝
 4. 插件目录隔离，禁止插件直接写 memory / queue / system path
 5. 工具权限 manifest，危险能力必须用户确认
-6. WebSocket / mobile / desktop 配对机制；WebSocket query token 迁移到更稳妥的握手方式
+6. WebSocket / mobile / desktop 配对机制
 7. 导出清单，默认排除所有私人记忆和密钥
 
 推荐演进顺序：
@@ -213,4 +212,4 @@ Lv3：带权限 manifest 的插件系统
 
 ## 当前结论
 
-当前安全模型适合“单用户、本机、可信客户端”的开发阶段。真正的风险不是核心 pipeline，而是把无鉴权本地入口、query token、社区资源和插件能力暴露到不可信环境。准备开放生态前，优先补 WS/mobile/desktop 配对、导入导出白名单、统一 source/privacy 策略。
+当前安全模型适合“单用户、本机、可信客户端”的开发阶段。真正的风险不是核心 pipeline，而是把未配对的客户端入口、社区资源和插件能力暴露到不可信环境。准备开放生态前，优先补 WS/mobile/desktop 配对、导入导出白名单、统一 source/privacy 策略。

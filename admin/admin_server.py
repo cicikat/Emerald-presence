@@ -77,9 +77,7 @@ from channels.desktop_ws import handle_connection as _ws_desktop_handler
 
 @app.websocket("/ws/desktop")
 async def ws_desktop_endpoint(websocket: _WebSocket):
-    # Token is read from Authorization: Bearer header (primary) or
-    # ?token= query param (deprecated — see SEC-WS-1, docs/security_model.md).
-    # Token value is never forwarded to logs regardless of path.
+    # WebSocket auth only accepts Authorization: Bearer. Query tokens are rejected.
     if not authenticate_ws(websocket):
         await websocket.close(code=1008)
         return
