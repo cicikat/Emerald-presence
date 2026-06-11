@@ -63,16 +63,30 @@ async def run_owner_chat_turn(
 
     from core.conversation_gate import conversation_lock
 
+    # ── N1: turn-level scope freeze ──────────────────────────────────────────
+    # Resolve active character exactly once per owner turn; fetch_context /
+    # build_prompt / post_process all consume this frozen scope so a mid-turn
+    # character switch (admin panel) cannot split reads and writes across
+    # two characters.
+    try:
+        _frozen_scope = pipeline._current_reality_scope(user_id)
+    except (ValueError, RuntimeError) as _scope_err:
+        logger.error("[owner_chat] scope freeze 失败，本轮中止: %s", _scope_err)
+        raise HTTPException(status_code=503, detail="active character 状态异常，本轮中止")
+
     async with conversation_lock(user_id):
         tool_result_text = await _probe_and_execute_tools(_probe_text, user_id)
 
-        context = await pipeline.fetch_context(user_id, message)
+        context = await pipeline.fetch_context(
+            user_id, message, frozen_scope=_frozen_scope
+        )
         messages, _ = pipeline.build_prompt(
             user_id,
             message,
             context,
             tool_result=tool_result_text,
             channel=channel_name,
+            char_id=_frozen_scope.character_id,
         )
         reply = await pipeline.run_llm(messages)
         if not reply:
@@ -101,6 +115,7 @@ async def run_owner_chat_turn(
             exclude_origin_channel=channel_name,
             pipeline=pipeline,
             envelope=stamp_user_chat(),
+            frozen_scope=_frozen_scope,
         )
 
         from core.memory.user_profile import get_affection_level
@@ -476,8 +491,14 @@ async def desktop_wake(body: dict = Body(default={}), _auth=Depends(verify_token
                 "[desktop_wake] Path B LLM start uid=%s event_id=%s",
                 uid, _pe_result.event_id,
             )
-            context = await pipeline.fetch_context(uid, prompt)
-            messages, _ = pipeline.build_prompt(uid, prompt, context)
+            # N1: turn-level scope freeze（与 run_owner_chat_turn / _pipeline_send 一致）
+            _wake_scope = pipeline._current_reality_scope(uid)
+            context = await pipeline.fetch_context(
+                uid, prompt, frozen_scope=_wake_scope
+            )
+            messages, _ = pipeline.build_prompt(
+                uid, prompt, context, char_id=_wake_scope.character_id
+            )
             reply = await pipeline.run_llm(messages)
             if reply:
                 # Shared reality guard before record_assistant_turn.
@@ -499,6 +520,7 @@ async def desktop_wake(body: dict = Body(default={}), _auth=Depends(verify_token
                     bypass_gate=True,  # already inside conversation_lock
                     pipeline=pipeline,
                     envelope=stamp_trigger(),
+                    frozen_scope=_wake_scope,
                 )
                 # Visible reply: strip render/NMP tags only; memory already scrubbed
                 # inside record_assistant_turn (memory_text path).

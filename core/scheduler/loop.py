@@ -348,12 +348,29 @@ async def _pipeline_send(
         _states = ["在思考", "在翻阅她的日记", "在想她说过的话", "在看窗外", "在灵体出游", "在家里"]
         prompt = prompt + f"\n（{_char_name()}此刻{random.choice(_states)}）"
 
+        # ── N1: turn-level scope freeze ──────────────────────────────────────
+        # Resolve active character exactly once per trigger turn; fetch_context /
+        # build_prompt / post_process all consume this frozen scope so a mid-turn
+        # character switch cannot split reads and writes across two characters.
+        try:
+            _frozen_scope = _pipeline._current_reality_scope(oid)
+        except (ValueError, RuntimeError) as _scope_err:
+            logger.error(
+                "[scheduler._pipeline_send] scope freeze 失败，本次触发中止 trigger=%s: %s",
+                trigger_name, _scope_err,
+            )
+            return None
+
         # ── conversation_lock: fetch_context → build_prompt → run_llm → record ──
         # bypass_gate=True because we already hold conversation_lock here.
         from core.conversation_gate import conversation_lock as _conv_lock
         async with _conv_lock(oid):
-            context = await _pipeline.fetch_context(oid, search_query or prompt)
-            messages, _ = _pipeline.build_prompt(oid, prompt, context)
+            context = await _pipeline.fetch_context(
+                oid, search_query or prompt, frozen_scope=_frozen_scope
+            )
+            messages, _ = _pipeline.build_prompt(
+                oid, prompt, context, char_id=_frozen_scope.character_id
+            )
             reply = await _pipeline.run_llm(messages)
             if reply:
                 turn_result = None
@@ -379,6 +396,7 @@ async def _pipeline_send(
                         pipeline=_pipeline,
                         envelope=_envelope,
                         audit_extras=_audit_extras,
+                        frozen_scope=_frozen_scope,
                     )
                 if output_mode == "return":
                     return reply

@@ -133,7 +133,7 @@ mark 或重试行为。
 shadow log 格式：
 
 ```json
-{"ts": 1748000000.0, "uid": "1043484516", "state": "QUIET", "candidates": [], "would_pick": null, "reason": "no_candidates"}
+{"ts": 1748000000.0, "uid": "1234567890", "state": "QUIET", "candidates": [], "would_pick": null, "reason": "no_candidates"}
 ```
 
 dry-run log 格式：
@@ -565,7 +565,7 @@ window 拦截、LLM 空回复或发送前异常时，不调用 execute 的 `afte
 {
   "last_diary_share": 1748001234.0,
   "trigger_state": {
-    "1043484516": {
+    "1234567890": {
       "state": "QUIET",
       "since_ts": 1748003600.0,
       "last_owner_turn_ts": 1748003000.0,
