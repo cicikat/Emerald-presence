@@ -395,6 +395,7 @@ R8-D 实测：当前 DLQ 目录无任何 legacy task 文件（`mid_term_append` 
 - R6-final（单出口稳态确认）：已完成（2026-06-11）。R1-D 后 QQ 路径完整接入 turn_sink，全部 LLM_ASSISTANT_REPLY 均经 scrub 链。守卫：`tests/test_r6c_reality_scrub_final.py`。
 - R1-D（QQ turn_sink 全量化）：已完成（2026-06-11）。`_qq_reality_reply_adapter` 调用 `record_assistant_turn`，QQ 不再是独立手写落库链路。剩余：QQ channel fanout（`fanout=[]` → `fanout="all"`）为架构统一可选项，不影响 scrub 安全。
 - `mes_example` 精简、时间联动注入属于 prompt 体感策略，不作为当前小修。
+- R3 CI 门禁（2026-06-11）：`tests/test_r3_scope_lint.py`（13 条）守卫 core/ 不新增 `char_id="yexuan"` 函数默认参数或裸 `data/` 路径；`tests/test_r3_memory_scope_cleanup_contract.py` 追踪迁移目标 allowlist 清理进度，守卫 admin/ 无新违规。`docs/memory.md` 残余工作 1–8、10 项已全部落地；残留 followup：旧 uid-only 数据迁移（9）、ShortTermMemory 默认值（11）、scope freeze 统一（12）。
 
 ---
 

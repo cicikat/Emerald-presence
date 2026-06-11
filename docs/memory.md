@@ -29,20 +29,20 @@
 | 内容级隔离 C：yexuan afterglow 不污染 hongcha hidden_state bucket | P0 Final / test_memory_isolation_p0_final.py |
 | 内容级隔离 D：入梦 active=yexuan → 切 active=hongcha → close → summary/impression 仍写 yexuan 桶 | P0 Final / test_memory_isolation_p0_final.py |
 
-### P0 Final 审计调用点分类（2026-06-04）
+### P0 Final 审计调用点分类（2026-06-04，状态核对 2026-06-11）
 
 | 调用点 | 文件 | 类别 | 说明 |
 |---|---|---|---|
 | `data_paths.py` 所有方法签名 `char_id: str = "yexuan"` | `core/data_paths.py` | **legacy/test 兼容层** | 签名默认值供旧代码 / 测试向后兼容；生产主链路调用方均显式传 char_id |
 | `_get_char_id_from_payload` fallback `"yexuan"` | `core/pipeline.py` / `core/memory/fixation_pipeline.py` | **DLQ 兼容层** | 仅在 DLQ 残留任务缺 char_id 时触发，WARN 日志可见，不静默 |
-| `mood.py GET /state` fallback `"yexuan"` | `admin/routers/mood.py:22` | **admin/debug，可接受** | 读取情绪状态的管理接口；失败时 fallback，无写路径 |
+| `mood.py GET /state` fallback `"yexuan"` | `admin/routers/mood.py` | ~~admin/debug~~ **✅ 已修复 P1-0F.2** | `_active_char_id()` fail-loud，不再 fallback yexuan；无写路径 |
 | `hidden_state_debug.py` 读 active_char_id | `admin/routers/hidden_state_debug.py` | **admin/debug，可接受** | fail-loud：active 空则 ValueError，不 fallback |
-| `admin/routers/memory.py` `short_term.load(user_id)` / `short_term.clear(user_id)` | `admin/routers/memory.py` | **admin/debug，可接受** | 管理面板读写；不走主链路；见 P1 TODO |
-| `admin/routers/users.py` `user_profile.load/save(user_id)` | `admin/routers/users.py` | **admin/debug，可接受** | 管理面板读写；不走主链路；见 P1 TODO |
-| `main.py:450-451` `_reply_with_tool_result` 读 short_term + user_profile（无 char_id） | `main.py` | **P1 TODO（reader bypass）** | 工具确认流程合成回复路径；读 yexuan bucket，不写错误数据；不产生新串味存储 |
-| `core/garden/manager.py:205,223` `get_current()` 无 char_id | `core/garden/manager.py` | **P1 TODO** | 花园系统读情绪决定浇水槽位；始终读 yexuan mood；见下方 P1 清单 |
+| `admin/routers/memory.py` `short_term.load/clear` | `admin/routers/memory.py` | ~~P1 TODO~~ **✅ 已修复 P1-0C** | `_resolve_char_id()` fail-loud：active 空则 503，char_id 非法则 422 |
+| `admin/routers/users.py` `user_profile.load/save` | `admin/routers/users.py` | ~~P1 TODO~~ **✅ 已修复 P1-0E** | `_resolve_char_id()` fail-loud：active 空则 503，char_id 非法则 422 |
+| `main.py` `_reply_with_tool_result` 读 short_term + user_profile | `main.py` | ~~P1 TODO~~ **✅ 已修复 P1-0A** | 使用 `frozen_scope.character_id`（N1 scope freeze）；fallback 到 `_active_character_id` |
+| `core/garden/manager.py` `get_current()` 无 char_id | `core/garden/manager.py` | ~~P1 TODO~~ **✅ 已修复 P1-0F** | `get_current(char_id=char_id)` 显式传入 |
 
-### 已落地基础设施（P0 后补齐，2026-06-10 核对）
+### 已落地基础设施（P0 后补齐，2026-06-11 核对）
 
 以下曾为 P1 TODO，当前已实现：
 
@@ -50,36 +50,37 @@
 - **path_resolver**（`core/memory/path_resolver.py`）：统一路径构造入口；`test_memory_direct_path_lint.py` 覆盖 `user_memory_root(...)` 直调门禁。
 - **慢队列 scope payload**：`summarize_to_midterm` 及后续 handler 均在入队时携带 `char_id` 快照，handler 透传至写入层。
 - **`user_facts` 全局域拆分**：跨角色通用事实（姓名、生日等）已归入 global scope，不再混在 per-char 的 `user_profile` 内。
+- **R3 CI 门禁**（2026-06-11）：`tests/test_r3_scope_lint.py` — core/ 不得新增 `char_id="yexuan"` 函数默认参数或裸 `data/` 路径构造；`tests/test_r3_memory_scope_cleanup_contract.py` — 迁移目标文件仍有违规时通过（文件清理后失败，提示移除 allowlist 条目）；admin/ 不得新增 char_id 默认参数。
 
-### 残余工作（P0 范围外，2026-06-10 核对）
+### 残余工作（P0 范围外，2026-06-11 核对）
 
 以下问题已知且已隔离，**不属于 P0 blocker**（不产生新串味存储写入）。编号保持原序以便 git blame 追溯。
 
-1. **CI grep 门禁缺失**：`core/` 内仍存在 `char_id: str = "yexuan"` 硬编码默认值（`data_paths.py` 签名作向后兼容层）；尚无 CI grep 规则禁止新增此类默认值。建议：补 CI `grep -r 'char_id: str = "yexuan"' core/` 步骤，命中则阻断。
+1. ✅ **CI grep 门禁** — 已落地 `tests/test_r3_scope_lint.py`（R3-CI，2026-06-10）：core/ 不得新增 `char_id="yexuan"` 函数默认参数或裸 `data/` 路径构造；现有违规文件列入 allowlist（含原因注释）。`tests/test_r3_memory_scope_cleanup_contract.py`（R3-cleanup，2026-06-11）追踪 allowlist 清理进度并守卫 admin/ 不引入新违规。
 
-2. **路径构造门禁部分覆盖**：`test_memory_direct_path_lint.py` 已覆盖 `user_memory_root(...)` 直调模式；但 f-string 直拼 `data/` 路径的模式仍靠 code review 保障，尚无自动检测。建议：补 lint 规则 `f"data/` 或 `f'data/` 出现在 `core/` 非 allowlist 文件时告警。
+2. ✅ **路径构造门禁** — 已落地 `tests/test_r3_scope_lint.py`（R3-CI，2026-06-10）：覆盖 `Path("data/...")` / `f"data/...` / `"data/" +` 三种模式；`core/data_paths.py`（路径权威）和 `core/dream/scenario_loader.py`（静态 authored-content）列入 allowlist。
 
-3. **`main.py._reply_with_tool_result` reader bypass** — 工具确认流程中 `short_term.load_for_prompt(user_id)` / `user_profile.load(user_id)` 未传 char_id，始终读 yexuan bucket。路径：`main.py:450-451`（行号随代码增减可能变化）。修复：传入 `_pipeline._active_character_id` 作为 char_id。
+3. ✅ **`main.py._reply_with_tool_result` reader bypass** — 已修复（P1-0A）：优先使用 `frozen_scope.character_id`（N1 scope freeze），无 frozen_scope 时 fallback 到 `_active_character_id`；两条路径均显式传 char_id。
 
-4. **`core/garden/manager.py` mood 读取** — `auto_water_tick()` 和 `force_water()` 调用 `get_current()` 无 char_id，始终读 yexuan mood 决定浇水槽位。修复：从 `active_prompt_assets` 读 char_id 后传入。
+4. ✅ **`core/garden/manager.py` mood 读取** — 已修复（P1-0F）：`auto_water_tick()` / `force_water()` 均调用 `get_current(char_id=char_id)`，char_id 由调用方传入。
 
-5. **`admin/routers/memory.py` `short_term.clear(user_id)`** — 管理面板清除短期记忆只清 yexuan bucket。修复：接收 char_id 查询参数。
+5. ✅ **`admin/routers/memory.py` char_id 兼容** — 已修复（P1-0C）：`_resolve_char_id()` helper：char_id=None 时读 active_prompt_assets，非法 char_id 返回 422，active 空返回 503；永不 fallback yexuan。
 
-6. **`admin/routers/users.py` `user_profile.load/save`** — 管理面板画像读写不区分 char_id，始终操作 yexuan bucket。修复：接收 char_id 查询参数。
+6. ✅ **`admin/routers/users.py` char_id 兼容** — 已修复（P1-0E）：同上，`_resolve_char_id()` fail-loud。
 
-7. **`hidden_state_decay` 仅处理当前 active 角色** — 调度器 decay tick 只处理当前 active_character 的隐性状态；非 active 角色的 hidden_state 不会被 decay。修复：遍历所有已知角色。
+7. ✅ **`hidden_state_decay` 仅处理 active 角色** — 已修复（P1-0G）：`_check_hidden_state_decay()` 遍历 `get_registry().list_all("character")` 所有注册角色，不依赖 active_character。
 
-8. **`user_facts` global 拆分** — ✅ 已完成（见"已落地基础设施"）。跨角色通用事实已归入 global scope。残余：确认所有读路径均已切到新拆分结构，旧 `user_profile` 内的遗留全局字段全部清理完毕。
+8. ✅ **`user_facts` global 拆分** — 已完成（P1-4）：跨角色通用事实归入 global scope；`pipeline.fetch_context` / `build_prompt` 已注入。
 
-9. **旧 uid-only 数据迁移** — P0 只建立新路径，旧 `data/history/{uid}.json`、`data/event_log/{uid}/` 等 legacy 文件不自动迁移至 `data/runtime/memory/{char_id}/{uid}/`。P1 迁移脚本待建。
+9. **旧 uid-only 数据迁移**（R3-followup）— 旧 `data/history/{uid}.json`、`data/event_log/{uid}/` 等 legacy 文件未自动迁移至 `data/runtime/memory/{char_id}/{uid}/`。干跑脚本见 `scripts/migrate_uid_only_memory_dry_run.py`；实际迁移待定。
 
-10. **`dream_state` 物理路径在 v1 已切换** — `_LAYOUT_DREAM="v1"` 时 `dream_state_path` 已走 `runtime/dreams/{char_id}/state/...`，legacy 兼容期完成。
+10. ✅ **`dream_state` 物理路径 v1** — `_LAYOUT_DREAM="v1"` 已走 `runtime/dreams/{char_id}/state/...`，legacy 兼容期完成。
 
-11. **`ShortTermMemory` 类方法 `clear/load`** — `short_term.ShortTermMemory.clear(user_id)` 和 `.load(user_id)` 无 char_id 参数，供旧代码使用；生产主链路不走此类接口，但应补齐参数签名。
+11. **`ShortTermMemory` 类方法默认值**（R3-followup）— `ShortTermMemory.load/clear/append/get_history` 已有 `char_id` 参数，但仍带 `char_id: str = "yexuan"` 默认值（列于 test_r3_scope_lint.py CHAR_ID_DEFAULT_ALLOWLIST）。生产主链路不走此类接口；future R3 pass 可移除默认值。
 
-12. **轮级 scope freeze 尚未统一**：当前 `fetch_context / build_prompt / post_process` 各自接收独立 `char_id` 参数，未在轮入口处构造单一 `MemoryScope` 对象贯穿全程。若中途 active_character 被切换，各步骤间有窗口期读取不同 char_id。建议：在 `Pipeline._run_turn()` 最顶端一次性构造 `MemoryScope.reality_scope(uid, active_char_id)` 并向下传递。
+12. **轮级 scope freeze 尚未统一**（R3-followup）— `fetch_context / build_prompt / post_process` 各自接收独立 `char_id` 参数，未在轮入口处构造单一 `MemoryScope` 贯穿全程。极短窗口期内 active_character 切换时各步骤 char_id 可能不一致。建议：在 `Pipeline._run_turn()` 顶端一次性构造 `MemoryScope.reality_scope(uid, active_char_id)` 并向下传递。
 
-> **最近核对**：2026-06-10。上述残余工作（1、2、12）为文档-代码已知漂移点，不影响当前 P0 隔离结论。
+> **最近核对**：2026-06-11。第 1–8、10 项已全部落地；第 9、11、12 项为已知 followup，不影响 P0 隔离结论。
 
 ---
 
