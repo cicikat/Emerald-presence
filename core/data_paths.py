@@ -101,6 +101,9 @@ class DataPaths:
     def scheduler_user_state(self) -> Path:
         return self._p("runtime", "scheduler_user_state.json")
 
+    def wake_delivery_ledger(self, user_id: str | int) -> Path:
+        return self._p("wake_delivery", f"{safe_user_id(user_id)}.json")
+
     # ── 记忆根目录 ─────────────────────────────────────────────────────────────
     def character_growth(self, *, char_id: str = "yexuan") -> Path:
         if _LAYOUT_CHARACTER_INNER == "legacy":

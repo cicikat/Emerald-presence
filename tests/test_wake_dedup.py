@@ -158,7 +158,7 @@ async def test_path_a_returns_pending_trigger_when_ws_disconnected(monkeypatch):
     assert pending[0]["content"] == "早上好！"
 
 
-async def test_desktop_wake_path_a_returns_canonical_ids(monkeypatch):
+async def test_desktop_wake_path_a_returns_canonical_ids(sandbox, monkeypatch):
     """Path A HTTP reply exposes the persisted turn_id as msg_id."""
     import json
 
@@ -189,6 +189,81 @@ async def test_desktop_wake_path_a_returns_canonical_ids(monkeypatch):
 
     assert result["reply"] == "离线问候"
     assert result["turn_id"] == result["msg_id"] == "turn-wake-path-a"
+
+
+async def test_desktop_wake_path_a_replay_is_at_most_once(sandbox, monkeypatch):
+    """同一个 stale last_seen 重试时，后端 ledger 阻止 Path A 重放和 Path B 新生成。"""
+    import json
+
+    monkeypatch.setattr(
+        "core.config_loader.get_config",
+        lambda: {"scheduler": {"owner_id": "owner-wake-once"}},
+    )
+    monkeypatch.setattr("channels.desktop_ws.get_connect_time", lambda: 0.0)
+
+    class _FakeAPA:
+        def read_text(self, encoding="utf-8"):
+            return json.dumps({"active_character": "yexuan"})
+
+    monkeypatch.setattr("core.sandbox.DataPaths.active_prompt_assets", lambda self: _FakeAPA())
+    now = time.time()
+    monkeypatch.setattr(
+        "core.memory.short_term.load",
+        lambda uid, char_id=None: [{
+            "role": "assistant",
+            "content": "只补发一次",
+            "timestamp": now,
+            "_turn_id": "turn-wake-once",
+        }],
+    )
+
+    from admin.routers.chat import desktop_wake
+
+    first = await desktop_wake({"last_seen": now - 60})
+    second = await desktop_wake({"last_seen": now - 60})
+
+    assert first["source"] == "pending_trigger"
+    assert second == {"reply": None, "source": "wake_already_delivered"}
+    ledger = json.loads(sandbox.wake_delivery_ledger("owner-wake-once").read_text(encoding="utf-8"))
+    assert ledger["wake_delivered"] == {"turn-wake-once": now}
+
+
+async def test_desktop_wake_path_a_concurrent_replay_is_at_most_once(sandbox, monkeypatch):
+    """并发 wake 由 uid lock 串行，只有一个请求能拿到同一 pending turn。"""
+    import asyncio
+    import json
+
+    monkeypatch.setattr(
+        "core.config_loader.get_config",
+        lambda: {"scheduler": {"owner_id": "owner-wake-concurrent"}},
+    )
+    monkeypatch.setattr("channels.desktop_ws.get_connect_time", lambda: 0.0)
+
+    class _FakeAPA:
+        def read_text(self, encoding="utf-8"):
+            return json.dumps({"active_character": "yexuan"})
+
+    monkeypatch.setattr("core.sandbox.DataPaths.active_prompt_assets", lambda self: _FakeAPA())
+    now = time.time()
+    monkeypatch.setattr(
+        "core.memory.short_term.load",
+        lambda uid, char_id=None: [{
+            "role": "assistant",
+            "content": "并发只补发一次",
+            "timestamp": now,
+            "_turn_id": "turn-wake-concurrent",
+        }],
+    )
+
+    from admin.routers.chat import desktop_wake
+
+    results = await asyncio.gather(
+        desktop_wake({"last_seen": now - 60}),
+        desktop_wake({"last_seen": now - 60}),
+    )
+
+    assert [result["source"] for result in results].count("pending_trigger") == 1
+    assert [result["source"] for result in results].count("wake_already_delivered") == 1
 
 
 async def test_path_a_excludes_post_connect_trigger_when_ws_connected(monkeypatch):

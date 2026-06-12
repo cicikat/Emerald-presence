@@ -66,6 +66,8 @@ conversation_lock(uid)
 ```
 
 - **conversation_lock** 是 uid 级，与 `desktop_wake Path B` 和 `run_owner_chat_turn` 共用同一把锁，保证同 uid 的 reality LLM 串行。
+- **desktop_wake Path A delivery ledger**：回放前在 uid 锁内读取 `wake_delivered: {turn_id: ts}`，
+  筛选时排除已送达 turn，并在 HTTP 返回前原子写入；因此重复/并发 wake 对同一 turn 至多返回一次。
 - **Dream Guard** 通过 `receive_perceive_event` fail-closed：BLOCK_ACTIVE / BLOCK_UNCERTAIN → 直接返回 None，不进 LLM。
 - **TTL dedup**：同一 trigger_name 在同一 60s 时间桶内重复触发 → DUPLICATE，静默丢弃。
 - **dedupe_key 组成（scheduler）**：`scheduler:uid:char:system:scheduled:hash({"trigger_name":name}):bucket` — payload 只含 trigger_name，key 稳定。

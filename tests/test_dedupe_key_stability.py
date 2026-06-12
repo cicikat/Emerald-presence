@@ -296,6 +296,10 @@ async def test_desktop_wake_with_last_seen_in_body_deduped(monkeypatch):
     class _FakePipeline:
         character = type("C", (), {"name": "Companion"})()
 
+        def _current_reality_scope(self, uid):
+            from core.memory.scope import MemoryScope
+            return MemoryScope.reality_scope(uid, "char-a")
+
         async def fetch_context(self, uid, prompt, *a, **kw):
             return {}
 

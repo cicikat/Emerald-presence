@@ -405,8 +405,11 @@ async def desktop_wake(body: dict = Body(default={}), _auth=Depends(verify_token
 
     # ── Path A: pending trigger turns ──────────────────────────────────────
     if last_seen is not None:
+        from core.wake_delivery_ledger import WakeDeliveryLedgerError
         try:
             from core.memory.short_term import load as _load_st
+            from core.memory.locks import uid_lock as _uid_lock
+            from core.wake_delivery_ledger import load_delivered, mark_delivered
             from channels import desktop_ws as _dws_pa
             # Resolve active character to scope history read correctly.
             # If active_prompt_assets.json is absent or empty, let exception propagate
@@ -417,34 +420,43 @@ async def desktop_wake(body: dict = Body(default={}), _auth=Depends(verify_token
             _active_cid = (_apa.get("active_character") or "").strip()
             if not _active_cid:
                 raise ValueError("active_character missing in active_prompt_assets.json")
-            history = _load_st(uid, char_id=_active_cid)
-            user_turn_ids = {
-                e["_turn_id"] for e in history
-                if e.get("role") == "user" and e.get("_turn_id")
-            }
-            # If WS is currently connected, exclude turns that were generated *after*
-            # this WS session was accepted: those were already fanout-pushed to the
-            # client and replaying them via HTTP would show the same reply twice.
-            ws_connect_time = _dws_pa.get_connect_time()
-            pending = [
-                e for e in history
-                if (
-                    e.get("role") == "assistant"
-                    and e.get("timestamp", 0) > last_seen
-                    and e.get("_turn_id")
-                    and e["_turn_id"] not in user_turn_ids
-                    and (not ws_connect_time or e.get("timestamp", 0) <= ws_connect_time)
-                )
-            ]
-            if pending:
-                latest = max(pending, key=lambda e: e.get("timestamp", 0))
-                turn_id = latest["_turn_id"]
-                return {
-                    "reply": latest["content"],
-                    "source": "pending_trigger",
-                    "turn_id": turn_id,
-                    "msg_id": turn_id,
+            async with _uid_lock(uid):
+                delivered = load_delivered(uid)
+                history = _load_st(uid, char_id=_active_cid)
+                user_turn_ids = {
+                    e["_turn_id"] for e in history
+                    if e.get("role") == "user" and e.get("_turn_id")
                 }
+                # If WS is currently connected, exclude turns that were generated *after*
+                # this WS session was accepted: those were already fanout-pushed to the
+                # client and replaying them via HTTP would show the same reply twice.
+                ws_connect_time = _dws_pa.get_connect_time()
+                eligible = [
+                    e for e in history
+                    if (
+                        e.get("role") == "assistant"
+                        and e.get("timestamp", 0) > last_seen
+                        and e.get("_turn_id")
+                        and e["_turn_id"] not in user_turn_ids
+                        and (not ws_connect_time or e.get("timestamp", 0) <= ws_connect_time)
+                    )
+                ]
+                pending = [e for e in eligible if e["_turn_id"] not in delivered]
+                if pending:
+                    latest = max(pending, key=lambda e: e.get("timestamp", 0))
+                    turn_id = latest["_turn_id"]
+                    mark_delivered(uid, delivered, turn_id, latest.get("timestamp", 0))
+                    return {
+                        "reply": latest["content"],
+                        "source": "pending_trigger",
+                        "turn_id": turn_id,
+                        "msg_id": turn_id,
+                    }
+                if eligible:
+                    return {"reply": None, "source": "wake_already_delivered"}
+        except WakeDeliveryLedgerError:
+            logger.exception("[desktop_wake] delivery ledger 不可用 — fail-closed")
+            return {"reply": None, "source": "wake_delivery_error"}
         except Exception:
             logger.exception("[desktop_wake] Path A 失败，降级到 Path B")
 
