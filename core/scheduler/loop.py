@@ -76,6 +76,11 @@ _COOLDOWNS: dict[str, int] = {
 # 冷却跟踪 {trigger_name: last_unix_timestamp}
 _last_trigger: dict[str, float] = {}
 
+
+def _cooldown_key(name: str, char_id: str | None = None) -> str:
+    """Return a per-character key when char_id is explicit; legacy callers stay global."""
+    return f"{char_id}:{name}" if char_id else name
+
 def _migrate_scheduler_state_once():
     """一次性迁移：拆分旧 scheduler_state.json → cooldowns + user_state，完成后删旧文件。"""
     old_path = get_paths()._p("scheduler_state.json")
@@ -202,15 +207,15 @@ def _cfg_retention() -> dict:
     return get_config().get("retention", {})
 
 
-def _is_ready(name: str) -> bool:
+def _is_ready(name: str, *, char_id: str | None = None) -> bool:
     """检查触发器是否已度过冷却期"""
-    elapsed = time.time() - _last_trigger.get(name, 0)
+    elapsed = time.time() - _last_trigger.get(_cooldown_key(name, char_id), 0)
     return elapsed >= _COOLDOWNS.get(name, 3600)
 
 
-def _mark(name: str):
+def _mark(name: str, *, char_id: str | None = None):
     """记录触发时间，同时持久化到 scheduler_cooldowns.json。"""
-    _last_trigger[name] = time.time()
+    _last_trigger[_cooldown_key(name, char_id)] = time.time()
     try:
         import json
         from core.safe_write import safe_write_json

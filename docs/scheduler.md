@@ -125,7 +125,8 @@ conversation_lock(uid)
 `core/scheduler/gating.py` 定义 `TriggerProposal` 并实现 `collect_and_decide(uid, proposals)`：
 
 1. 过滤 `requires_state` 不包含当前状态的候选，`bypass_state_machine=True` 跳过此过滤
-2. 过滤冷却未到的候选，冷却仍沿用 `loop.py` 的 `_COOLDOWNS` / `_is_ready`
+2. 过滤冷却未到的候选，冷却沿用 `loop.py` 的 `_COOLDOWNS` / `_is_ready`；proposal 携带
+   `char_id` 时读取 `{char_id}:{trigger_name}` 角色键，否则读取旧全局键
 3. 多候选按 `urgency` 选最高者
 4. 一个 tick 最多返回一条候选
 

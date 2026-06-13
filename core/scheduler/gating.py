@@ -7,7 +7,8 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+import inspect
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from core.safe_write import rotate_jsonl_if_needed, safe_append_jsonl
@@ -57,6 +58,7 @@ class TriggerProposal:
     requires_state: list
     bypass_state_machine: bool = False
     execute: Optional[ExecuteFn] = None
+    char_id: str | None = None
 
 
 def _shadow_cfg() -> dict:
@@ -64,10 +66,18 @@ def _shadow_cfg() -> dict:
     return get_config().get("scheduler", {}).get("gating_shadow", {})
 
 
-def is_trigger_ready(trigger_name: str) -> bool:
+def is_trigger_ready(trigger_name: str, *, char_id: str | None = None) -> bool:
     from core.scheduler.loop import _is_ready
 
-    return _is_ready(trigger_name)
+    return _is_ready(trigger_name, char_id=char_id)
+
+
+def _proposal_cooldown_ready(proposal: TriggerProposal) -> bool:
+    if proposal.char_id is None:
+        return is_trigger_ready(proposal.trigger_name)
+    if "char_id" in inspect.signature(is_trigger_ready).parameters:
+        return is_trigger_ready(proposal.trigger_name, char_id=proposal.char_id)
+    return is_trigger_ready(proposal.trigger_name)
 
 
 def collect_and_decide(uid: str, proposals: list[TriggerProposal]) -> Optional[TriggerProposal]:
@@ -139,6 +149,8 @@ def _collect_native_proposals(ctx: dict) -> list[TriggerProposal]:
     for entry in iter_proposers():
         item = entry.fn(ctx)
         if item is not None:
+            if item.char_id is None and ctx.get("char_id"):
+                item = replace(item, char_id=str(ctx["char_id"]))
             proposals.append(item)
     return proposals
 
@@ -211,7 +223,7 @@ def _decide(uid: str, proposals: list[TriggerProposal]) -> tuple[Optional[Trigge
             return None, "dnd_filtered", candidates
         state_allowed = dnd_allowed
 
-    cooldown_allowed = [p for p in state_allowed if is_trigger_ready(p.trigger_name)]
+    cooldown_allowed = [p for p in state_allowed if _proposal_cooldown_ready(p)]
     if not cooldown_allowed:
         return None, "cooldown_filtered", candidates
 
@@ -246,7 +258,7 @@ def _serialize_candidate(
 ) -> dict:
     required = [_state_value(s) for s in proposal.requires_state]
     state_allowed = proposal.bypass_state_machine or _state_value(state) in set(required)
-    cooldown_ready = is_trigger_ready(proposal.trigger_name)
+    cooldown_ready = _proposal_cooldown_ready(proposal)
     aw_behavior = _policy_active_window_behavior(proposal.trigger_name)
     _force_send = proposal.trigger_name in (force_send_names or frozenset())
     aw_blocked = user_active and aw_behavior != "exempt" and not _force_send
@@ -264,6 +276,7 @@ def _serialize_candidate(
             pass
     return {
         "trigger_name": proposal.trigger_name,
+        "char_id": proposal.char_id,
         "urgency": proposal.urgency,
         "topic_source": proposal.topic_source,
         "requires_state": required,

@@ -56,6 +56,7 @@ async def execute_prompt(
     topic_key: str = "",
     reads_cache_ok: bool = True,
     after_send: Optional[AfterSend] = None,
+    char_id: str | None = None,
 ) -> ExecuteResult:
     """Execute a scheduler prompt, or log what would happen in dry-run mode."""
 
@@ -76,6 +77,7 @@ async def execute_prompt(
         return result
 
     from core.scheduler import loop
+    resolved_char_id = char_id or loop._active_char_id_or_none()
 
     sent_text = await loop._pipeline_send(prompt, search_query=search_query, trigger_name=trigger_name)
     if not sent_text:
@@ -96,6 +98,9 @@ async def execute_prompt(
         if inspect.isawaitable(maybe):
             await maybe
     for name in result.would_mark:
+        mark_params = inspect.signature(loop._mark).parameters
+        if resolved_char_id and "char_id" in mark_params:
+            loop._mark(name, char_id=resolved_char_id)
         loop._mark(name)
     return ExecuteResult(
         trigger_name=result.trigger_name,
