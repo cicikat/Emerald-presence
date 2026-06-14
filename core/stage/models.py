@@ -20,7 +20,7 @@ def now_iso() -> str:
 class StageSettings:
     min_responders: int = 1
     max_responders: int = 2
-    max_ai_chain_depth: int = 2
+    max_ai_chain_depth: int = 3
     respond_threshold: float = 0.5
     spontaneous_threshold: float = 0.7
     addressed_exclusive: bool = False
@@ -69,7 +69,7 @@ class StageSettings:
         return cls(
             min_responders=int(raw.get("min_responders", 1)),
             max_responders=int(raw.get("max_responders", 2)),
-            max_ai_chain_depth=int(raw.get("max_ai_chain_depth", 2)),
+            max_ai_chain_depth=int(raw.get("max_ai_chain_depth", 3)),
             respond_threshold=float(raw.get("respond_threshold", 0.5)),
             spontaneous_threshold=float(raw.get("spontaneous_threshold", 0.7)),
             addressed_exclusive=bool(raw.get("addressed_exclusive", False)),
@@ -88,10 +88,12 @@ class StageSettings:
 
 
 def settings_from_config() -> StageSettings:
-    """Load authored Stage defaults from config.yaml."""
+    """Load Stage defaults from config.yaml. group_defaults takes precedence over group_chat."""
     from core.config_loader import get_config
 
-    return StageSettings.from_dict(get_config().get("group_chat") or {})
+    cfg = get_config()
+    raw = cfg.get("group_defaults") or cfg.get("group_chat") or {}
+    return StageSettings.from_dict(raw)
 
 
 @dataclass(frozen=True)

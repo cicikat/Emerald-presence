@@ -91,6 +91,27 @@ def load_transcript(group_id: str) -> list[TranscriptEntry]:
         return []
 
 
+def delete_stage(group_id: str) -> bool:
+    """Hard-delete stage meta + transcript files. Returns False if not found, never raises."""
+    meta_path = get_paths().stage_meta(group_id=group_id)
+    if not meta_path.exists():
+        return False
+    try:
+        group_dir = get_paths().stage_group_dir(group_id=group_id)
+        meta_path.unlink()
+        transcript_path = get_paths().stage_transcript(group_id=group_id)
+        if transcript_path.exists():
+            transcript_path.unlink()
+        try:
+            group_dir.rmdir()
+        except OSError:
+            pass
+        return True
+    except Exception as exc:
+        logger.error("[stage_store] delete_stage failed group=%s: %s", group_id, exc)
+        return False
+
+
 def append_transcript(stage: Stage, entry: TranscriptEntry) -> bool:
     allowed_speakers = {"owner", *stage.roster}
     if entry.speaker_id not in allowed_speakers:

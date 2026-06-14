@@ -167,9 +167,14 @@ async def test_runner_phase_b_is_bounded_and_triggered_by_previous_speaker(sandb
         turn_id="turn-b",
     )
 
-    assert [item.speaker_id for item in result.replies] == ["yexuan", "yexuanJ-5412"]
+    # Phase A: yexuan replies to owner.
+    # Phase B iter 1: yexuanJ-5412 replies (triggered by yexuan, peer_reply bonus applies).
+    # Phase B iter 2: yexuan replies again (triggered by yexuanJ-5412, peer_reply bonus applies).
+    # Chain is bounded at max_ai_chain_depth=2.
+    assert [item.speaker_id for item in result.replies] == ["yexuan", "yexuanJ-5412", "yexuan"]
     assert result.replies[1].triggered_by == "yexuan"
-    assert result.ai_chain_depth == 1
+    assert result.replies[2].triggered_by == "yexuanJ-5412"
+    assert result.ai_chain_depth == 2
 
 
 async def test_runner_holds_one_owner_lock_for_entire_round(sandbox):

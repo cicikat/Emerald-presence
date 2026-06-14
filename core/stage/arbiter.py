@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from core.character_name_provider import get_char_name
 from core.stage.models import Stage, TranscriptEntry
 
+# Bonus applied when a peer (another AI character, not the owner) just spoke.
+# Scaled by talkativeness so chatty chars are more eager to reply.
+PEER_REPLY_BASE = 0.40
+
 
 @dataclass(frozen=True)
 class CandidateScore:
@@ -41,6 +45,7 @@ def score_candidates(
     candidates: list[str] | tuple[str, ...] | None = None,
 ) -> list[CandidateScore]:
     latest_text = transcript[-1].content if transcript else ""
+    latest_speaker = transcript[-1].speaker_id if transcript else "owner"
     pool = tuple(candidates) if candidates is not None else stage.roster
     addressed = {char_id for char_id in pool if _addressed(stage, char_id, latest_text)}
     if addressed and stage.settings.addressed_exclusive:
@@ -49,10 +54,13 @@ def score_candidates(
     result: list[CandidateScore] = []
     for char_id in pool:
         talkativeness = min(max(stage.settings.talkativeness.get(char_id, 0.5), 0.0), 1.0)
+        # peer_spoke: another AI character (not the human owner, not self) just spoke
+        peer_spoke = latest_speaker != "owner" and latest_speaker != char_id
         parts = {
             "talkativeness": talkativeness * 0.5,
             "addressed": 0.9 if char_id in addressed else 0.0,
             "topic": _keyword_relevance(stage, char_id, latest_text),
+            "peer_reply": PEER_REPLY_BASE * talkativeness if peer_spoke else 0.0,
             "recency_penalty": -_recency_penalty(char_id, transcript),
         }
         total = round(max(0.0, min(sum(parts.values()), 1.5)), 4)

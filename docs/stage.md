@@ -81,12 +81,14 @@ speaker_id / content / timestamp / _turn_id / triggered_by
 | 方法 | 路径 | 描述 |
 |---|---|---|
 | `GET` | `/group/list` | 列出所有 Stage 群 |
-| `POST` | `/group/create` | 建群（roster + domain + settings） |
+| `POST` | `/group/create` | 建群（roster + domain + settings）；settings 缺省时从 `group_defaults` config 读 |
 | `GET` | `/group/{id}` | 取群详情（roster + settings + 近 50 条 transcript） |
+| `DELETE` | `/group/{id}` | 硬删除群 + transcript；正在跑的轮次下轮 load 不到自然结束 |
 | `POST` | `/group/{id}/send` | 触发 arbiter 一轮，立即返回 `{round_id, status:"accepted"}`，整轮经 WS 异步推送 |
 | `GET` | `/group/{id}/history?before=` | 分页 transcript，`before` 为 Unix 时间戳上界（可选） |
 | `GET` | `/group/{id}/settings` | 读群设置 |
-| `PATCH` | `/group/{id}/settings` | 部分更新群设置 |
+| `PATCH` | `/group/{id}/settings` | 部分更新群设置（min/max_responders 等） |
+| `PATCH` | `/group/{id}/roster` | 改群成员（`{roster:[char_id,…]}`）；max_responders 自动夹紧到新 roster 长度 |
 
 `POST /group/{id}/send` 触发 `run_reality_stage_turn()` 作为异步 task，不阻塞 HTTP 返回。
 

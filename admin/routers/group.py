@@ -26,6 +26,7 @@ from core.stage.models import Stage, StageSettings, now_iso
 from core.stage.store import (
     append_transcript,
     create_stage,
+    delete_stage,
     load_stage,
     load_transcript,
     save_stage,
@@ -250,6 +251,38 @@ async def get_group_settings(group_id: str, _auth=Depends(verify_token)):
 
 
 # ── settings patch ───────────────────────────────────────────────────────────
+
+@router.delete("/{group_id}", summary="删除群（连同 transcript）")
+async def delete_group(group_id: str, _auth=Depends(verify_token)):
+    ok = delete_stage(group_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="群不存在")
+    return {"ok": True, "deleted": group_id}
+
+
+@router.patch("/{group_id}/roster", summary="改群成员（加/减角色）")
+async def patch_group_roster(group_id: str, body: dict, _auth=Depends(verify_token)):
+    stage = _require_stage(group_id)
+    new_roster = [str(r).strip() for r in (body.get("roster") or []) if str(r).strip()]
+    if not new_roster:
+        raise HTTPException(status_code=422, detail="roster 不能为空")
+    if len(set(new_roster)) != len(new_roster):
+        raise HTTPException(status_code=422, detail="roster 不能含重复成员")
+    from core.asset_registry import get_registry
+    reg = get_registry()
+    for char_id in new_roster:
+        try:
+            reg.resolve(char_id, "character")
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"角色 {char_id!r} 不存在")
+    settings = stage.settings
+    if settings.max_responders > len(new_roster):
+        settings = replace(settings, max_responders=len(new_roster))
+    updated = replace(stage, roster=tuple(new_roster), settings=settings, updated_at=now_iso())
+    if not save_stage(updated):
+        raise HTTPException(status_code=500, detail="保存失败")
+    return {**_summary(updated), "settings": _settings_dict(updated.settings)}
+
 
 @router.patch("/{group_id}/settings", summary="改群设置（部分更新）")
 async def patch_group_settings(group_id: str, body: dict, _auth=Depends(verify_token)):

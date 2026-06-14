@@ -123,7 +123,8 @@ async def run_owner_turn(
             latest_speaker = transcript[-1].speaker_id
             candidates = [char_id for char_id in stage.roster if char_id != latest_speaker]
             ranked = score_candidates(stage, transcript, candidates=candidates)
-            if not ranked or ranked[0].total < stage.settings.spontaneous_threshold:
+            # AI chain uses a looser threshold so peer_reply bonus can clear the bar.
+            if not ranked or ranked[0].total < stage.settings.respond_threshold * 0.8:
                 break
             pick = ranked[0]
             entry = await _generate_and_append(
