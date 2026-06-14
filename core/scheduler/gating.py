@@ -46,6 +46,7 @@ MIGRATED_TRIGGERS: frozenset[str] = frozenset({
     "garden_vase_wilted",
     "reminders",
     "overflow",
+    "dream_exit",
     "letter_writer",
 })
 

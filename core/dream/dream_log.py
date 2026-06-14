@@ -120,3 +120,64 @@ def clear_current(user_id: str | int, *, char_id: str = "yexuan") -> bool:
     except Exception as e:
         logger.error(f"[dream_log] clear failed uid={user_id}: {e}")
         return False
+
+
+# Minimum user turns for a dream to count as "valid" (≤ this → test/discard).
+VALID_DREAM_MIN_USER_TURNS = 3
+
+
+def count_valid_dreams(*, char_id: str = "yexuan") -> dict:
+    """Count valid archived dreams for the given character.
+
+    Scans archive directory; a dream is valid if it contains more than
+    VALID_DREAM_MIN_USER_TURNS user turns. Corrupt/missing files are skipped.
+    Returns {"total_valid": int, "total_archived": int, "last_dream_at": float|None}.
+    Pure read-only; all paths via get_paths().
+    """
+    archive_dir = get_paths().dreams_archive_dir(char_id=char_id)
+    if not archive_dir.exists():
+        return {"total_valid": 0, "total_archived": 0, "last_dream_at": None}
+
+    files = list(archive_dir.glob("dream_*.jsonl"))
+    total_archived = len(files)
+    total_valid = 0
+    last_dream_at: float | None = None
+
+    for f in files:
+        user_turns = 0
+        file_last_ts: float | None = None
+        try:
+            for line in f.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except Exception:
+                    continue
+                if record.get("role") == "user":
+                    user_turns += 1
+                ts = record.get("ts")
+                if isinstance(ts, (int, float)) and ts > 0:
+                    if file_last_ts is None or ts > file_last_ts:
+                        file_last_ts = float(ts)
+        except Exception as e:
+            logger.warning("[dream_log] count_valid_dreams: skipping %s: %s", f.name, e)
+            continue
+
+        if user_turns > VALID_DREAM_MIN_USER_TURNS:
+            total_valid += 1
+            if file_last_ts is not None:
+                if last_dream_at is None or file_last_ts > last_dream_at:
+                    last_dream_at = file_last_ts
+            else:
+                # fall back to file mtime when no ts field
+                mtime = f.stat().st_mtime
+                if last_dream_at is None or mtime > last_dream_at:
+                    last_dream_at = mtime
+
+    return {
+        "total_valid": total_valid,
+        "total_archived": total_archived,
+        "last_dream_at": last_dream_at,
+    }

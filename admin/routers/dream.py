@@ -133,6 +133,83 @@ async def dream_exit(_auth=Depends(verify_token)):
     return {"ok": True, "exited": True}
 
 
+@router.post("/dream/wake", summary="软挽留闸门（满足门控时叶瑄挽留一次；否则直接硬退）")
+async def dream_wake(_auth=Depends(verify_token)):
+    """
+    Soft retention gate called when user taps the WAKE button.
+
+    - If status != DREAM_ACTIVE, OR retention already offered this dream, OR gate
+      threshold not met → falls through to force_exit_dream immediately.
+    - If gate passes → sets status=DREAM_EXIT_REQUESTED, generates one retention
+      sentence, returns {"retained": True, "retention_text": "...", "dream_id": "..."}.
+    - LLM failure in _generate_retention_line → falls back to immediate hard exit
+      (fail-open: user is never blocked from leaving).
+
+    Invariant D preserved: /dream/exit is untouched and always succeeds.
+    """
+    uid = _owner_uid()
+
+    from core.dream.dream_state import DreamStatus, read_state, write_state
+    from core.dream.dream_pipeline import (
+        _should_retain, _generate_retention_line, force_exit_dream,
+    )
+
+    state = read_state(uid)
+    status = state.get("status")
+    dream_id = str(state.get("dream_id") or "").strip()
+
+    # Not in an active dream → hard exit fallback (idempotent, safe)
+    if status != DreamStatus.DREAM_ACTIVE.value:
+        await force_exit_dream(uid)
+        return {"retained": False, "exited": True}
+
+    # Already offered retention this dream → hard exit (no repeated nagging)
+    if state.get("retention_offered_dream_id") == dream_id:
+        await force_exit_dream(uid)
+        return {"retained": False, "exited": True}
+
+    # Gate check: immersion + emotional threshold
+    if not _should_retain(state):
+        await force_exit_dream(uid)
+        return {"retained": False, "exited": True}
+
+    # Transition to EXIT_REQUESTED and mark retention offered
+    state["status"] = DreamStatus.DREAM_EXIT_REQUESTED.value
+    state["retention_offered_dream_id"] = dream_id
+    write_state(uid, state)
+
+    # Generate retention line — fail-open: LLM failure → hard exit
+    retention_text = await _generate_retention_line(uid, state)
+    if not retention_text:
+        logger.warning("[dream_wake] retention LLM failed uid=%s, falling back to hard exit", uid)
+        await force_exit_dream(uid)
+        return {"retained": False, "exited": True}
+
+    return {"retained": True, "retention_text": retention_text, "dream_id": dream_id}
+
+
+@router.post("/dream/resume", summary="挽留后留下（status → DREAM_ACTIVE）")
+async def dream_resume(_auth=Depends(verify_token)):
+    """
+    Resume after a soft retention: set status back to DREAM_ACTIVE so
+    dream_turn() can continue processing messages.
+
+    Only acts when status == DREAM_EXIT_REQUESTED; any other status is a no-op
+    (idempotent, safe to call spuriously).
+    """
+    uid = _owner_uid()
+
+    from core.dream.dream_state import DreamStatus, read_state, write_state
+
+    state = read_state(uid)
+    if state.get("status") == DreamStatus.DREAM_EXIT_REQUESTED.value:
+        state["status"] = DreamStatus.DREAM_ACTIVE.value
+        write_state(uid, state)
+        logger.info("[dream_resume] resumed uid=%s dream_id=%s", uid, state.get("dream_id"))
+
+    return {"ok": True}
+
+
 _BOUNDARY_FACTOR: dict[str, int] = {
     "vague": 10,
     "body_perceptible": 20,
@@ -272,6 +349,15 @@ async def dream_state_get(_auth=Depends(verify_token)):
 
     base.update(hud)
     return base
+
+
+@router.get("/dream/stats", summary="梦境次数统计（只读，有效梦 > N 轮）")
+async def dream_stats_get(_auth=Depends(verify_token)):
+    from core.pipeline_registry import get as _get_pipeline
+    from core.dream.dream_log import count_valid_dreams
+    pl = _get_pipeline()
+    char_id = (pl._active_character_id if pl else None) or "yexuan"
+    return count_valid_dreams(char_id=char_id)
 
 
 @router.get("/dream/settings", summary="读取梦境设置（全字段）")

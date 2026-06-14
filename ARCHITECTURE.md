@@ -15,6 +15,7 @@ QQ 消息 → main.py → message_queue
          ├─ state_machine：观测 owner turn / sensor tick，维护 CHATTING / QUIET / RESTLESS
          ├─ gating/policy：统一 state / active-window / DND / defer / cooldown 决策（含 Watch 发言事件）
          ├─ proposer dry-run：记录 would-send / would-mark；live winner 进入统一执行层
+         ├─ dream_exit：出梦后 QUIET-only 主动开口，一梦一次，沿用 dream_state.char_id
          ├─ policy.py：active-window / DND 运行时策略权威
          ├─ EXECUTE_MODE：当前为 live（见 core/scheduler/execution.py）
          └─ legacy gather：发言型 trigger 让路，maintenance/state scan 保留
@@ -30,6 +31,10 @@ QQ 消息 → main.py → message_queue
 
 通道细节见 `docs/channels.md`。手机端当前通过 mobile 轮询通道接收主动消息，不占用桌宠 WebSocket。花园这类不进入对话 pipeline 的伴生状态，见 `docs/garden.md`。
 Dream Session 后续必须走独立 pipeline，不进入当前现实对话 pipeline，也不走现有 `post_process`。
+
+Scheduler proposal 显式携带 `char_id` 时，`execute_prompt → _pipeline_send` 会冻结该角色的
+Reality scope；若它不是当前 active character，Pipeline 按该 scope 加载对应角色卡与世界书，
+避免“做梦角色”和实际发言角色错位。
 
 多角色群聊使用独立 `core/stage/` Session 内核：Stage 持有 roster、共享 transcript 和纯规则回合仲裁，
 一整轮 Phase A + Phase B 共用一次 owner conversation lock。Reality Stage 通过 per-character

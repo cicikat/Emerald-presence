@@ -63,6 +63,7 @@ def _ensure_builtins_loaded() -> None:
         "core.scheduler.triggers.garden_water",
         "core.scheduler.triggers.garden_daily",
         "core.scheduler.triggers.overflow",
+        "core.scheduler.triggers.dream_exit",
         "core.scheduler.triggers.letter_writer",
     ):
         module = import_module(module_name)

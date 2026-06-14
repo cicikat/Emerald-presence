@@ -70,6 +70,7 @@ _COOLDOWNS: dict[str, int] = {
     "hidden_state_decay":         12 * 3600,       # 用户隐性状态衰减：12小时
     "hidden_state_consolidate":   7 * 24 * 3600,   # 基线收敛：7天
     "overflow":              3 * 3600,   # 理由累积溢出：3小时
+    "dream_exit":           60 * 60,     # 出梦主动开口：一梦一次，1小时冷却兜底
     "letter_writer":         7 * 24 * 3600,  # 真实邮件：7天最多一封
 }
 
@@ -279,6 +280,7 @@ async def _pipeline_send(
     output_mode: str = "speak",   # "speak" | "return"
     record_turn: bool = True,
     kind: str = "scheduled",   # stimulus kind — must be in _TRIGGER_OUTLET_ALLOWED_KINDS
+    char_id: str | None = None,
 ) -> Optional[str]:
     """LOW-TRUST STIMULUS / TRIGGER-ONLY REALITY REPLY outlet.
 
@@ -323,7 +325,7 @@ async def _pipeline_send(
         # same time bucket.  correlation_id is logged for tracing but not hashed.
         import uuid as _uuid
         correlation_id = str(_uuid.uuid4())
-        char_id = _active_char_id_or_none()
+        resolved_char_id = char_id or _active_char_id_or_none()
 
         from core.perceive_event import PerceiveEvent, receive_perceive_event, PerceiveStatus
         pe_event = PerceiveEvent(
@@ -331,7 +333,7 @@ async def _pipeline_send(
             uid=oid,
             channel="system",
             kind=kind,
-            char_id=char_id,
+            char_id=resolved_char_id,
             payload={"trigger_name": trigger_name},
         )
         pe_result = await receive_perceive_event(pe_event)
@@ -339,7 +341,7 @@ async def _pipeline_send(
             logger.info(
                 "[scheduler._pipeline_send] gate=%s trigger=%s uid=%s char_id=%s "
                 "correlation_id=%s dedupe_key=%s",
-                pe_result.status, trigger_name, oid, char_id,
+                pe_result.status, trigger_name, oid, resolved_char_id,
                 correlation_id, pe_result.dedupe_key,
             )
             return None
@@ -347,7 +349,7 @@ async def _pipeline_send(
         logger.info(
             "[scheduler._pipeline_send] perceive_event=true trigger=%s uid=%s char_id=%s "
             "correlation_id=%s event_id=%s",
-            trigger_name, oid, char_id, correlation_id, pe_result.event_id,
+            trigger_name, oid, resolved_char_id, correlation_id, pe_result.event_id,
         )
 
         # Audit extras: threaded into record_assistant_turn → post_process → capture_turn
@@ -367,8 +369,9 @@ async def _pipeline_send(
             prompt = prompt + "\n（今天是她的生日，4月24日）"
         _states = ["在思考", "在翻阅她的日记", "在想她说过的话", "在看窗外", "在灵体出游", "在家里"]
         try:
-            prompt = prompt + f"\n（{_char_name()}此刻{random.choice(_states)}）"
-        except RuntimeError as _cn_err:
+            from core.character_name_provider import get_char_name
+            prompt = prompt + f"\n（{get_char_name(resolved_char_id)}此刻{random.choice(_states)}）"
+        except Exception as _cn_err:
             logger.warning("[scheduler._pipeline_send] 角色名不可用，跳过状态提示: %s", _cn_err)
 
         # ── N1: turn-level scope freeze ──────────────────────────────────────
@@ -376,7 +379,11 @@ async def _pipeline_send(
         # build_prompt / post_process all consume this frozen scope so a mid-turn
         # character switch cannot split reads and writes across two characters.
         try:
-            _frozen_scope = _pipeline._current_reality_scope(oid)
+            if resolved_char_id:
+                from core.memory.scope import MemoryScope
+                _frozen_scope = MemoryScope.reality_scope(oid, resolved_char_id)
+            else:
+                _frozen_scope = _pipeline._current_reality_scope(oid)
         except (ValueError, RuntimeError) as _scope_err:
             logger.error(
                 "[scheduler._pipeline_send] scope freeze 失败，本次触发中止 trigger=%s: %s",

@@ -26,6 +26,13 @@ logger = logging.getLogger(__name__)
 HARD_EXIT_KEYWORD = "/stop"
 _SOFT_EXIT_ACCEPT_MARKER = "[[EXIT_DREAM_ACCEPT]]"
 
+# ── Soft retention gate thresholds (adjustable module constants) ──────────────
+# Immersion proxy: minimum valid dream turns in current session
+RETAIN_MIN_TURNS = 3
+# Emotional intensity thresholds
+RETAIN_TENSION_MIN: float = 0.55   # yexuan emotional_tension (0–1)
+RETAIN_HEAT_MIN: float = 55.0      # body_state.heat (0–100)
+
 # ── scenario_control block parser (v0.6) ──────────────────────────────────────
 
 _SCENARIO_CONTROL_RE = re.compile(
@@ -493,6 +500,8 @@ async def _do_close_dream(uid: str, dream_id: str, exit_type: str) -> None:
     state["status"] = DreamStatus.REALITY_AFTERGLOW.value
     state["last_dream_id"] = dream_id
     state["last_exit_type"] = exit_type
+    state["last_dream_mode"] = dream_mode
+    state["last_exited_at"] = time.time()
     write_state(uid, state)
 
     delete_hud_state(uid)
@@ -540,6 +549,83 @@ async def _generate_summary_bg(
             "[dream_pipeline] %s mode — distill_impression skipped uid=%s dream_id=%s",
             dream_mode, uid, dream_id,
         )
+
+
+def _should_retain(state: dict) -> bool:
+    """
+    Return True iff the dream is immersive enough to warrant a soft retention attempt.
+
+    Immersion proxy: ≥ RETAIN_MIN_TURNS valid turns in this session (avoids retaining
+    a dream that barely started).  Emotional gate: yexuan tension OR body heat must
+    exceed threshold — objective signal, no "explicit" emotion required.
+    """
+    from core.dream.dream_log import read_current
+    from core.dream.dream_state import get_local_state
+
+    local = get_local_state(state)
+    uid = str(state.get("user_id") or "")
+    char_id = str(state.get("char_id") or "yexuan")
+
+    # Immersion: count assistant turns in current dream log as proxy for valid turns
+    try:
+        history = read_current(uid, char_id=char_id)
+        turn_count = sum(1 for m in history if m.get("role") == "assistant")
+    except Exception:
+        turn_count = 0
+
+    immersive = turn_count >= RETAIN_MIN_TURNS
+
+    # Emotional gate: yexuan tension or body heat
+    tension = float(local.get("emotional_tension") or 0.0)
+    from core.dream.body_state import BodyState
+    body = BodyState.from_dict(local.get("body_state") or {})
+    high_emotion = (tension >= RETAIN_TENSION_MIN) or (body.heat >= RETAIN_HEAT_MIN)
+
+    return immersive and high_emotion
+
+
+async def _generate_retention_line(uid: str, state: dict) -> str | None:
+    """
+    Generate a single soft-retention sentence from 叶瑄 using dream-mode LLM.
+
+    Returns the generated text, or None on any failure.
+    Fail-open contract: caller must fall back to force_exit_dream on None.
+    """
+    try:
+        from core.pipeline_registry import get as _get_pipeline
+        pl = _get_pipeline()
+        if pl is None:
+            return None
+        character = pl.character
+        char_name = getattr(character, "name", "你") if character else "你"
+
+        # Minimal dream-context messages: system card + instruction
+        # We intentionally skip the full dream prompt build to keep this cheap.
+        # The instruction itself carries enough context.
+        system_content = (
+            f"你是{char_name}，正在一场梦境会话中。"
+            "你的人格、语气、对她的依恋感保持不变，不受世界设定影响。"
+        )
+        instruction = (
+            "（你察觉到她正要醒来离开这场梦。此刻梦里气氛还浓、情绪还热。"
+            "你不想就这样让她走——说一句想留住她的话。"
+            "怎么说由你此刻的状态决定：可以是轻声的挽留、半开玩笑的不舍、"
+            "或一个「再待一会儿」的请求。只说一句，不要解释，不要括号动作。）"
+        )
+
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": instruction},
+        ]
+
+        from core import llm_client
+        reply = await llm_client.chat(messages)
+        if not reply or not reply.strip():
+            return None
+        return reply.strip()
+    except Exception as exc:
+        logger.warning("[dream_pipeline] _generate_retention_line failed uid=%s: %s", uid, exc)
+        return None
 
 
 def _ensure_dream_id(uid: str, state: dict) -> str:

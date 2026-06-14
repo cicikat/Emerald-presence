@@ -280,6 +280,8 @@ WriteEnvelope 双重门控：
 
 afterglow 完整路径：Dream exit → summary → Reality prompt `6f_dream_afterglow`（0–5h）；同时 `wire_afterglow_from_summary()` → `integrate_afterglow_and_save()` → hidden_state.json（Phase 6 numeric wiring）并写 residue，供 `dream_afterglow_soft_hint` 在详细层结束后接管至 8h。
 
+出梦后的首次现实开口由 scheduler `dream_exit` proposer 负责，而不是 hook 在关闭点：它等待异步 summary/afterglow 就绪后，走正常 Reality `_pipeline_send → fetch_context → build_prompt`，因此直接复用 `6f_dream_afterglow` / soft hint 上下文。触发器只在 `QUIET` 状态报名，按 `dream_state.char_id` 让做梦角色发言，并以 `last_greeted_dream_id` 保证一梦一次。scenario/mirror 不写 afterglow，按中性问候降级；sandbox afterglow 8h 内始终未就绪时，也仅在退出后一个有限清醒时段内降级问候一次。
+
 ---
 
 ## 四、三层回流（梦 → 现实，唯一出口）
@@ -289,6 +291,8 @@ afterglow 完整路径：Dream exit → summary → Reality prompt `6f_dream_aft
 | **archive 原文** | 梦境全文 | `archive/dream_*.jsonl` | **仅她复盘，任何 loader 永不读** |
 | **afterglow summary** | 剥场景的情绪余韵 | `summaries/*.summary.json` | `wire_afterglow_from_summary()` 读取后转写 `afterglow_residue.json`（Phase 6 已接线）；summary 本身 never_retrieve |
 | **impression residue** | 低权模糊印象 | `impressions/{uid}.json` → 6g | impression_loader 唯一读 |
+
+`dream_exit` 主动开口不是第四层回流产物：它不自行保存或拼装梦内容，只消费上述现实侧只读注入层并触发一次正常 Reality turn。
 
 **边界精确化**：「我们共有过一场梦 + 那种情绪」**是**真实共同事件，可回流；「梦里去了哪、做了什么、什么世界设定」**不是**现实事实，只留 archive。剥离在**生成时**结构性完成，使下游没有可泄漏的场景。
 
@@ -338,17 +342,27 @@ REALITY_CHAT → DREAM_ENTRANCE_AVAILABLE → DREAM_ACTIVE → DREAM_CLOSING →
 |---|---|---|
 | `POST /dream/enter` | ✅ 已有 | 入梦，冻结世界/快照 |
 | `POST /dream/chat` | ✅ 已有 | 梦内回合，走独立 dream pipeline |
-| `POST /dream/exit` | ✅ 已有 | 硬退出；无条件穿透并立即关闭梦境 |
+| `POST /dream/exit` | ✅ 已有 | 硬退出；无条件穿透并立即关闭梦境（Invariant D，永不可改） |
+| `POST /dream/wake` | ✅ 已有 | 软挽留闸门；满足门控时叶瑄挽留一次，否则直接硬退 |
+| `POST /dream/resume` | ✅ 已有 | 挽留后留下；`DREAM_EXIT_REQUESTED → DREAM_ACTIVE` |
 | `GET /dream/state` | ✅ 已有 | 只读 UI 投影：状态、身体数值、张力、场景和象征锚 |
 | `GET /dream/settings` | ✅ 已有 | 读取 per-uid 偏好默认值 |
 | `PATCH /dream/settings` | ✅ 已有 | 枚举校验后的局部更新；`world_layer` / `lucid_mode` 仅影响下一场梦 |
+
+**软挽留（`/dream/wake`）设计约束**：
+- `/dream/exit` 保持纯硬退，**零改动**（Invariant D）。
+- `/dream/wake` 是唯一软挽留入口，且只拦一次（`retention_offered_dream_id` 去重）。
+- 门控：入梦有效轮数 ≥ 3（`RETAIN_MIN_TURNS`）AND（`emotional_tension ≥ 0.55` OR `body.heat ≥ 55`）。
+- LLM 生成挽留失败 → fail-open，自动退化为硬退出，不卡用户。
+- 用户坚持醒来：前端调 `/dream/exit`（硬退，必成功）。
+- `DREAM_EXIT_REQUESTED` 状态下 `dream_turn()` 仍被 status 守卫拒绝（只接受 DREAM_ACTIVE / DREAM_CLOSING）；`/dream/resume` 把状态置回 DREAM_ACTIVE 后对话恢复。
 
 入梦构建 `context_snapshot` 时会尝试消费 reality-scoped `dream_seed.json`。有效种子以前缀
 `今晚的梦境设定：...` 注入 `entry_reason`；TTL 12 小时、一次性消费、失败不阻断 Dream。
 
 ### dream_state.json 字段
 
-`user_id` / `status` / `dream_id` / `frozen_world` / `lucid_mode` / `context_snapshot` / `body_state{heat,sensitivity,tension}` / `emotional_tension`(他的，0–1)
+`user_id` / `status` / `dream_id` / `frozen_world` / `lucid_mode` / `context_snapshot` / `body_state{heat,sensitivity,tension}` / `emotional_tension`(他的，0–1)。关闭后保留 `char_id` / `last_dream_id` / `last_exit_type` / `last_dream_mode` / `last_exited_at` / `last_greeted_dream_id`，供现实侧出梦问候去重与降级判断；`clear_local_state()` 不清这些字段。软挽留相关字段：`retention_offered_dream_id`（标记本场已挽留过，防重复；`clear_local_state()` 不清，因为存在于活跃梦期间的 state dict 外层）。
 
 ### dream_settings.json 字段（UI 设置页对应）
 

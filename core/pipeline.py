@@ -196,6 +196,17 @@ class Pipeline:
         uid = scope.uid
         char_id = scope.character_id
         assert char_id is not None
+        scoped_character = self.character
+        scoped_lore_engine = self.lore_engine
+        if char_id != self._active_character_id:
+            from core.character_loader import load as load_character
+            from core.lore_engine import LoreEngine
+
+            scoped_character = load_character(char_id)
+            scoped_lore_engine = LoreEngine()
+            scoped_lore_engine.load()
+            if scoped_character.world_book:
+                scoped_lore_engine.load_entries(scoped_character.world_book)
 
         from core.memory import short_term, user_profile, group_context, event_log, mid_term
         from core.memory import user_identity, user_facts
@@ -217,7 +228,7 @@ class Pipeline:
         history          = short_term.load_for_prompt(uid, char_id=char_id)
         recent_group_ctx = group_context.get_recent(group_id)
         relation         = user_relation.get_relation(uid)
-        lore_entries     = self.lore_engine.match(content, history)
+        lore_entries     = scoped_lore_engine.match(content, history)
 
         # 情景记忆检索
         # N2-A: fetch_context 是读路径，传 allow_strengthen=False 禁止写回 strength，
@@ -233,7 +244,7 @@ class Pipeline:
         from core.memory.mood_state import get_current as _get_mood
         episodic_result = format_for_prompt(
             episodic_memories,
-            char_name=self.character.name,
+            char_name=scoped_character.name,
             current_emotion=_get_mood(char_id=char_id),
         )
 
@@ -249,7 +260,7 @@ class Pipeline:
         from core.memory.mood_state import get_current as _get_mood2
         episodic_fallback_result = format_for_prompt(
             episodic_fallback,
-            char_name=self.character.name,
+            char_name=scoped_character.name,
             current_emotion=_get_mood2(char_id=char_id),
         ) if episodic_fallback else ""
 
@@ -295,6 +306,7 @@ class Pipeline:
             "episodic_fallback_result": episodic_fallback_result,
             "mid_term":                 mid_term_text,
             "dream_impression_text":    dream_impression_text,
+            "_scoped_character":        scoped_character,
         }
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -346,16 +358,15 @@ class Pipeline:
 
         # 跨通道接续感知
         if channel and self._last_channel and channel != self._last_channel:
-            _channel_names = {"qq": "QQ", "desktop": "桌宠"}
-            _from = _channel_names.get(self._last_channel, self._last_channel)
-            _to = _channel_names.get(channel, channel)
-            _switch_hint = f"（刚才还在{_from}那边说话，现在换到{_to}这里了。是同一个对话的延续。）"
+            _switch_hint = "（你感觉她像是换了个地方继续跟你说话，但这还是同一段对话的延续。）"
             _perception = (_perception + "；" + _switch_hint) if _perception else _switch_hint
         if channel:
             self._last_channel = channel
 
+        scoped_character = context.get("_scoped_character", self.character)
+        scoped_author_note = self.author_note_extra if _char_id == self._active_character_id else ""
         messages, debug_info = prompt_builder.build(
-            character=self.character,
+            character=scoped_character,
             user_id=user_id,
             user_message=content,
             history=context["history"],
@@ -368,7 +379,7 @@ class Pipeline:
             lore_entries=context["lore_entries"],
             tool_result=tool_result,
             perception_block=_perception,
-            author_note_extra=self.author_note_extra,
+            author_note_extra=scoped_author_note,
             current_time=_current_time,
             reminders=context.get("reminders", []),
             diary_context=context.get("diary_context", ""),
@@ -381,7 +392,8 @@ class Pipeline:
             stage_presence=context.get("stage_presence", ""),
             stage_transcript=context.get("stage_transcript", ""),
         )
-        self.author_note_extra = ""
+        if _char_id == self._active_character_id:
+            self.author_note_extra = ""
         debug_info["pending_paths"] = _pending_paths
         return messages, debug_info
 

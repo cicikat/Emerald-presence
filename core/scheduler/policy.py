@@ -154,6 +154,13 @@ POLICY_TABLE: dict[str, TriggerPolicy] = {
         mark_on_drop=False,
         cross_marks=["morning_greeting"],
     ),
+    "dream_exit": TriggerPolicy(
+        trigger_id="dream_exit",
+        priority="normal",
+        active_window_behavior="defer",
+        max_defer_age_secs=4 * 3600,
+        on_defer_expire="force_send",
+    ),
 
     # ── filler，活跃窗口内直接 drop ────────────────────────────────────────
     "random_message": TriggerPolicy(

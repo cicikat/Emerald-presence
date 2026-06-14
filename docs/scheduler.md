@@ -30,6 +30,7 @@ core/scheduler/triggers/         ← 各触发器独立文件
     reminders.py                 到点备忘录 proposer
     sensor_aware.py              sensor 实时状态 → 主动开口（默认关闭）
     overflow.py                  多种真实理由累计溢出后主动联系
+    dream_exit.py                出梦后由做梦角色主动开口一次
     letter_writer.py             情感事件驱动的真实邮件来信
     dnd.py                       请勿打扰状态（已实现，R2-D 已接入 main.py）
 ```
@@ -137,7 +138,7 @@ conversation_lock(uid)
 
 已迁移 proposer 覆盖：watch（`hr_critical/hr_high/sleep_end`）、生日四档、`period_reminder`、
 time_based 的早晚安/随机/天气/日记/主动回忆、diary 两档、`timenode`、`festival/holiday_boost`、
-`reminders`、`topic_followup`、`overflow`、`letter_writer`、花园伴生事件（bloom/harvest/handle/vase）。`garden_water`、
+`reminders`、`topic_followup`、`overflow`、`dream_exit`、`letter_writer`、花园伴生事件（bloom/harvest/handle/vase）。`garden_water`、
 `garden_daily` 扫描本体、`episodic_sweep`、`episodic_decay`、`dlq_monitor`、`sensor_aware`
 仍只走 legacy 真实检查或事件驱动路径。
 
@@ -556,6 +557,7 @@ window 拦截、LLM 空回复或发送前异常时，不调用 execute 的 `afte
 | `hr_critical` | 1h | **高** | watch | 心率>120 告警 |
 | `sleep_end` | 2h | 低 | watch | 睡眠结束感知；`admin/routers/watch.py` 合并睡眠片段后回到 `watch.on_watch_event("sleep_end", ...)` |
 | `overflow` | 3h | 低 | overflow | 对话间隔、旧记忆牵引、隐性需求、花园事件、强情绪累计超过阈值后主动联系 |
+| `dream_exit` | 1h | 普通 | dream_exit | 出梦后由 dream_state.char_id 对应角色主动开口；QUIET-only、一梦一次；无 afterglow 时按有限时段降级为中性问候 |
 | `letter_writer` | 7天 | 低 | letter_writer | 梦境、久未对话、强记忆、纪念日前夕或 hidden state 溢出时，经质量与相似度门控后发送真实邮件 |
 | ~~`sleep_report`~~ | 20h | 低 | watch | 睡眠报告（未实现，已移除冷却位） |
 | reminders（备忘录） | 无冷却 | 低 | loop.py内联 | 到点即发，发完标记完成 |

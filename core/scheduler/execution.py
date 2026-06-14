@@ -79,7 +79,12 @@ async def execute_prompt(
     from core.scheduler import loop
     resolved_char_id = char_id or loop._active_char_id_or_none()
 
-    sent_text = await loop._pipeline_send(prompt, search_query=search_query, trigger_name=trigger_name)
+    sent_text = await loop._pipeline_send(
+        prompt,
+        search_query=search_query,
+        trigger_name=trigger_name,
+        char_id=resolved_char_id,
+    )
     if not sent_text:
         blocked = ExecuteResult(
             trigger_name=result.trigger_name,
