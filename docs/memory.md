@@ -654,7 +654,7 @@ author_note_rotator 每次选 note 时读取此文件，命中 underrepresented 
 
 - `get_current()` → 当前情绪字符串
 - `get_intensity()` → 当前强度 float
-- `update(emotion)` → 漂移更新（post_process 调）
+- `update(emotion, force=False)` → 漂移更新；`force=True` 跳过切换门槛/pending，但仍保留强度漂移
 - `nudge_from_memory(emotion, strength)` → 记忆召回时的微调（episodic 调）
 
 ### ⚠️ 当前状态
@@ -673,7 +673,7 @@ mood_text 输出**不是独立的 prompt 层**，而是直接拼入层 1（syste
 mood_state 目前影响：
 1. episodic_memory 召回时的 emotion_bonus 加分
 2. nudge_from_memory 的情绪强度微调
-3. 三路触发写入：detect（每轮 post_process）、trigger（yandere 关键词）、schedule（深夜自动注入 sleepy）
+3. 三路触发写入：detect（每轮 post_process，保留强度门槛）、trigger（yandere 关键词；工具 thinking 通过 helper 强制置位）、schedule（深夜 sleepy 通过 helper 强制置位）
 ---
 
 ## 记忆系统时序关系

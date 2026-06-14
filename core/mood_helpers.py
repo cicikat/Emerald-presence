@@ -63,7 +63,7 @@ async def maybe_mark_sleepy_from_time(uid: str, char_id: str, envelope=None) -> 
 
     async with _locks.global_lock("mood_state"):
         if _get_mood(char_id=char_id) not in ("yandere", "angry"):
-            _mood_update("sleepy", source="schedule", char_id=char_id)
+            _mood_update("sleepy", source="schedule", char_id=char_id, force=True)
             logger.debug(
                 "[mood_helpers.maybe_mark_sleepy] sleepy mood 写入 uid=%s char_id=%s", uid, char_id
             )
@@ -99,7 +99,7 @@ async def mark_tool_thinking_mood(uid: str, char_id: str, envelope=None) -> bool
     from core.memory.mood_state import update as _mood_update
 
     async with _locks.global_lock("mood_state"):
-        _mood_update("thinking", source="trigger", char_id=char_id)
+        _mood_update("thinking", source="trigger", char_id=char_id, force=True)
         logger.debug(
             "[mood_helpers.mark_tool_thinking] thinking mood 写入 uid=%s char_id=%s", uid, char_id
         )

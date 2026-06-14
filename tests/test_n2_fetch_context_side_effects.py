@@ -357,6 +357,7 @@ async def test_mark_tool_thinking_mood_calls_mood_update():
 
     assert len(calls) == 1
     assert calls[0][0][0] == "thinking", f"情绪应为 thinking，实际 {calls[0][0][0]!r}"
+    assert calls[0][1]["force"] is True
 
 
 @pytest.mark.asyncio
@@ -405,6 +406,7 @@ async def test_maybe_mark_sleepy_writes_when_nighttime():
         await mood_helpers.maybe_mark_sleepy_from_time(uid="u1", char_id="yexuan")
 
     assert len(calls) == 1 and calls[0][0][0] == "sleepy"
+    assert calls[0][1]["force"] is True
 
 
 @pytest.mark.asyncio

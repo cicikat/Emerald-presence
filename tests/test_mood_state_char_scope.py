@@ -18,6 +18,7 @@ Covers:
     — active=missing_id，mood_state.update 不被调用，post_process 抛错
 7.  mood_state 路径不含 uid
     — sandbox.mood_state(char_id="character_b") 路径字符串不含 uid 格式
+8.  force=True 允许低强度专用入口一次切换；普通 detect 仍保留低强度去噪
 """
 
 import asyncio
@@ -201,6 +202,36 @@ def test_update_writes_only_target_char(sandbox):
     assert yexuan_before == yexuan_after, (
         "yexuan mood_state must be unchanged after update(char_id='character_b')"
     )
+
+
+@pytest.mark.parametrize(
+    ("emotion", "expected_intensity"),
+    [("sleepy", 0.09), ("thinking", 0.06)],
+)
+def test_force_update_switches_low_intensity_mood_immediately(
+    sandbox, emotion, expected_intensity
+):
+    """Dedicated force writers switch low-intensity moods in one update."""
+    from core.memory.mood_state import update
+
+    state = update(emotion, source="trigger", char_id="character_b", force=True)
+
+    assert state["previous"] == "neutral"
+    assert state["current"] == emotion
+    assert state["pending"] is None
+    assert state["intensity"] == expected_intensity
+
+
+@pytest.mark.parametrize("emotion", ["sleepy", "thinking"])
+def test_detect_update_still_rejects_low_intensity_mood_switch(sandbox, emotion):
+    """The normal detect path keeps the low-intensity noise gate."""
+    from core.memory.mood_state import update
+
+    state = update(emotion, source="detect", char_id="character_b", force=False)
+
+    assert state["current"] == "neutral"
+    assert state["pending"] is None
+    assert state["intensity"] > 0.0
 
 
 # ── 4. pipeline.post_process mood update passes active char_id ───────────────

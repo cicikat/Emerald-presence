@@ -83,10 +83,18 @@ def save(state: dict, *, char_id: str = "yexuan") -> None:
     reset("mood_state")
 
 
-def update(new_emotion: str, new_intensity: float | None = None, source: str = "detect", *, char_id: str = "yexuan") -> dict:
+def update(
+    new_emotion: str,
+    new_intensity: float | None = None,
+    source: str = "detect",
+    *,
+    char_id: str = "yexuan",
+    force: bool = False,
+) -> dict:
     """
     根据本轮检测到的情绪，做加权漂移更新情绪状态。
     新情绪占30%，旧情绪占70%。
+    force=True 时跳过切换门槛和 pending，强度仍按相同权重漂移。
     返回更新后的状态。
     """
     state = load(char_id=char_id)
@@ -104,7 +112,15 @@ def update(new_emotion: str, new_intensity: float | None = None, source: str = "
     # 用 pending 字段记录"上轮想切换的情绪"
     pending = state.get("pending", None)
 
-    if new_emotion != current:
+    if force:
+        state["previous"] = current
+        state["current"] = new_emotion
+        state["pending"] = None
+        logger.info(
+            f"[mood] 情绪强制切换: {current} → {new_emotion} "
+            f"(intensity={blended_intensity:.2f})"
+        )
+    elif new_emotion != current:
         if new_intensity >= 0.4:
             if pending == new_emotion:
                 # 连续两轮相同新情绪，执行切换

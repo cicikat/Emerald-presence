@@ -100,7 +100,9 @@ class TestSleepyHelperEnvelopeGating:
                                 uid="test_uid", char_id="yexuan", envelope=envelope_allow
                             )
         assert result is True
-        mock_update.assert_called_once_with("sleepy", source="schedule", char_id="yexuan")
+        mock_update.assert_called_once_with(
+            "sleepy", source="schedule", char_id="yexuan", force=True
+        )
 
     @pytest.mark.asyncio
     async def test_sleepy_legacy_none_envelope_allows_write(self):
@@ -182,7 +184,9 @@ class TestThinkingHelperEnvelopeGating:
                     uid="test_uid", char_id="yexuan", envelope=envelope_allow
                 )
         assert result is True
-        mock_update.assert_called_once_with("thinking", source="trigger", char_id="yexuan")
+        mock_update.assert_called_once_with(
+            "thinking", source="trigger", char_id="yexuan", force=True
+        )
 
     @pytest.mark.asyncio
     async def test_thinking_legacy_none_envelope_allows_write(self):
