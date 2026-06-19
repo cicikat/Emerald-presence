@@ -104,13 +104,19 @@ async def _compress_facts(facts: list) -> list:
     return facts
 
 
+_PENDING_OVERRIDE_THRESHOLD = 2  # 连续 N 次一致提取才落盘覆盖
+
+
 async def update(user_id: str, new_facts: dict, *, char_id: str = "yexuan"):
     """
-    合并更新用户画像，不覆盖已有非空值
+    合并更新用户画像。
 
-    new_facts 中 important_facts 列表会去重追加；
-    追加后若总数超过 50 条，触发 LLM 压缩到 30 条以内。
-    其他字段只在原值为 None 时更新
+    important_facts 列表去重追加；超 30 条触发 LLM 压缩。
+    其他标量字段：
+      - 原值为空 → 直接填入（同旧逻辑）
+      - 原值非空且新值不同 → 写入 _pending_overrides 挂起，
+        连续 _PENDING_OVERRIDE_THRESHOLD 次同一新值才落盘覆盖，
+        防止单次偶然提取翻转已确认的值。
     """
     profile = load(user_id, char_id=char_id)
 
@@ -125,7 +131,7 @@ async def update(user_id: str, new_facts: dict, *, char_id: str = "yexuan"):
             elif value and value not in existing:
                 existing.append(value)
 
-            # 超过 50 条时触发 LLM 合并压缩
+            # 超过 30 条时触发 LLM 合并压缩
             if len(existing) > 30:
                 logger.info(
                     f"[user_profile] important_facts 已达 {len(existing)} 条，触发 LLM 压缩"
@@ -134,9 +140,35 @@ async def update(user_id: str, new_facts: dict, *, char_id: str = "yexuan"):
 
             profile["important_facts"] = existing
         else:
-            # 其他字段：只在原值为空时更新
-            if not profile.get(key) and value:
-                profile[key] = value
+            old_value = profile.get(key)
+            if not old_value:
+                # 空值直接填
+                if value:
+                    profile[key] = value
+            elif value and value != old_value:
+                # 非空旧值且新值不同：走 pending-override 计数
+                pending = profile.setdefault("_pending_overrides", {})
+                current = pending.get(key, {})
+                if current.get("new_value") == value:
+                    current["count"] = current.get("count", 1) + 1
+                else:
+                    current = {"new_value": value, "count": 1}
+
+                if current["count"] >= _PENDING_OVERRIDE_THRESHOLD:
+                    profile[key] = value
+                    pending.pop(key, None)
+                    if not pending:
+                        profile.pop("_pending_overrides", None)
+                    logger.info(
+                        f"[user_profile] {key} 覆盖更新：{old_value!r} → {value!r}"
+                        f"（{current['count']} 次连续提取）"
+                    )
+                else:
+                    pending[key] = current
+                    logger.debug(
+                        f"[user_profile] {key} pending override {current['count']}/{_PENDING_OVERRIDE_THRESHOLD}"
+                        f"：候选值 {value!r}"
+                    )
 
     _save(user_id, profile, char_id=char_id)
 
@@ -151,17 +183,16 @@ async def extract_and_update(user_id: str, recent_messages: list[dict], *, char_
     if not recent_messages:
         return
 
-    # 把消息列表转换成可读文本
-    conv_text = "\n".join(
-        f"{'用户' if m['role'] == 'user' else 'AI'}: {m['content']}"
-        for m in recent_messages[-10:]  # 只取最近10条，省token
-    )
+    # 只喂用户轮——角色发言不是事实证据，防止角色幻觉被当事实写入画像
+    user_turns = [m for m in recent_messages if m.get("role") == "user"]
+    conv_text = "\n".join(m["content"] for m in user_turns[-10:])
 
     prompt_messages = [
         {
             "role": "system",
             "content": (
-                "你是一个信息提取助手。请从下面的对话中提取用户的个人信息。\n"
+                "你是一个信息提取助手。请从下面的用户发言中提取用户的个人信息。\n"
+                "注意：以下文字仅包含用户自己说的话，不含AI发言。\n"
                 "只返回 JSON 对象，不要输出任何其他内容。\n"
                 "JSON 格式：\n"
                 '{"name": null或字符串, "location": null或字符串, "pets": null或字符串, "interests": null或字符串, "occupation": null或字符串, "important_facts": [字符串列表]}\n'
@@ -172,7 +203,7 @@ async def extract_and_update(user_id: str, recent_messages: list[dict], *, char_
         },
         {
             "role": "user",
-            "content": f"对话内容：\n{conv_text}",
+            "content": f"用户发言：\n{conv_text}",
         },
     ]
 

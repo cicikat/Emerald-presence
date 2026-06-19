@@ -361,6 +361,10 @@ async def enter_dream(
     from core.dream.dream_state import read_state, write_state, DreamStatus, _VALID_DREAM_MODES
     from core.dream.dream_context import build_snapshot
 
+    # Fail-closed: dream subsystem supports yexuan only; non-yexuan blocked until Method B
+    if char_id != "yexuan":
+        return {"ok": False, "error": "这个角色还不会做梦"}
+
     if dream_mode not in _VALID_DREAM_MODES:
         return {"ok": False, "error": f"invalid dream_mode={dream_mode!r}"}
 
@@ -409,7 +413,10 @@ async def enter_dream(
         return {"ok": False, "error": f"cannot enter dream from status={state.get('status')}"}
 
     dream_id = f"dream_{uid}_{int(time.time())}"
-    snapshot = await build_snapshot(uid, entry_reason=entry_reason, char_id=char_id)
+    from core.pipeline_registry import get as _get_pl_enter
+    _pl_enter = _get_pl_enter()
+    char_name = (getattr(getattr(_pl_enter, "character", None), "name", None) or "叶瑄") if _pl_enter else "叶瑄"
+    snapshot = await build_snapshot(uid, entry_reason=entry_reason, char_id=char_id, char_name=char_name)
 
     # Freeze world_layer and lucid_mode from settings for this dream session
     from core.dream.dream_settings import load as _load_settings_enter

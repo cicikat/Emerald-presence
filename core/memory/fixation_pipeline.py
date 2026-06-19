@@ -426,6 +426,35 @@ def _write_trigger_audit_log(
         log_error("trigger_audit_log.write", _e)
 
 
+# 会话型触发器：主动说给用户听、期待用户回应，其 assistant 正文写入 short_term
+# 保留对话连续性。纯维护型触发（episodic_sweep / hidden_state_decay 等）不发言，
+# 不调用 capture_turn，无需列出。
+CONVERSATIONAL_TRIGGERS: frozenset[str] = frozenset({
+    # 花园伴生事件
+    "garden_bloom", "garden_harvest_expired", "garden_handle_ask",
+    "garden_handle_gift", "garden_handle_self", "garden_vase_wilted",
+    # 时间类问候 / 碎碎念
+    "morning_greeting", "night_reminder", "random_message", "weather_alert",
+    "daily_journal", "spontaneous_recall",
+    # 日记相关
+    "diary_reminder", "diary_share_reminder",
+    # 关心 / 追问
+    "period_reminder", "topic_followup", "overflow", "presence_nag",
+    # 生日系列
+    "birthday_midnight", "birthday_eve", "birthday_afternoon", "birthday_night",
+    # 时间节点 / 节日
+    "timenode", "festival", "holiday_boost",
+    # 备忘录到点提醒
+    "reminders",
+    # Apple Watch 事件
+    "hr_critical", "hr_high", "sleep_end",
+    # 传感器主动开口
+    "sensor_aware",
+    # 出梦 / 来信
+    "dream_exit", "letter_writer",
+})
+
+
 def capture_turn(
     uid: str,
     user_msg: str,
@@ -441,9 +470,11 @@ def capture_turn(
     """
     生成 turn_id，写 short_term + event_log。
     trigger_name 非空时为 scheduler/sensor/watch 触发路径：
-      - 不写 short_term（trigger 不是 user message，不进入 LLM 历史上下文）。
-      - 只写 event_log（forensic audit）+ trigger_audit_log（仅 metadata/hash，无正文）。
-    P0 trigger boundary rule: trigger 永远不是 assistant history。
+      - 会话型触发（trigger_name in CONVERSATIONAL_TRIGGERS）：写 short_term assistant 行
+        保留对话连续性，同时写 event_log + trigger_audit_log。
+      - 非会话型触发（系统锚点等）：不写 short_term，只写 event_log + trigger_audit_log。
+    P0 trigger boundary rule: trigger 的 user_msg 侧永远不是 history；
+    会话型触发的 assistant 正文例外，以维持叶瑄主动开口后的上下文连续性。
 
     调用约束：必须在 uid_lock 内、detect_emotion 完成后调用。
     envelope 未传时默认零值（fail-closed）。
@@ -474,8 +505,10 @@ def capture_turn(
     _scrubbed_reply = _scrub(reply)
 
     if trigger_name:
-        # P0 trigger boundary: triggers must NOT enter short_term/history.
-        # Write forensic audit log + metadata-only trigger_audit_log.
+        # P0 trigger boundary: non-conversational triggers must NOT enter short_term.
+        # Conversational triggers (those that speak to the user and expect a reply)
+        # additionally write their assistant reply to short_term so that the next
+        # user turn has context.  The forensic audit path is unchanged for all triggers.
         _write_trigger_audit_log(
             uid, turn_id, trigger_name, _scrubbed_reply, emotion, char_id,
             **(audit_extras or {}),
@@ -484,6 +517,10 @@ def capture_turn(
             event_log.append(uid, "assistant", _scrubbed_reply, emotion=emotion, turn_id=turn_id, trigger_name=trigger_name, char_id=char_id)
             if _scrubbed_reply is not None else True,
         ]
+        if trigger_name in CONVERSATIONAL_TRIGGERS and _scrubbed_reply is not None:
+            writes.append(
+                short_term.append(uid, "assistant", _scrubbed_reply, turn_id=turn_id, char_id=char_id)
+            )
     else:
         writes = [
             short_term.append(uid, "user", user_msg, turn_id=turn_id, char_id=char_id),
@@ -681,11 +718,19 @@ async def reflect_to_episodic(
             )
 
         # 过滤平淡内容。closure 已在此前执行，因此中性低强度完结事件也能关闭旧记忆。
+        # group 来源（stage 群聊投影）豁免：给底分 0.4，确保群聊事实能进 episodic。
         if data.get("emotion_peak") == "neutral" and data.get("strength", 0) < 0.4:
-            _log_fixation("reflect_to_episodic", uid, {
-                "mid_ids": mid_ids, "trigger": trigger,
-            }, "ok", "neutral skip")
-            return None
+            _is_group_source = any(
+                str(e.get("source", "")).startswith("group:")
+                for e in to_process
+            )
+            if _is_group_source:
+                data["strength"] = 0.4
+            else:
+                _log_fixation("reflect_to_episodic", uid, {
+                    "mid_ids": mid_ids, "trigger": trigger,
+                }, "ok", "neutral skip")
+                return None
 
         episode: dict = {
             "id": ep_id,

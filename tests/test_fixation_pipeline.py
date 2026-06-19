@@ -476,3 +476,88 @@ def test_validate_episode_sleepy_passes():
 def test_validate_episode_illegal_emotion_rejected():
     from core.pipeline import _validate_episode
     assert _validate_episode(_base_episode(emotion_peak="unknown_emotion")) is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# capture_turn：会话型触发写 short_term / 锚点型触发不写
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_conversational_trigger_writes_short_term(sandbox):
+    """会话型触发（如 garden_bloom）应将 assistant 正文写入 short_term。"""
+    from core.memory.fixation_pipeline import capture_turn
+    from core.memory import short_term
+    from core.write_envelope import stamp_trigger
+
+    uid = "u_conv_trigger"
+    turn_id = capture_turn(
+        uid, "", "那株花开了，站在那里看了一会儿。", "gentle",
+        trigger_name="garden_bloom",
+        envelope=stamp_trigger(),
+    )
+
+    history = short_term.load(uid)
+    assert len(history) == 1, "会话型触发应写入 1 条 short_term assistant 记录"
+    assert history[0]["role"] == "assistant"
+    assert history[0]["_turn_id"] == turn_id
+
+
+def test_non_conversational_trigger_skips_short_term(sandbox):
+    """未在 CONVERSATIONAL_TRIGGERS 中的触发不应写入 short_term。"""
+    from core.memory.fixation_pipeline import capture_turn
+    from core.memory import short_term
+    from core.write_envelope import stamp_trigger
+
+    uid = "u_nonconv_trigger"
+    capture_turn(
+        uid, "", "系统内部锚点", "neutral",
+        trigger_name="__unknown_anchor__",
+        envelope=stamp_trigger(),
+    )
+
+    history = short_term.load(uid)
+    assert len(history) == 0, "未知/锚点型触发不应写入 short_term"
+
+
+def test_conversational_trigger_entry_survives_load_for_prompt(sandbox):
+    """会话型触发写入的 assistant 条目不应被 load_for_prompt 的 trigger_stub 过滤器剔除。"""
+    from core.memory.fixation_pipeline import capture_turn
+    from core.memory.short_term import load_for_prompt
+    from core.write_envelope import stamp_trigger
+
+    uid = "u_conv_prompt"
+    capture_turn(
+        uid, "", "昨晚做了个梦，醒来想跟你说说。", "gentle",
+        trigger_name="dream_exit",
+        envelope=stamp_trigger(),
+    )
+
+    entries = load_for_prompt(uid)
+    assert len(entries) == 1, "会话型触发 assistant 记录应出现在 load_for_prompt 结果中"
+    assert entries[0]["role"] == "assistant"
+
+
+def test_conversational_trigger_turn_grouped_correctly(sandbox):
+    """会话型触发写入后，用户回复应和触发 assistant 条目形成同一 turn-group（共享 turn_id 可选）。"""
+    from core.memory.fixation_pipeline import capture_turn
+    from core.memory import short_term
+    from core.write_envelope import stamp_trigger, stamp_user_chat
+
+    uid = "u_conv_grouping"
+
+    # 叶瑄因 garden_bloom 主动发话
+    t1 = capture_turn(
+        uid, "", "花开了。", "gentle",
+        trigger_name="garden_bloom",
+        envelope=stamp_trigger(),
+    )
+    # 用户回复
+    t2 = capture_turn(
+        uid, "好漂亮！", "嗯，很好看。", "happy",
+        envelope=stamp_user_chat(),
+    )
+
+    history = short_term.load(uid)
+    # 共 3 条：trigger assistant + user + user_reply assistant
+    assert len(history) == 3
+    roles = [e["role"] for e in history]
+    assert roles == ["assistant", "user", "assistant"]

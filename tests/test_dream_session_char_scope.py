@@ -57,36 +57,20 @@ def _read_state(sandbox, uid):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-# ── 1. enter_dream writes char_id into dream_state ────────────────────────────
+# ── 1. enter_dream rejects non-yexuan (Method A fail-closed) ─────────────────
 
-def test_enter_dream_writes_char_id(sandbox):
-    """enter_dream(uid, char_id='character_b') must persist char_id in dream_state JSON."""
+def test_enter_dream_rejects_non_yexuan(sandbox):
+    """enter_dream with a non-yexuan char_id must fail-closed with a friendly error."""
     from core.dream.dream_pipeline import enter_dream
-    from core.dream.dream_state import DreamStatus
 
     async def run():
-        with patch("core.dream.dream_context.build_snapshot", new=AsyncMock(return_value={
-            "created_at": time.time(),
-            "user_id": _UID,
-            "yexuan_awareness": "lucid_shared",
-            "boundary": "dream_only",
-            "entry_reason": "",
-            "relationship_state": {},
-            "recent_reality_context": "",
-            "episodic_summary": "",
-            "mid_term_context": "",
-            "profile_impression": "",
-        })):
-            return await enter_dream(_UID, entry_reason="test", char_id="character_b")
+        return await enter_dream(_UID, entry_reason="test", char_id="character_b")
 
     result = asyncio.run(run())
-    assert result.get("ok"), f"enter_dream failed: {result}"
-
-    state = _read_state(sandbox, _UID)
-    assert state.get("char_id") == "character_b", (
-        f"dream_state must have char_id='character_b', got {state.get('char_id')!r}"
+    assert result.get("ok") is False, f"Expected rejection, got: {result}"
+    assert "做梦" in result.get("error", ""), (
+        f"Error message must mention inability to dream, got: {result.get('error')!r}"
     )
-    assert state.get("status") == DreamStatus.DREAM_ACTIVE.value
 
 
 def test_enter_dream_yexuan_char_id(sandbox):

@@ -21,7 +21,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-async def build_snapshot(user_id: str, entry_reason: str = "", *, char_id: str = "yexuan") -> dict[str, Any]:
+async def build_snapshot(user_id: str, entry_reason: str = "", *, char_id: str = "yexuan", char_name: str = "叶瑄") -> dict[str, Any]:
     """
     Assemble and return the frozen dream context snapshot.
 
@@ -36,7 +36,7 @@ async def build_snapshot(user_id: str, entry_reason: str = "", *, char_id: str =
     snapshot: dict[str, Any] = {
         "created_at": time.time(),
         "user_id": user_id,
-        "yexuan_awareness": "lucid_shared",
+        f"{char_id}_awareness": "lucid_shared",
         "boundary": "dream_only",
         "entry_reason": entry_reason,
         "memory_access": memory_access,
@@ -75,15 +75,15 @@ async def build_snapshot(user_id: str, entry_reason: str = "", *, char_id: str =
     # relationship_summary and full_snapshot both include recent context + profile
     try:
         from core.memory import short_term
-        history = short_term.load_for_prompt(user_id)
-        snapshot["recent_reality_context"] = _summarize_recent(history)
+        history = short_term.load_for_prompt(user_id, char_id=char_id)
+        snapshot["recent_reality_context"] = _summarize_recent(history, char_name=char_name)
     except Exception as e:
         logger.warning(f"[dream_context] recent_reality_context failed: {e}")
         snapshot["recent_reality_context"] = ""
 
     try:
         from core.memory import user_profile
-        profile = user_profile.load(user_id)
+        profile = user_profile.load(user_id, char_id=char_id)
         snapshot["profile_impression"] = _extract_impression(profile)
     except Exception as e:
         logger.warning(f"[dream_context] profile_impression failed: {e}")
@@ -94,10 +94,10 @@ async def build_snapshot(user_id: str, entry_reason: str = "", *, char_id: str =
         try:
             from core.memory.episodic_memory import retrieve, format_for_prompt
             from core.memory.mood_state import get_current as _get_mood
-            episodes = retrieve(user_id=user_id, topic="", top_k=3)
+            episodes = retrieve(user_id=user_id, topic="", top_k=3, char_id=char_id)
             snapshot["episodic_summary"] = format_for_prompt(
                 episodes,
-                char_name="叶瑄",
+                char_name=char_name,
                 current_emotion=_get_mood(),
             )
         except Exception as e:
@@ -106,7 +106,7 @@ async def build_snapshot(user_id: str, entry_reason: str = "", *, char_id: str =
 
         try:
             from core.memory import mid_term
-            snapshot["mid_term_context"] = mid_term.format_for_prompt(user_id)
+            snapshot["mid_term_context"] = mid_term.format_for_prompt(user_id, char_id=char_id)
         except Exception as e:
             logger.warning(f"[dream_context] mid_term failed: {e}")
             snapshot["mid_term_context"] = ""
@@ -130,12 +130,12 @@ async def build_snapshot(user_id: str, entry_reason: str = "", *, char_id: str =
     return snapshot
 
 
-def _summarize_recent(history: list[dict]) -> str:
+def _summarize_recent(history: list[dict], *, char_name: str = "叶瑄") -> str:
     """Condense last few history turns into a short context string."""
     tail = history[-6:] if len(history) > 6 else history
     lines = []
     for h in tail:
-        role = "用户" if h.get("role") == "user" else "叶瑄"
+        role = "用户" if h.get("role") == "user" else char_name
         content = (h.get("content") or "")[:60]
         lines.append(f"{role}：{content}")
     return "\n".join(lines)

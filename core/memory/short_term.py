@@ -452,6 +452,39 @@ def _save(user_id: str, history: list[dict], *, char_id: str = "yexuan") -> bool
         return False
 
 
+def detect_reply_homogeneity(
+    history: list[dict],
+    *,
+    recent_n: int = 6,
+    prefix_len: int = 2,
+    min_hits: int = 3,
+) -> str | None:
+    """
+    检测近 recent_n 条 assistant 消息的句首是否高度重复。
+    若 ≥ min_hits 条共享相同 prefix_len 字句首，返回软提示供 prompt 注入；否则返回 None。
+    仅做统计，不修改 history 内容，不绕过 _sanitize_assistant_message。
+    """
+    from collections import Counter
+
+    assistant_msgs = [
+        msg["content"].strip()
+        for msg in history
+        if msg.get("role") == "assistant" and isinstance(msg.get("content"), str) and msg["content"].strip()
+    ][-recent_n:]
+
+    if len(assistant_msgs) < min_hits:
+        return None
+
+    prefixes = [m[:prefix_len] for m in assistant_msgs if len(m) >= prefix_len]
+    if not prefixes:
+        return None
+
+    top_prefix, count = Counter(prefixes).most_common(1)[0]
+    if count >= min_hits:
+        return f'（近几轮回复开头连续用了「{top_prefix}」，这轮换个切入方式，不要再以相同句首开头。）'
+    return None
+
+
 def clear(user_id: str, *, char_id: str = "yexuan"):
     """清空指定用户的短期历史（admin 用）"""
     _save(user_id, [], char_id=char_id)
