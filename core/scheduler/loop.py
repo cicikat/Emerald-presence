@@ -70,6 +70,7 @@ _COOLDOWNS: dict[str, int] = {
     "hidden_state_decay":         12 * 3600,       # 用户隐性状态衰减：12小时
     "hidden_state_consolidate":   7 * 24 * 3600,   # 基线收敛：7天
     "overflow":              3 * 3600,   # 理由累积溢出：3小时
+    "presence_nag":          2 * 3600,   # 存在感弹窗：2小时最多一次
     "dream_exit":           60 * 60,     # 出梦主动开口：一梦一次，1小时冷却兜底
     "letter_writer":         7 * 24 * 3600,  # 真实邮件：7天最多一封
 }
@@ -277,6 +278,8 @@ async def _pipeline_send(
     search_query: str = "",
     trigger_name: str = "",
     behavior: dict | None = None,
+    behavior_factory=None,
+    fanout="all",
     output_mode: str = "speak",   # "speak" | "return"
     record_turn: bool = True,
     kind: str = "scheduled",   # stimulus kind — must be in _TRIGGER_OUTLET_ALLOWED_KINDS
@@ -315,7 +318,8 @@ async def _pipeline_send(
         if _pipeline is None:
             logger.warning("[scheduler._pipeline_send] pipeline 未注入，降级直接发送")
             if output_mode != "return":
-                await _send(prompt, behavior=behavior)
+                fallback_behavior = behavior_factory(prompt) if behavior_factory else behavior
+                await _send(prompt, behavior=fallback_behavior)
                 return prompt
             return None
 
@@ -427,12 +431,14 @@ async def _pipeline_send(
                     else:
                         source = TurnSource.TRIGGER
                         _envelope = stamp_trigger()
+                    resolved_behavior = behavior_factory(reply) if behavior_factory else behavior
                     turn_result = await record_assistant_turn(
                         assistant_text=reply,
                         uid=oid,
                         source=source,
                         trigger_name=trigger_name or "scheduler",
-                        fanout=[] if output_mode == "return" else "all",
+                        fanout=[] if output_mode == "return" else fanout,
+                        payload={"behavior": resolved_behavior} if resolved_behavior else None,
                         bypass_gate=True,  # already inside conversation_lock
                         pipeline=_pipeline,
                         envelope=_envelope,

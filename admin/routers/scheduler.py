@@ -58,6 +58,7 @@ async def put_sched_config(body: dict, auth=Depends(verify_token)):
     bool_fields = [
         "enabled", "morning_greeting", "night_reminder", "random_message",
         "daily_journal", "period_reminder", "diary_reminder", "diary_inject",
+        "presence_nag",
     ]
     for f in bool_fields:
         if f in body:
@@ -65,6 +66,15 @@ async def put_sched_config(body: dict, auth=Depends(verify_token)):
 
     if "owner_id" in body:
         cfg["owner_id"] = str(body["owner_id"]).strip()
+
+    if "presence_nag_minutes" in body:
+        try:
+            minutes = int(body["presence_nag_minutes"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="presence_nag_minutes 必须是正整数")
+        if minutes <= 0:
+            raise HTTPException(status_code=422, detail="presence_nag_minutes 必须是正整数")
+        cfg["presence_nag_minutes"] = minutes
 
     if "signatures" in body:
         sigs = body["signatures"]

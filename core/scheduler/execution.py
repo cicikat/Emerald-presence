@@ -43,6 +43,7 @@ class ExecuteResult:
 ExecuteFn = Callable[..., Awaitable[ExecuteResult]]
 PromptFactory = Callable[[], str]
 AfterSend = Callable[[], object]
+BehaviorFactory = Callable[[str], dict]
 
 
 async def execute_prompt(
@@ -57,6 +58,8 @@ async def execute_prompt(
     reads_cache_ok: bool = True,
     after_send: Optional[AfterSend] = None,
     char_id: str | None = None,
+    behavior_factory: Optional[BehaviorFactory] = None,
+    fanout="all",
 ) -> ExecuteResult:
     """Execute a scheduler prompt, or log what would happen in dry-run mode."""
 
@@ -84,6 +87,8 @@ async def execute_prompt(
         search_query=search_query,
         trigger_name=trigger_name,
         char_id=resolved_char_id,
+        behavior_factory=behavior_factory,
+        fanout=fanout,
     )
     if not sent_text:
         blocked = ExecuteResult(

@@ -19,7 +19,7 @@ import time
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 from admin.auth import verify_token
 from core.config_loader import get_config
 from core.memory.user_profile import load as _load_profile, save as _save_profile
@@ -30,6 +30,17 @@ router = APIRouter()
 
 # 最近一次手机传感器快照（内存缓存，重启清零）
 _last_sensor_data: dict = {}
+
+_SENSITIVE_WINDOW_KEYWORDS = (
+    "密码", "password", "银行", "bank", "支付", "payment",
+    "微信支付", "alipay", "私聊", "secret", "1password",
+    "登录", "login", "身份证", "信用卡",
+)
+
+
+def _is_sensitive_window_text(text: str) -> bool:
+    folded = str(text or "").casefold()
+    return any(keyword.casefold() in folded for keyword in _SENSITIVE_WINDOW_KEYWORDS)
 
 
 def _save_sensor_to_profile(data: dict):
@@ -158,6 +169,7 @@ class _RealtimeInput(BaseModel):
     mouse_clicks: int = Field(ge=0)
     mouse_distance_px: int = Field(ge=0)
     idle_seconds: int = Field(ge=0)
+    edit_hint: Optional[Literal["typing_long", "editing", "deleting", "idle"]] = None
 
 
 class _RealtimeFocus(BaseModel):
@@ -188,6 +200,16 @@ async def receive_realtime_snapshot(
     payload: _RealtimeIngest,
     auth=Depends(verify_token),
 ):
+    # Sidecar 应整帧跳过敏感窗口；这里再次 fail-closed，防止旧客户端或误配置泄漏。
+    if (
+        _is_sensitive_window_text(payload.focus.title_hint)
+        or (
+            payload.screen is not None
+            and _is_sensitive_window_text(payload.screen.window_title)
+        )
+    ):
+        return {"ok": False, "skipped": "sensitive_window"}
+
     # title_hint server-side 兜底截断
     if len(payload.focus.title_hint) > 80:
         payload.focus.title_hint = payload.focus.title_hint[:80]

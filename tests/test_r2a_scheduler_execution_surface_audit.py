@@ -60,8 +60,8 @@ class TestPolicyWiredToRuntime:
         """POLICY_TABLE includes all currently policy-managed speaking triggers."""
         from core.scheduler.policy import POLICY_TABLE
 
-        assert len(POLICY_TABLE) == 27, (
-            f"POLICY_TABLE 条目数变化：期望 27，实际 {len(POLICY_TABLE)}。"
+        assert len(POLICY_TABLE) == 28, (
+            f"POLICY_TABLE 条目数变化：期望 28，实际 {len(POLICY_TABLE)}。"
             "如需增删，先更新此测试并记录原因。"
         )
 
@@ -514,7 +514,7 @@ class TestMigratedTriggersSnapshot:
         "festival", "holiday_boost", "spontaneous_recall",
         "garden_bloom", "garden_harvest_expired", "garden_handle_ask",
         "garden_handle_gift", "garden_handle_self", "garden_vase_wilted",
-        "reminders", "overflow", "dream_exit", "letter_writer",
+        "reminders", "overflow", "presence_nag", "dream_exit", "letter_writer",
     })
 
     def test_migrated_triggers_matches_snapshot(self):

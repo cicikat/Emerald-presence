@@ -241,6 +241,12 @@ POLICY_TABLE: dict[str, TriggerPolicy] = {
         active_window_behavior="drop",
         mark_on_drop=False,
     ),
+    "presence_nag": TriggerPolicy(
+        trigger_id="presence_nag",
+        priority="filler",
+        active_window_behavior="drop",
+        mark_on_drop=False,
+    ),
 }
 
 
