@@ -49,6 +49,12 @@ class StageCharacterView:
             viewer_id=self.char_id,
         )
         from core.tag_rules import get_tags
+        from core.author_note_rotator import get_current_note
+        try:
+            _char_note = get_current_note(char_id=self.char_id)
+        except Exception:
+            _char_note = ""
+        _note_hint = f"\n你当前的写作风格锚点：{_char_note}" if _char_note else ""
         stage_instruction = (
             "你在一个有其他角色在场的群聊里。"
             "你可以回应在场的其他角色，不必每句都只对用户说话；"
@@ -57,6 +63,8 @@ class StageCharacterView:
             "只输出你要说的话。"
             "参考已注入的群聊共享对话，不要重复你之前已经说过的内容或已经道过的歉；"
             "没有新东西要说就简短带过或不说。"
+            "以你自己独特的方式回应，避免与其他角色刚说的话语气雷同。"
+            + _note_hint
         )
         messages, debug = self.pipeline.build_prompt(
             stage.owner_uid,

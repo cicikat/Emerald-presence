@@ -255,6 +255,9 @@ async def handle_message(message: dict):
     # ── 步骤1：群聊记录群消息流 ─────────────────────────────────────────────
     if is_group:
         group_context.append(group_id, sender_name, content)
+        # 群聊走隔离路径，不进 reality 主链
+        await _handle_group_message(group_id, sender_name, content, target_id)
+        return
 
     # ── 步骤2.5（N1）：现实轮级 scope freeze —————————————————————————————————
     # _current_reality_scope() 内部调用 _refresh_character_if_needed()，
@@ -560,6 +563,94 @@ async def _reply_with_tool_result(
             pending_paths=_meta.get("pending_paths", []),
         )
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 群聊隔离路径（不写主记忆）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _handle_group_message(
+    group_id: str,
+    sender_name: str,
+    content: str,
+    target_id: str,
+) -> None:
+    """
+    群聊隔离路径：只读 group_context + 角色卡生成回复，直发后追加到 group_context。
+    不触发 record_assistant_turn / capture_turn / fixation 等主记忆写入。
+    """
+    from core.memory import group_context as _gc
+    from core.output import text_output
+    from core import response_processor
+    from core.response_processor import strip_render_tags as _strip_rt
+    from core.conversation_gate import conversation_lock
+    from core.error_handler import log_error as _log_error
+
+    if _pipeline is None:
+        logger.error("[group_message] pipeline 未初始化，跳过群消息 group=%s", group_id)
+        return
+
+    char = _pipeline.character
+
+    # 组装最简 system prompt：角色卡 + 群聊定位
+    parts: list[str] = []
+    if char.system_prompt:
+        parts.append(char.system_prompt)
+    if char.description:
+        parts.append(f"外貌与背景：{char.description}")
+    if char.personality:
+        parts.append(f"性格：{char.personality}")
+    parts.append(
+        "【群聊模式】你现在在QQ群聊里，以轻松自然的方式参与群聊。"
+        "回复简短有趣为主，不要写独白或旁白动作描述。"
+    )
+
+    # 拼入最近群聊历史（不含刚追加的当前消息，那条作为 user turn）
+    recent = _gc.get_recent(group_id)
+    history = recent[:-1] if recent else []
+    if history:
+        ctx_lines = "\n".join(
+            f"[{m.get('timestamp', '')}] {m.get('sender_name', '')}: {m.get('content', '')}"
+            for m in history
+        )
+        parts.append(f"以下是最近的群聊记录（供参考）：\n{ctx_lines}")
+
+    system_prompt = "\n\n".join(parts)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"[{sender_name}] {content}"},
+    ]
+
+    async with conversation_lock(f"group_{group_id}"):
+        try:
+            raw_reply = await _pipeline.run_llm(messages)
+        except Exception as _e:
+            _log_error("group_message.run_llm", _e)
+            return
+
+        if not raw_reply:
+            logger.warning("[group_message] LLM 回复为空 group=%s", group_id)
+            return
+
+        segments = response_processor.process(raw_reply, char.name)
+        if not segments:
+            logger.warning("[group_message] 回复处理后为空 group=%s", group_id)
+            return
+
+        clean = [s for s in (_strip_rt(seg) for seg in segments) if s]
+        if not clean:
+            logger.warning("[group_message] strip 后为空 group=%s", group_id)
+            return
+
+        logger.info("[group_message] 发送群 %s 共 %d 段", group_id, len(clean))
+        try:
+            await text_output.send(target_id, clean, is_group=True)
+        except Exception as _e:
+            _log_error("group_message.send", _e)
+            return
+
+        # 把机器人回复追加进群上下文，供下轮参考（可丢弃，不写主记忆）
+        _gc.append(group_id, char.name, "\n".join(clean))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

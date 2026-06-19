@@ -12,6 +12,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _SWITCH_INTERVAL_MINUTES = 30
+_SWITCH_INTERVAL_ROUNDS = 6  # 同一 note 连续使用超过此回合数也触发切换
 
 
 _DEFAULT_POOL_PATH = Path(__file__).parent.parent / "characters" / "default_author_notes.json"
@@ -50,7 +51,10 @@ def _should_switch(state: dict) -> bool:
     try:
         last = datetime.fromisoformat(state["last_switched_at"])
         elapsed = (datetime.now() - last).total_seconds() / 60
-        return elapsed >= _SWITCH_INTERVAL_MINUTES
+        if elapsed >= _SWITCH_INTERVAL_MINUTES:
+            return True
+        # 同一 note 连续使用回合数超过阈值时也切换（密集对话防风格静止）
+        return state.get("current_use_count", 0) >= _SWITCH_INTERVAL_ROUNDS
     except Exception:
         return True
 
@@ -121,6 +125,8 @@ def get_current_note(paths=None, char_id: str | None = None) -> str:
             if current_id is not None:
                 for note in pool:
                     if note["id"] == current_id:
+                        state["current_use_count"] = state.get("current_use_count", 0) + 1
+                        _save_state(write_state_path, state)
                         return note["content"]
 
         underrepresented: list[str] = []
@@ -136,6 +142,7 @@ def get_current_note(paths=None, char_id: str | None = None) -> str:
 
         state["current_id"] = chosen["id"]
         state["last_switched_at"] = datetime.now().isoformat(timespec="seconds")
+        state["current_use_count"] = 1
         state["history"] = history[:30]
 
         _save_state(write_state_path, state)

@@ -103,6 +103,69 @@ def _load_activity_snapshot(*, char_id: str) -> str:
         return ""
 
 
+_REALTIME_ACTIVITY_LABELS: dict[str, str] = {
+    "coding": "写代码",
+    "code": "写代码",
+    "browsing": "浏览网页",
+    "browser": "浏览网页",
+    "gaming": "打游戏",
+    "game": "打游戏",
+    "video": "看视频",
+    "social": "使用社交软件",
+    "document": "写文档",
+    "work": "处理工作",
+    "music": "听音乐",
+    "creative": "进行创作",
+    "idle": "暂时停下来了",
+}
+
+
+def _format_realtime_awareness(tags: set[str], *, now: float | None = None) -> str:
+    """Build a short ephemeral sensor hint without injecting window-title text."""
+    try:
+        import time
+        from core.memory import realtime_state
+
+        snap = realtime_state.get()
+        if snap is None:
+            return ""
+
+        current_time = time.time() if now is None else now
+        stale_seconds = current_time - float(snap.get("received_at", 0))
+        tag_hit = bool(tags & {"query.what_doing", "topic.activity"})
+        input_data = snap.get("input", {})
+        idle_seconds = int(input_data.get("idle_seconds", 9999))
+        if not ((tag_hit and stale_seconds < 300) or (stale_seconds < 180 and idle_seconds < 120)):
+            return ""
+
+        parts: list[str] = []
+        screen = snap.get("screen") or {}
+        activity = _REALTIME_ACTIVITY_LABELS.get(
+            str(screen.get("app_label", "")).casefold()
+        )
+        if activity:
+            parts.append(f"大致在{activity}")
+        else:
+            app = str(snap.get("focus", {}).get("app", "")).strip()
+            # Process name is a coarse app summary. Strip path/control-like characters.
+            app = re.sub(r"[^0-9A-Za-z._ +()-]", "", app)[:40]
+            if app and app.casefold() != "unknown":
+                parts.append(f"在用 {app}")
+
+        edit_hint = input_data.get("edit_hint")
+        if edit_hint in ("typing_long", "editing"):
+            parts.append("正在认真输入")
+        elif edit_hint == "deleting":
+            parts.append("像是在反复修改")
+        elif idle_seconds >= 120:
+            parts.append("暂时停下来了")
+
+        return "，".join(parts)
+    except Exception as exc:
+        logger.warning("[prompt_builder] realtime awareness read failed: %s", exc)
+        return ""
+
+
 def _load_style_hint(*, char_id: str) -> str:
     """从observations.jsonl读取行为倾向，返回给author_note的提示词片段。"""
     try:
@@ -519,6 +582,25 @@ def build(
             })
 
     # ─────────────────────────────────────────────────────────────────────────
+    # 层 3.9：桌面实时感知（sidecar /sensor/realtime 快照）
+    # mode=tagged/fresh：询问在做什么 / 活动相关话题时注入；或快照极新时主动注入。
+    # 只注摘要（app / 输入行为），永不注入 visible_text / clickable_text 原文。
+    # TTL：tag 触发允许 5 分钟内快照；无 tag 触发要求 3 分钟内且用户活跃。
+    # ─────────────────────────────────────────────────────────────────────────
+    _realtime_awareness = _format_realtime_awareness(_tags)
+    if _realtime_awareness:
+        _layers.append("3.9_screen_awareness")
+        messages.append({
+            "role": "system",
+            "content": (
+                f"（{character.name}感知到用户此刻{_realtime_awareness}。"
+                "这是短时氛围线索，不必刻意提起，也不要当作长期事实。）"
+            ),
+            "_layer": "3.9_screen_awareness",
+            "_drop_priority": 25,
+        })
+
+    # ─────────────────────────────────────────────────────────────────────────
     # 层 5：关于这个用户（用户画像，100% 注入）
     # ─────────────────────────────────────────────────────────────────────────
     profile_parts = []
@@ -867,6 +949,15 @@ def build(
     ]
     if author_note_extra:
         author_note_lines.append(f"（{author_note_extra}）")
+
+    # S2 防句式坍缩：检测近几轮 assistant 短回复同质性，命中时注入软提示
+    try:
+        from core.memory.short_term import detect_reply_homogeneity as _detect_homogeneity
+        _homogeneity_hint = _detect_homogeneity(history)
+        if _homogeneity_hint:
+            author_note_lines.append(_homogeneity_hint)
+    except Exception:
+        pass
 
     # ── 根据 chat.style 注入输出风格指令 ──────────────────────────────────────
     from core.config_loader import get_config as _get_config

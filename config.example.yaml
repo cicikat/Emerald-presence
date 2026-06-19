@@ -78,6 +78,7 @@ mail:
   enabled: false                 # true 后才会真正发送角色来信
   smtp_host: smtp.gmail.com
   smtp_port: 587
+  proxy_url: ''                  # SMTP 直连失败时填写，如 http://127.0.0.1:7897
   smtp_user: your@gmail.com
   smtp_password: app-password-here
   from_addr: your@gmail.com
@@ -179,6 +180,9 @@ diary:
 
 scheduler:
   enabled: true
+  presence_nag: false
+  presence_nag_minutes: 60
+  activity_level: high
   owner_id: '你的QQ号'           # 主人的 QQ 号，调度器主动消息发送目标，勿提交真实值
   owner_birthday: 'MM-DD'        # 主人生日，格式 MM-DD，勿提交真实值
   morning_greeting: true

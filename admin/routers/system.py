@@ -173,7 +173,17 @@ async def patch_meta_mode(body: dict, auth=Depends(verify_token)):
     from core.tool_dispatcher import _DANGER_MODE_TTL_SECONDS
     expires_at: float | None = None
     if mode == "danger":
-        ttl = int(body.get("ttl_seconds") or _DANGER_MODE_TTL_SECONDS)
+        raw_ttl = body.get("ttl_seconds")
+        if isinstance(raw_ttl, bool) or (
+            isinstance(raw_ttl, float) and not raw_ttl.is_integer()
+        ):
+            raise HTTPException(status_code=422, detail="ttl_seconds 必须是正整数")
+        try:
+            ttl = _DANGER_MODE_TTL_SECONDS if raw_ttl is None else int(raw_ttl)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="ttl_seconds 必须是正整数")
+        if ttl <= 0:
+            raise HTTPException(status_code=422, detail="ttl_seconds 必须是正整数")
         expires_at = time.time() + ttl
 
     p = get_paths().meta_mode()

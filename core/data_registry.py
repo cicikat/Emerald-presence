@@ -132,6 +132,9 @@ REGISTRY: dict[str, PathMeta] = {
     # ── runtime: global safe/danger mode flag ─────────────────────────────────
     "meta_mode":              PathMeta("runtime",   "shared",          "global",        "ignore"),
 
+    # ── canonical: shared toy-project files, writable only through whitelist ─
+    "very_formal_project_dir": PathMeta("canonical", "shared",         "global",        "ignore"),
+
     # ── Stage: multi-character session truth ─────────────────────────────────
     # Stage may run in reality or dream; the persisted meta carries the domain.
     "stage_group_dir":        PathMeta("canonical", "shared",          "per_group",     "ignore"),
@@ -149,9 +152,13 @@ REGISTRY: dict[str, PathMeta] = {
     "runtime_character_dir":  PathMeta("runtime",   "character_inner", "per_char",      "ignore"),
 
     # ── Activity: reading activity paths ─────────────────────────────────────
-    "reading_char_root":      PathMeta("runtime",   "reality",         "per_char",      "ignore"),
-    "reading_sessions_root":  PathMeta("runtime",   "reality",         "per_char_user", "ignore"),
-    "reading_session_dir":    PathMeta("runtime",   "reality",         "per_char_user", "ignore"),
+    "reading_char_root":         PathMeta("runtime",    "reality", "per_char",      "ignore"),
+    "reading_sessions_root":     PathMeta("runtime",    "reality", "per_char_user", "ignore"),
+    "reading_session_dir":       PathMeta("runtime",    "reality", "per_char_user", "ignore"),
+    # ── Library (shared book shelf) ───────────────────────────────────────────
+    "reading_library_root":      PathMeta("authored",   "shared",  "global",        "ignore-but-authored"),
+    "reading_library_books_dir": PathMeta("authored",   "shared",  "global",        "ignore-but-authored"),
+    "reading_library_insights_dir": PathMeta("derived", "shared",  "global",        "ignore"),
 
     # ── Activity: generic session (char_id-first layout) ─────────────────────
     "activity_char_root":     PathMeta("runtime",   "reality",         "per_char",      "ignore"),

@@ -35,11 +35,15 @@ async def enqueue_reality_projection(group_id: str) -> int:
         source = f"group:{stage.group_id}"
         source_turn_id = f"{source}:{stage.projection_cursor}:{len(transcript)}"
         for char_id in stage.roster:
+            # Use the character's own lines as `reply` so summarize_turn produces
+            # a meaningful fact-based summary rather than echoing an instruction.
+            char_lines = [e.content for e in segment if e.speaker_id == char_id]
+            char_reply = "\n".join(char_lines)
             slow_queue.enqueue("summarize_to_midterm", {
                 "turn_id": source_turn_id,
                 "uid": stage.owner_uid,
                 "user_content": "群聊共享记录：\n" + rendered,
-                "reply": f"请从角色 {char_id} 的视角保留这段群聊中值得记住的事实。",
+                "reply": char_reply,
                 "tags": ["group_chat"],
                 "emotion": "neutral",
                 "force_reflect": True,

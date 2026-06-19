@@ -435,6 +435,19 @@ class DataPaths:
         写入前调用方负责 .mkdir(parents=True, exist_ok=True)。"""
         return self._p("runtime", "memory", char_id, safe_user_id(user_id))
 
+    # ── 信件内容资产（authored static content）────────────────────────────────
+    def letter_samples_dir(self, *, char_id: str = "yexuan") -> Path:
+        """示范信件库目录（静态内容）: content/characters/{char_id}/letter_samples/"""
+        return Path(f"content/characters/{char_id}/letter_samples")
+
+    def letter_knowledge_dir(self, *, char_id: str = "yexuan") -> Path:
+        """知识库目录（静态内容）: content/characters/{char_id}/knowledge/"""
+        return Path(f"content/characters/{char_id}/knowledge")
+
+    def sent_letters(self, user_id: str | int, *, char_id: str = "yexuan") -> Path:
+        """已发送信件归档: data/runtime/memory/{char_id}/{uid}/sent_letters.json"""
+        return self.user_memory_root(user_id, char_id=char_id) / "sent_letters.json"
+
     def memory_char_root(self, *, char_id: str = "yexuan") -> Path:
         """S6: per-char memory 根目录: data/runtime/memory/{char_id}/
         用于 v1 模式下枚举所有用户（各 uid 是其直接子目录）。"""
@@ -449,6 +462,10 @@ class DataPaths:
     def meta_mode(self) -> Path:
         """data/runtime/meta_mode.json — global safe/danger mode switch."""
         return self._p("runtime", "meta_mode.json")
+
+    def very_formal_project_dir(self) -> Path:
+        """data/very_formal_project/ — whitelisted toy files only."""
+        return self._p("very_formal_project")
 
     # ── Stage / multi-character group session ───────────────────────────────
     def stage_group_dir(self, *, group_id: str) -> Path:
@@ -476,6 +493,19 @@ class DataPaths:
             "runtime", "activity", "reading",
             char_id, safe_user_id(uid), safe_user_id(session_id),
         )
+
+    # ── Library (shared book shelf across chars) ──────────────────────────────
+    def reading_library_root(self) -> Path:
+        """data/library/  — shared book library root."""
+        return self._p("library")
+
+    def reading_library_books_dir(self) -> Path:
+        """data/library/books/  — user-placed PDF files."""
+        return self._p("library", "books")
+
+    def reading_library_insights_dir(self, *, book_id: str) -> Path:
+        """data/library/insights/{book_id}/  — Yexuan's reading insights per book."""
+        return self._p("library", "insights", safe_user_id(book_id))
 
     # ── Activity: generic session (char_id-first layout) ─────────────────────
     def activity_char_root(self, *, char_id: str) -> Path:

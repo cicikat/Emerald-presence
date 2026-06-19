@@ -31,7 +31,7 @@ def check_diary_facts(content: str) -> list[str]:
         issues.append("含引号（对白标志）")
     return issues
 
-_PROFILE_ALLOWED_KEYS = {"name", "location", "pets", "interests", "occupation", "important_facts"}
+_PROFILE_ALLOWED_KEYS = {"name", "location", "pets", "interests", "occupation", "important_facts", "_pending_overrides"}
 
 
 def check_profile(data: dict) -> list[str]:

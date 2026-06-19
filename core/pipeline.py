@@ -711,7 +711,9 @@ class Pipeline:
             f"- send_notification: 发通知，仅当{_char}明确说「提醒你/通知你/告诉你记得」等字样时才触发，"
             f"params: {{\"title\": \"标题\", \"message\": \"内容\"}}\n"
             f"- dream_invite: 邀请用户进入梦境，仅当{_char}明确表达「一起去梦里/想和你做梦/来梦里找我」"
-            f"等直接邀请语义时才触发，params: {{}}\n\n"
+            f"等直接邀请语义时才触发，params: {{}}\n"
+            f"- toy_invite: 进入玩耍模式，仅当{_char}明确表达「想和你玩玩具/一起玩/给你点小奖励/打开玩耍模式」"
+            f"等当下、第一人称、主动邀请一起玩 toy 的语义时才触发，params: {{}}\n\n"
             f"如果不满足严格规则，输出空字符串。"
         )
 
@@ -1014,7 +1016,8 @@ async def _handler_trait_tracker_update(payload: dict) -> None:
 
     async with _locks.uid_lock(uid):
         recent = _st.load(uid, char_id=char_id)[-40:]
-        history_lines = [msg["content"] for msg in recent]
+        # 只统计 assistant 行：user 行包含关键词不代表角色表达过该特质
+        history_lines = [msg["content"] for msg in recent if msg.get("role") == "assistant"]
         counts = count_traits_in_history(history_lines, traits)
         trait_path = get_paths().trait_state(char_id=char_id)
         update_trait_state(counts, trait_path, write_path=trait_path)
