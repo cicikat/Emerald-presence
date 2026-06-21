@@ -207,6 +207,23 @@ async def upload_character(file: UploadFile = File(...), auth=Depends(verify_tok
     return {"message": f"角色卡 {safe_name} 已上传", "filename": safe_name}
 
 
+@router.get("/characters/active-info", summary="当前活跃角色基本信息（前端初始化用）")
+async def get_active_char_info(auth=Depends(verify_token)):
+    """返回当前活跃角色的显示名与性别，供前端替换叶瑄占位文本。
+
+    Response: {"char_id": "yexuan", "name": "叶瑄", "gender": "male"}
+    """
+    active_id = _active_character_id()
+    if not active_id:
+        return {"char_id": "", "name": "(未配置)", "gender": "neutral"}
+    try:
+        from core.character_loader import load as _load_char
+        char = _load_char(active_id)
+        return {"char_id": active_id, "name": char.name, "gender": char.gender}
+    except Exception:
+        return {"char_id": active_id, "name": active_id, "gender": "neutral"}
+
+
 @router.get("/characters/{name}/export", summary="导出角色卡文件")
 async def export_character(name: str, auth=Depends(verify_token)):
     from fastapi.responses import Response as _Resp

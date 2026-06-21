@@ -45,3 +45,35 @@ class _IgnoreWin10054ProactorFilter(logging.Filter):
 
 def install_asyncio_proactor_noise_filter() -> None:
     logging.getLogger("asyncio").addFilter(_IgnoreWin10054ProactorFilter())
+
+
+# ── Console quiet mode ────────────────────────────────────────────────────────
+# uvicorn access log: args layout = (client_addr, method, full_path, http_version, status_code)
+class DropSuccessfulAccessFilter(logging.Filter):
+    """Drop 2xx/3xx uvicorn access entries; keep 4xx/5xx so errors surface."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and len(record.args) >= 5:
+            try:
+                if 200 <= int(record.args[4]) < 400:
+                    return False
+            except (ValueError, TypeError):
+                pass
+        return True
+
+
+def install_access_noise_filter() -> None:
+    lg = logging.getLogger("uvicorn.access")
+    if any(isinstance(f, DropSuccessfulAccessFilter) for f in lg.filters):
+        return
+    lg.addFilter(DropSuccessfulAccessFilter())
+
+
+def install_console_quiet_mode() -> None:
+    """Suppress high-frequency INFO noise on the console.
+
+    - uvicorn.access: 2xx/3xx entries dropped; 4xx/5xx still surface.
+    - prompt_builder.debug: raised to WARNING (layer-size lines silenced).
+      prompt_builder.token (trim/budget warnings) is unaffected.
+    """
+    install_access_noise_filter()
+    logging.getLogger("prompt_builder.debug").setLevel(logging.WARNING)

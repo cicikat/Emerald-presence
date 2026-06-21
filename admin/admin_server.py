@@ -23,8 +23,8 @@ from admin.auth import verify_token, security, get_admin_secret, authenticate_ws
 
 # ── FastAPI 应用 ──────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="QQ-ST-Bot 管理面板",
-    description="QQ SillyTavern Bot 远程管理接口",
+    title="Emerald-Presence 运维控制台",
+    description="Emerald-Presence 运维 / 调试 / 创作接口（密钥与部署配置见 config.yaml）",
     version="1.0.0",
 )
 
@@ -38,8 +38,8 @@ from admin.routers import (
     garden, mobile, diary, chat_log,
     mood, activity, dream,
     reading, gomoku, chess, dream_seed,
-    debug, hidden_state_debug, hardware,
-    group,
+    hidden_state_debug, hardware, observe,
+    group, relationship_facts,
 )
 
 app.include_router(users.router,          prefix="/users",     tags=["用户"])
@@ -69,10 +69,11 @@ app.include_router(diary.router,     prefix="/diary",     tags=["日记"])
 app.include_router(chat_log.router,  prefix="/chat-log",  tags=["聊天日志"])
 app.include_router(mobile.router,    prefix="",           tags=["手机端"])
 app.include_router(dream.router,     prefix="",           tags=["梦境"])
-app.include_router(debug.router,              prefix="", tags=["Debug"])  # DEV-ONLY
-app.include_router(hidden_state_debug.router, prefix="", tags=["Debug"])  # DEV-ONLY
+app.include_router(hidden_state_debug.router, prefix="", tags=["观测"])
+app.include_router(observe.router,            prefix="", tags=["观测"])
 app.include_router(hardware.router, prefix="/hardware", tags=["硬件"])
 app.include_router(group.router,    prefix="/group",    tags=["群聊"])
+app.include_router(relationship_facts.router, prefix="", tags=["关系事实"])
 
 # ── 桌宠端 WebSocket 端点 ─────────────────────────────────────────────────────
 from fastapi import WebSocket as _WebSocket
@@ -98,7 +99,7 @@ async def root():
     index_file = _STATIC_DIR / "index.html"
     if index_file.exists():
         return FileResponse(str(index_file))
-    return {"status": "ok", "service": "QQ-ST-Bot Admin", "ui": "index.html not found"}
+    return {"status": "ok", "service": "Emerald-Presence Admin", "ui": "index.html not found"}
 
 
 async def start_admin_server():
@@ -107,6 +108,10 @@ async def start_admin_server():
     from admin.log_filter import install_access_log_sanitizer
 
     install_access_log_sanitizer()
+
+    from admin.log_filter import install_console_quiet_mode
+    if get_config().get("logging", {}).get("console_quiet", True):
+        install_console_quiet_mode()
 
     cfg = get_config().get("admin", {})
     host = cfg.get("host", "127.0.0.1")

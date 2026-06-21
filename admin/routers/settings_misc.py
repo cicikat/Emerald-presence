@@ -15,53 +15,16 @@ from core.config_loader import get_config
 router = APIRouter()
 CONFIG_FILE = Path("config.yaml")
 
-# ─── 工具开关 ──────────────────────────────────────────────────────────────────
+# ─── 工具注册表（只读诊断） ─────────────────────────────────────────────────────
 
-_TOOL_CONFIG_KEYS = {
-    "weather":         "weather",
-    "device_shutdown": "device_control",
-    "device_sleep":    "device_control",
-    "set_timer":       "timer",
-    "web_search":      "web_search",
-}
-
-
-@router.get("/tools", summary="获取所有工具启用状态")
-async def get_tools(auth=Depends(verify_token)):
-    tools_cfg = get_config().get("tools", {})
-    return {
-        name: tools_cfg.get(group, {}).get("enabled", True)
-        for name, group in _TOOL_CONFIG_KEYS.items()
-    }
-
-
-class ToolUpdate(BaseModel):
-    enabled: bool
-
-
-@router.put("/tools/{name}", summary="修改工具启用状态并热重载")
-async def update_tool(name: str, body: ToolUpdate, auth=Depends(verify_token)):
-    if name not in _TOOL_CONFIG_KEYS:
-        raise HTTPException(status_code=404, detail=f"未知工具：{name}")
-
-    group = _TOOL_CONFIG_KEYS[name]
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            full_cfg = yaml.safe_load(f) or {}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {e}")
-
-    full_cfg.setdefault("tools", {}).setdefault(group, {})["enabled"] = body.enabled
-
-    try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            yaml.dump(full_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"写入配置文件失败: {e}")
-
-    from core import config_loader
-    config_loader.reload_config()
-    return {"tool": name, "enabled": body.enabled, "message": f"工具 {name} 已{'启用' if body.enabled else '禁用'}"}
+@router.get("/tools/registry", summary="获取已注册工具列表（来自 _TOOL_REGISTRY，非 config 列表）")
+async def get_tool_registry(auth=Depends(verify_token)):
+    from core.tool_dispatcher import _TOOL_REGISTRY
+    tools = [
+        {"name": name, "description": (info.get("description") or info.get("desc") or "").strip()}
+        for name, info in _TOOL_REGISTRY.items()
+    ]
+    return {"tools": tools}
 
 
 # ─── 上下文轮数 ────────────────────────────────────────────────────────────────

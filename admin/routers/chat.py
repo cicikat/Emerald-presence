@@ -111,6 +111,12 @@ async def run_owner_chat_turn(
         if not reply:
             reply = ""
 
+        try:
+            from core.observe.prompt_capture import update_llm_output as _upd_prompt_out
+            _upd_prompt_out(user_id, reply)
+        except Exception:
+            pass
+
         # Shared reality guard: remove tool_call residue, character-name prefix,
         # AI self-disclosure — applied before both fanout and memory write.
         if reply:

@@ -1,14 +1,17 @@
 """
 一起看书 Activity HTTP API (P0)
 
-POST /activity/reading/start               — 上传 PDF，创建阅读 session
-GET  /activity/reading/state               — 获取当前 active session
-GET  /activity/reading/page                — 读取某一页
-POST /activity/reading/turn_page           — 翻页（direction 或指定 page）
-POST /activity/reading/close               — 关闭 session
-GET  /activity/reading/library             — 列出书库中的书
-POST /activity/reading/library/add         — 上传 PDF 到书库
-POST /activity/reading/start_from_library  — 从书库开始阅读
+POST /activity/reading/start                  — 上传 PDF，创建阅读 session
+GET  /activity/reading/state                  — 获取当前 active session
+GET  /activity/reading/page                   — 读取某一页
+POST /activity/reading/turn_page              — 翻页（direction 或指定 page）
+POST /activity/reading/close                  — 关闭 session
+GET  /activity/reading/library                — 列出书库（读 manifest，含 title/category）
+POST /activity/reading/library/add            — 上传 PDF 到书库（写 manifest，uuid4 book_id）
+POST /activity/reading/library/delete         — 删除书库中的书（删 manifest + 磁盘文件）
+POST /activity/reading/library/rename         — 修改书的显示名称（只改 manifest title）
+POST /activity/reading/library/categorize     — 设置书的分类（只改 manifest category）
+POST /activity/reading/start_from_library     — 从书库开始阅读（按 manifest book_id 查文件）
 
 设计约束（见 docs/reading-activity.md）：
 - Reality-side Activity，不接 trigger / stimulus / Dream / Scenario。
@@ -21,6 +24,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
+import uuid
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -50,8 +55,8 @@ from core.sandbox import get_paths as _get_paths
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# 安全文件名：只保留字母 / 数字 / 下划线 / 横线 / 点，去掉其余字符
-_UNSAFE_CHAR_RE = re.compile(r"[^A-Za-z0-9._\-]")
+# 安全文件名：保留 Unicode 文字（含中文），只清除路径分隔符和系统非法字符
+_UNSAFE_CHAR_RE = re.compile(r'[\\/:\*\?"<>\|\x00-\x1f]')
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _MAX_FILENAME_LEN = 128
 
@@ -105,6 +110,55 @@ def _require_session(char_id: str, session_id: str) -> ReadingSession:
     if session is None:
         raise HTTPException(status_code=404, detail=f"session {session_id!r} 不存在")
     return session
+
+
+# ── 书库 manifest 助手 ─────────────────────────────────────────────────────────
+
+def _load_manifest() -> dict:
+    path = _get_paths().reading_library_manifest()
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {"books": []}
+
+
+def _save_manifest(manifest: dict) -> None:
+    path = _get_paths().reading_library_manifest()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def _migrate_manifest_if_needed() -> dict:
+    """首次使用时扫描 books/ 目录自动生成 manifest.json；沿用 make_file_id 作为 book_id 以兼容已有 insights。"""
+    paths = _get_paths()
+    if paths.reading_library_manifest().exists():
+        return _load_manifest()
+
+    books_dir = paths.reading_library_books_dir()
+    books_dir.mkdir(parents=True, exist_ok=True)
+    books = []
+    for p in sorted(books_dir.iterdir()):
+        if p.is_file() and p.suffix.lower() == ".pdf":
+            books.append({
+                "book_id": make_file_id(p.name),
+                "title": p.stem,
+                "category": "未分类",
+                "filename": p.name,
+                "added_at": now_iso(),
+                "total_pages": None,
+            })
+    manifest = {"books": books}
+    _save_manifest(manifest)
+    logger.info("[reading] manifest 初始化，共 %d 本书", len(books))
+    return manifest
+
+
+def _find_book(manifest: dict, book_id: str) -> dict | None:
+    return next((b for b in manifest["books"] if b["book_id"] == book_id), None)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -314,25 +368,14 @@ async def close_reading(
 
 @router.get("/reading/library", summary="列出书库中的书")
 async def list_library(auth=Depends(verify_token)):
-    """列出 data/library/books/ 下的所有 PDF 文件。"""
+    """从 manifest.json 返回书库列表（含 title / category / total_pages）。"""
+    manifest = _migrate_manifest_if_needed()
     books_dir = _get_paths().reading_library_books_dir()
-    books_dir.mkdir(parents=True, exist_ok=True)
-    books = []
-    for p in sorted(books_dir.iterdir()):
-        if p.is_file() and p.suffix.lower() == ".pdf":
-            book_id = make_file_id(p.name)
-            books.append({
-                "book_id": book_id,
-                "filename": p.name,
-                "size_bytes": p.stat().st_size,
-            })
-    return {"books": books}
-
-
-class AddToLibraryResult(BaseModel):
-    book_id: str
-    filename: str
-    size_bytes: int
+    result = []
+    for book in manifest["books"]:
+        path = books_dir / book["filename"]
+        result.append({**book, "size_bytes": path.stat().st_size if path.exists() else 0})
+    return {"books": result}
 
 
 @router.post("/reading/library/add", summary="上传 PDF 到书库")
@@ -340,15 +383,14 @@ async def add_to_library(
     file: UploadFile = File(...),
     auth=Depends(verify_token),
 ):
-    """把上传的 PDF 保存到 data/library/books/。同名文件直接覆盖。"""
+    """把上传的 PDF 保存到 data/library/books/，并更新 manifest.json。同名文件直接覆盖。"""
     safe_name = _sanitize_filename(file.filename or "upload.pdf")
     if not safe_name.lower().endswith(".pdf"):
         raise HTTPException(status_code=422, detail="书库仅支持 PDF 文件")
 
     content = await file.read()
     try:
-        # 只做轻量校验（能解析），不在 add 时提取页面
-        extract_pages(content, safe_name)
+        pdf_info, _ = extract_pages(content, safe_name)
     except PDFOCRRequired as e:
         raise HTTPException(status_code=422, detail=str(e))
     except PDFFileTooLarge as e:
@@ -358,14 +400,28 @@ async def add_to_library(
 
     books_dir = _get_paths().reading_library_books_dir()
     books_dir.mkdir(parents=True, exist_ok=True)
-    dest = books_dir / safe_name
-    dest.write_bytes(content)
-    logger.info("[reading] add_to_library: file=%r size=%d", safe_name, len(content))
-    return AddToLibraryResult(
-        book_id=make_file_id(safe_name),
-        filename=safe_name,
-        size_bytes=len(content),
-    )
+    (books_dir / safe_name).write_bytes(content)
+
+    manifest = _migrate_manifest_if_needed()
+    # Preserve book_id on re-upload (match by filename)
+    match = next((b for b in manifest["books"] if b["filename"] == safe_name), None)
+    if match:
+        match["total_pages"] = pdf_info.total_pages
+        book_id = match["book_id"]
+    else:
+        book_id = str(uuid.uuid4())
+        manifest["books"].append({
+            "book_id": book_id,
+            "title": Path(safe_name).stem,
+            "category": "未分类",
+            "filename": safe_name,
+            "added_at": now_iso(),
+            "total_pages": pdf_info.total_pages,
+        })
+    _save_manifest(manifest)
+    book = _find_book(manifest, book_id)
+    logger.info("[reading] add_to_library: file=%r book_id=%s", safe_name, book_id)
+    return {**book, "size_bytes": len(content)}
 
 
 class StartFromLibraryRequest(BaseModel):
@@ -383,15 +439,15 @@ async def start_reading_from_library(
     char_id = _active_char_id()
     resolved_uid = body.uid.strip() or _default_uid()
 
-    books_dir = _get_paths().reading_library_books_dir()
-    # book_id 是 make_file_id(filename) 的结果，要反查文件名
-    target: Path | None = None
-    for p in books_dir.iterdir():
-        if p.is_file() and p.suffix.lower() == ".pdf" and make_file_id(p.name) == body.book_id:
-            target = p
-            break
-    if target is None:
+    manifest = _migrate_manifest_if_needed()
+    book_entry = _find_book(manifest, body.book_id)
+    if book_entry is None:
         raise HTTPException(status_code=404, detail=f"书库中找不到 book_id={body.book_id!r}")
+
+    books_dir = _get_paths().reading_library_books_dir()
+    target = books_dir / book_entry["filename"]
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"书文件不存在: {book_entry['filename']!r}")
 
     content = target.read_bytes()
     safe_name = target.name
@@ -412,7 +468,7 @@ async def start_reading_from_library(
         session_id=new_session_id(),
         uid=resolved_uid,
         char_id=char_id,
-        file_id=make_file_id(safe_name),
+        file_id=body.book_id,
         filename=safe_name,
         total_pages=total,
         current_page=start_page,
@@ -428,6 +484,80 @@ async def start_reading_from_library(
         resolved_uid, char_id, safe_name, total, session.session_id,
     )
     return session.to_dict()
+
+
+class DeleteBookRequest(BaseModel):
+    book_id: str
+    with_insights: bool = False
+
+
+class RenameBookRequest(BaseModel):
+    book_id: str
+    title: str
+
+
+class CategorizeBookRequest(BaseModel):
+    book_id: str
+    category: str
+
+
+@router.post("/reading/library/delete", summary="从书库删除一本书")
+async def delete_from_library(
+    body: DeleteBookRequest,
+    auth=Depends(verify_token),
+):
+    manifest = _migrate_manifest_if_needed()
+    book = _find_book(manifest, body.book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"书库中找不到 book_id={body.book_id!r}")
+
+    filename = book["filename"]
+    manifest["books"] = [b for b in manifest["books"] if b["book_id"] != body.book_id]
+    _save_manifest(manifest)
+
+    file_path = _get_paths().reading_library_books_dir() / filename
+    if file_path.exists():
+        file_path.unlink()
+
+    if body.with_insights:
+        insights_dir = _get_paths().reading_library_insights_dir(book_id=body.book_id)
+        if insights_dir.exists():
+            shutil.rmtree(insights_dir)
+
+    logger.info("[reading] delete_from_library: book_id=%s file=%r", body.book_id, filename)
+    return {"deleted": True, "book_id": body.book_id}
+
+
+@router.post("/reading/library/rename", summary="修改书的显示名称")
+async def rename_book(
+    body: RenameBookRequest,
+    auth=Depends(verify_token),
+):
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title 不能为空")
+    manifest = _migrate_manifest_if_needed()
+    book = _find_book(manifest, body.book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"书库中找不到 book_id={body.book_id!r}")
+    book["title"] = title
+    _save_manifest(manifest)
+    return book
+
+
+@router.post("/reading/library/categorize", summary="设置书的分类")
+async def categorize_book(
+    body: CategorizeBookRequest,
+    auth=Depends(verify_token),
+):
+    category = body.category.strip() or "未分类"
+    manifest = _migrate_manifest_if_needed()
+    book = _find_book(manifest, body.book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"书库中找不到 book_id={body.book_id!r}")
+    book["category"] = category
+    _save_manifest(manifest)
+    return book
 
 
 @router.post("/reading/chat", summary="活动内对话（陪伴聊天）")

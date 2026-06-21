@@ -426,3 +426,153 @@ async def dream_settings_patch(body: dict, _auth=Depends(verify_token)):
     current.update(updates)
     _save(uid, current)
     return {"ok": True, "settings": current}
+
+
+# ── 梦境世界书/预设 Authoring ─────────────────────────────────────────────────
+
+import re as _re
+_SAFE_WORLD_RE = _re.compile(r'^[^/\\<>:"|?*\x00-\x1f]{1,64}$')
+
+
+def _world_dir(world: str):
+    """返回 characters/dream_worlds/{world}/ 路径，经 sandbox 验证。"""
+    from core.sandbox import get_paths
+    if not _SAFE_WORLD_RE.match(world):
+        raise HTTPException(status_code=422, detail=f"世界名称不合法: {world!r}")
+    p = get_paths().dream_worlds_dir() / world
+    return p
+
+
+def _preset_path(world: str):
+    """返回 characters/dream_presets/{world}.md 路径。"""
+    from core.sandbox import get_paths
+    if not _SAFE_WORLD_RE.match(world):
+        raise HTTPException(status_code=422, detail=f"世界名称不合法: {world!r}")
+    return get_paths().dream_presets_dir() / f"{world}.md"
+
+
+@router.get("/dream/worlds", summary="列出梦境世界目录")
+async def list_dream_worlds(_auth=Depends(verify_token)):
+    from core.sandbox import get_paths
+    worlds_dir = get_paths().dream_worlds_dir()
+    if not worlds_dir.exists():
+        return {"worlds": []}
+    worlds = sorted(
+        d.name for d in worlds_dir.iterdir()
+        if d.is_dir() and not d.name.startswith("_")
+    )
+    return {"worlds": worlds}
+
+
+@router.get("/dream/worlds/{world}/lorebook", summary="读取梦境世界书条目列表")
+async def get_dream_lorebook(world: str, _auth=Depends(verify_token)):
+    import yaml as _yaml
+    p = _world_dir(world) / "lorebook.yaml"
+    if not p.exists():
+        return {"entries": []}
+    try:
+        data = _yaml.safe_load(p.read_text(encoding="utf-8")) or []
+        if not isinstance(data, list):
+            raise HTTPException(status_code=500, detail="lorebook.yaml 格式错误：应为裸 list")
+        return {"entries": data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取失败: {e}")
+
+
+def _write_dream_lorebook(world: str, entries: list):
+    import yaml as _yaml
+    p = _world_dir(world) / "lorebook.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        _yaml.dump(entries, allow_unicode=True, default_flow_style=False, sort_keys=False),
+        encoding="utf-8",
+    )
+
+
+@router.post("/dream/worlds/{world}/lorebook", summary="新增梦境世界书条目")
+async def add_dream_lore_entry(world: str, body: dict, _auth=Depends(verify_token)):
+    import yaml as _yaml
+    p = _world_dir(world) / "lorebook.yaml"
+    entries = []
+    if p.exists():
+        raw = _yaml.safe_load(p.read_text(encoding="utf-8")) or []
+        entries = raw if isinstance(raw, list) else []
+
+    keywords = body.get("keywords")
+    content = body.get("content", "")
+    if not keywords or not isinstance(keywords, list):
+        raise HTTPException(status_code=422, detail="keywords 必须为非空列表")
+    if not content.strip():
+        raise HTTPException(status_code=422, detail="content 不能为空")
+
+    entry = {
+        "keywords": [str(k) for k in keywords],
+        "content": str(content),
+        "insertion_order": int(body.get("insertion_order", len(entries))),
+        "regex": bool(body.get("regex", False)),
+    }
+    entries.append(entry)
+    _write_dream_lorebook(world, entries)
+    return {"ok": True, "index": len(entries) - 1, "entry": entry}
+
+
+@router.put("/dream/worlds/{world}/lorebook/{index}", summary="修改梦境世界书条目")
+async def update_dream_lore_entry(world: str, index: int, body: dict, _auth=Depends(verify_token)):
+    import yaml as _yaml
+    p = _world_dir(world) / "lorebook.yaml"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="lorebook.yaml 不存在")
+    entries = _yaml.safe_load(p.read_text(encoding="utf-8")) or []
+    if not isinstance(entries, list) or index < 0 or index >= len(entries):
+        raise HTTPException(status_code=404, detail=f"条目 {index} 不存在")
+
+    entry = dict(entries[index])
+    if "keywords" in body:
+        kw = body["keywords"]
+        if not isinstance(kw, list) or not kw:
+            raise HTTPException(status_code=422, detail="keywords 必须为非空列表")
+        entry["keywords"] = [str(k) for k in kw]
+    if "content" in body:
+        entry["content"] = str(body["content"])
+    if "insertion_order" in body:
+        entry["insertion_order"] = int(body["insertion_order"])
+    if "regex" in body:
+        entry["regex"] = bool(body["regex"])
+
+    entries[index] = entry
+    _write_dream_lorebook(world, entries)
+    return {"ok": True, "index": index, "entry": entry}
+
+
+@router.delete("/dream/worlds/{world}/lorebook/{index}", summary="删除梦境世界书条目")
+async def delete_dream_lore_entry(world: str, index: int, _auth=Depends(verify_token)):
+    import yaml as _yaml
+    p = _world_dir(world) / "lorebook.yaml"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="lorebook.yaml 不存在")
+    entries = _yaml.safe_load(p.read_text(encoding="utf-8")) or []
+    if not isinstance(entries, list) or index < 0 or index >= len(entries):
+        raise HTTPException(status_code=404, detail=f"条目 {index} 不存在")
+
+    entries.pop(index)
+    _write_dream_lorebook(world, entries)
+    return {"ok": True, "remaining": len(entries)}
+
+
+@router.get("/dream/worlds/{world}/preset", summary="读取梦境世界预设文本")
+async def get_dream_preset(world: str, _auth=Depends(verify_token)):
+    p = _preset_path(world)
+    if not p.exists():
+        return {"world": world, "content": ""}
+    return {"world": world, "content": p.read_text(encoding="utf-8")}
+
+
+@router.put("/dream/worlds/{world}/preset", summary="保存梦境世界预设文本")
+async def put_dream_preset(world: str, body: dict, _auth=Depends(verify_token)):
+    content = body.get("content", "")
+    p = _preset_path(world)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(str(content), encoding="utf-8")
+    return {"ok": True, "world": world, "bytes": len(content.encode("utf-8"))}

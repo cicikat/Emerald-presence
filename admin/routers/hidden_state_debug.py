@@ -1,6 +1,5 @@
 """
-[DEV-ONLY] GET /debug/user-hidden-state
-Read-only endpoint for observing UserHiddenState + Dream snapshot.
+GET /debug/user-hidden-state — 隐性状态只读观测。
 
 Security contract:
   - No write paths exposed.
@@ -58,9 +57,9 @@ def _active_char_id() -> str:
 
 @router.get(
     "/debug/user-hidden-state",
-    summary="[DEV] 读取 UserHiddenState + Dream Snapshot（只读）",
+    summary="读取 UserHiddenState + Dream Snapshot（只读）",
     description=(
-        "返回当前用户的 UserHiddenState 各字段 + Dream Snapshot 投影，供开发者调试。\n\n"
+        "返回当前用户的 UserHiddenState 各字段 + Dream Snapshot 投影。\n\n"
         "**只读。无任何写路径。**\n\n"
         "- `sensitivity`: 当前 / 基线敏感度\n"
         "- `touch_need`: 接触需求基线 + 当前亏欠量\n"
