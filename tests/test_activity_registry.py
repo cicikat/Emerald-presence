@@ -171,12 +171,12 @@ def test_gomoku_has_companion_chat():
     assert get_activity_meta("gomoku").has_companion_chat is True
 
 
-def test_reading_no_companion_chat():
-    assert get_activity_meta("reading").has_companion_chat is False
+def test_reading_has_companion_chat():
+    assert get_activity_meta("reading").has_companion_chat is True
 
 
-def test_chess_no_companion_chat():
-    assert get_activity_meta("chess").has_companion_chat is False
+def test_chess_has_companion_chat():
+    assert get_activity_meta("chess").has_companion_chat is True
 
 
 def test_dream_seed_has_companion_chat():

@@ -1,4 +1,4 @@
-"""
+﻿"""
 tests/test_user_facts_smoke.py
 ===============================
 Smoke test: verify user_facts global layer is injected correctly across
@@ -401,7 +401,7 @@ class TestPipelineFetchContext:
         pipeline.author_note_extra = ""
         pipeline._last_channel = None
         pipeline.lore_engine = mock.MagicMock()
-        pipeline.lore_engine.match.return_value = []
+        pipeline.lore_engine.match.return_value = ([], [])
 
         # Stub _current_reality_scope to bypass active_prompt_assets.json
         scope = MemoryScope.reality_scope(OWNER_UID, char_id)
@@ -417,11 +417,11 @@ class TestPipelineFetchContext:
                 mock.patch("core.memory.mid_term.format_for_prompt", return_value=""),
                 mock.patch("core.memory.group_context.get_recent", return_value=[]),
                 mock.patch("core.user_relation.get_relation", return_value={}),
-                mock.patch("core.memory.episodic_memory.retrieve", return_value=[]),
+                mock.patch("core.memory.episodic_memory.retrieve", return_value=([], [])),
                 mock.patch("core.memory.episodic_memory.format_for_prompt", return_value=""),
-                mock.patch("core.memory.episodic_memory.retrieve_fallback", return_value=[]),
+                mock.patch("core.memory.episodic_memory.retrieve_fallback", return_value=([], [])),
                 mock.patch("core.memory.mood_state.get_current", return_value="calm"),
-                mock.patch("core.memory.event_log.search", new=mock.AsyncMock(return_value="")),
+                mock.patch("core.memory.event_log.search", new=mock.AsyncMock(return_value=("", []))),
                 mock.patch("core.memory.user_identity.format_for_prompt",
                            new=mock.AsyncMock(return_value=f"[identity-{char_id}]")),
                 mock.patch("core.tools.reminder.get_reminders", return_value=[]),
@@ -474,11 +474,11 @@ class TestPipelineFetchContext:
                     mock.patch("core.memory.mid_term.format_for_prompt", return_value=""),
                     mock.patch("core.memory.group_context.get_recent", return_value=[]),
                     mock.patch("core.user_relation.get_relation", return_value={}),
-                    mock.patch("core.memory.episodic_memory.retrieve", return_value=[]),
+                    mock.patch("core.memory.episodic_memory.retrieve", return_value=([], [])),
                     mock.patch("core.memory.episodic_memory.format_for_prompt", return_value=""),
-                    mock.patch("core.memory.episodic_memory.retrieve_fallback", return_value=[]),
+                    mock.patch("core.memory.episodic_memory.retrieve_fallback", return_value=([], [])),
                     mock.patch("core.memory.mood_state.get_current", return_value="calm"),
-                    mock.patch("core.memory.event_log.search", new=mock.AsyncMock(return_value="")),
+                    mock.patch("core.memory.event_log.search", new=mock.AsyncMock(return_value=("", []))),
                     mock.patch("core.memory.user_identity.format_for_prompt",
                                new=mock.AsyncMock(return_value=f"[scoped-identity-{cid}]")),
                     mock.patch("core.tools.reminder.get_reminders", return_value=[]),
@@ -506,3 +506,4 @@ class TestPipelineFetchContext:
         assert all(v == facts_values[0] for v in facts_values), (
             f"user_facts_text should be same across chars, got: {facts_results}"
         )
+

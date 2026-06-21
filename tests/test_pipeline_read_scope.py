@@ -79,7 +79,7 @@ def _make_pipeline(char_id: str, registry):
     from core.pipeline import Pipeline
     char = _load(char_id)
     lore = MagicMock()
-    lore.match.return_value = []
+    lore.match.return_value = ([], [])
     return Pipeline(char, lore_engine=lore, active_character_id=char_id)
 
 
@@ -112,12 +112,12 @@ def _apply_base_stubs(monkeypatch):
     import core.memory.group_context as _gc
     import core.memory.diary_context as _dc
 
-    monkeypatch.setattr(_el, "search", AsyncMock(return_value=""))
+    monkeypatch.setattr(_el, "search", AsyncMock(return_value=("", [])))
     monkeypatch.setattr(_up, "load", lambda *a, **kw: {})
     monkeypatch.setattr(_mt, "format_for_prompt", lambda *a, **kw: "")
     monkeypatch.setattr(_st, "load_for_prompt", lambda *a, **kw: [])
-    monkeypatch.setattr(_ep, "retrieve", lambda *a, **kw: [])
-    monkeypatch.setattr(_ep, "retrieve_fallback", lambda *a, **kw: [])
+    monkeypatch.setattr(_ep, "retrieve", lambda *a, **kw: ([], []) if kw.get("return_trace") else [])
+    monkeypatch.setattr(_ep, "retrieve_fallback", lambda *a, **kw: ([], []) if kw.get("return_trace") else [])
     monkeypatch.setattr(_ui, "format_for_prompt", AsyncMock(return_value=""))
     monkeypatch.setattr(_il, "load_impression_text", lambda *a, **kw: "")
     monkeypatch.setattr(_gc, "get_recent", lambda *a, **kw: "")
@@ -181,9 +181,9 @@ def test_fetch_context_passes_char_id_to_event_log_search(
 
     captured: list[str] = []
 
-    async def _spy_search(user_id, query, llm_client=None, *, char_id="yexuan"):
+    async def _spy_search(user_id, query, llm_client=None, *, char_id="yexuan", return_trace=False):
         captured.append(char_id)
-        return ""
+        return ("", []) if return_trace else ""
 
     monkeypatch.setattr(_el, "search", _spy_search)
 
@@ -289,9 +289,9 @@ def test_fetch_context_passes_char_id_to_episodic_retrieve(
 
     captured: list[str] = []
 
-    def _spy_retrieve(user_id, topic="", top_k=3, *, char_id="yexuan", allow_strengthen=True):
+    def _spy_retrieve(user_id, topic="", top_k=3, *, char_id="yexuan", allow_strengthen=True, return_trace=False):
         captured.append(char_id)
-        return []
+        return ([], []) if return_trace else []
 
     monkeypatch.setattr(_ep, "retrieve", _spy_retrieve)
 

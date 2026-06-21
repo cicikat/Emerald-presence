@@ -69,7 +69,7 @@ def _make_pipeline(char_id: str, registry):
     from core.pipeline import Pipeline
     char = _load(char_id)
     lore = MagicMock()
-    lore.match.return_value = []
+    lore.match.return_value = ([], [])
     return Pipeline(char, lore_engine=lore, active_character_id=char_id)
 
 

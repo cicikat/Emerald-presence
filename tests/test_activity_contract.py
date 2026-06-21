@@ -228,10 +228,10 @@ def test_activity_list_gomoku_summary_threshold_12(activity_list_client):
     assert gomoku["memory_policy"]["summary_threshold"] == 12
 
 
-def test_activity_list_reading_summary_threshold_none(activity_list_client):
+def test_activity_list_reading_summary_threshold_2(activity_list_client):
     data = activity_list_client.get("/activity/list").json()
     reading = next(item for item in data if item["id"] == "reading")
-    assert reading["memory_policy"]["summary_threshold"] is None
+    assert reading["memory_policy"]["summary_threshold"] == 2
 
 
 def test_activity_list_does_not_expose_session_store(activity_list_client):

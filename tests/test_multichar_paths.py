@@ -67,8 +67,9 @@ def test_character_inner_v1_top_paths(dp, tmp_path, method, expected_parts):
 
 # ── character_inner authored 静态路径（不走沙盒 _p，绝对路径略去 base）─────────
 
-def test_activity_pool_legacy(dp):
-    assert dp.activity_pool(char_id="yexuan") == Path("data/yexuan_inner/activity_pool.yaml")
+def test_activity_pool_v1(dp):
+    # content/characters/yexuan/activity_pool.yaml now exists — new path wins
+    assert dp.activity_pool(char_id="yexuan") == Path("content/characters/yexuan/activity_pool.yaml")
     assert dp.activity_pool() == dp.activity_pool(char_id="yexuan")
 
 

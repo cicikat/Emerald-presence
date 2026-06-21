@@ -31,6 +31,7 @@ _UID = "v1_test_user"
 _FAKE_CHARACTER = MagicMock()
 _FAKE_CHARACTER.name = "Companion"
 _FAKE_CHARACTER.description = "Companion是圣塞西尔学院的老师"
+_FAKE_CHARACTER.gender = "male"
 _FAKE_CHARACTER.jailbreak_entries = []
 
 _ALL_WORLDS = ["reality_derived", "abo", "vampire", "cat", "flower_bud", "custom"]

@@ -78,7 +78,7 @@ def _make_pipeline(char_id: str, registry):
     from core.pipeline import Pipeline
     char = _load(char_id)
     lore = MagicMock()
-    lore.match.return_value = []
+    lore.match.return_value = ([], [])
     return Pipeline(char, lore_engine=lore, active_character_id=char_id)
 
 
@@ -106,12 +106,12 @@ def _apply_base_stubs(monkeypatch) -> None:
     import core.memory.group_context as _gc
     import core.memory.diary_context as _dc
 
-    monkeypatch.setattr(_el, "search", AsyncMock(return_value=""))
+    monkeypatch.setattr(_el, "search", AsyncMock(return_value=("", [])))
     monkeypatch.setattr(_up, "load", lambda *a, **kw: {})
     monkeypatch.setattr(_mt, "format_for_prompt", lambda *a, **kw: "")
     monkeypatch.setattr(_st, "load_for_prompt", lambda *a, **kw: [])
-    monkeypatch.setattr(_ep, "retrieve", lambda *a, **kw: [])
-    monkeypatch.setattr(_ep, "retrieve_fallback", lambda *a, **kw: [])
+    monkeypatch.setattr(_ep, "retrieve", lambda *a, **kw: ([], []) if kw.get("return_trace") else [])
+    monkeypatch.setattr(_ep, "retrieve_fallback", lambda *a, **kw: ([], []) if kw.get("return_trace") else [])
     monkeypatch.setattr(_ui, "format_for_prompt", AsyncMock(return_value=""))
     monkeypatch.setattr(_il, "load_impression_text", lambda *a, **kw: "")
     monkeypatch.setattr(_gc, "get_recent", lambda *a, **kw: "")

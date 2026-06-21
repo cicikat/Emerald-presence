@@ -29,6 +29,7 @@ import pytest
 _FAKE_CHARACTER = MagicMock()
 _FAKE_CHARACTER.name = "Companion"
 _FAKE_CHARACTER.description = "Companion，男，圣塞西尔学院教师"
+_FAKE_CHARACTER.gender = "male"
 _FAKE_CHARACTER.jailbreak_entries = []
 
 _EMPTY_SNAPSHOT: dict[str, Any] = {

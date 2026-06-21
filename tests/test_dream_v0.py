@@ -23,12 +23,13 @@ _UID = "v0_test_user"
 _FAKE_CHARACTER = MagicMock()
 _FAKE_CHARACTER.name = "Companion"
 _FAKE_CHARACTER.description = "Companion，男，圣塞西尔学院教师，温柔内敛，有强烈的依恋倾向。"
+_FAKE_CHARACTER.gender = "male"
 _FAKE_CHARACTER.jailbreak_entries = []
 
 _FAKE_PIPELINE = MagicMock()
 _FAKE_PIPELINE.character = _FAKE_CHARACTER
 _FAKE_PIPELINE.lore_engine = MagicMock()
-_FAKE_PIPELINE.lore_engine.match.return_value = []
+_FAKE_PIPELINE.lore_engine.match.return_value = ([], [])
 
 
 def _make_fake_llm(reply: str = "梦境回复文本") -> AsyncMock:

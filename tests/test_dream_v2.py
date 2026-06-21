@@ -29,12 +29,13 @@ _UID = "v2_test_user"
 _FAKE_CHARACTER = MagicMock()
 _FAKE_CHARACTER.name = "Companion"
 _FAKE_CHARACTER.description = "Companion是圣塞西尔学院的老师"
+_FAKE_CHARACTER.gender = "male"
 _FAKE_CHARACTER.jailbreak_entries = ["测试破限条目"]
 
 _FAKE_PIPELINE = MagicMock()
 _FAKE_PIPELINE.character = _FAKE_CHARACTER
 _FAKE_PIPELINE.lore_engine = MagicMock()
-_FAKE_PIPELINE.lore_engine.match.return_value = []
+_FAKE_PIPELINE.lore_engine.match.return_value = ([], [])
 
 _SNAPSHOT = {
     "created_at": 0.0,

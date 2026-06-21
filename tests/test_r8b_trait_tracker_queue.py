@@ -57,7 +57,7 @@ def _make_pipeline(char_id: str, registry):
     from unittest.mock import MagicMock
     char = _load(char_id)
     lore = MagicMock()
-    lore.match.return_value = []
+    lore.match.return_value = ([], [])
     return Pipeline(char, lore_engine=lore, active_character_id=char_id)
 
 
