@@ -1,6 +1,8 @@
 """
 LLM 客户端模块
-所有 LLM 调用的唯一出口，支持 DeepSeek / OpenAI / 本地模型
+所有 LLM 调用的唯一出口，支持多模型 preset 路由（DeepSeek / Claude / 本地）。
+Preset 路由、参数合并、provider 白名单由 core.model_registry 管理。
+Prompt-style 转换（narrative / xml）由 core.prompt_style 管理。
 """
 
 import json
@@ -13,12 +15,14 @@ from openai import AsyncOpenAI
 
 from core.config_loader import get_config
 from core.error_handler import log_error
+from core.model_registry import ModelClient, get_model_client, reload_registry
 from core.prompt_layer import sanitize_messages
+from core.prompt_style import apply_prompt_style
 
 logger = logging.getLogger(__name__)
 
-# 全局客户端实例（延迟初始化）
-_client: AsyncOpenAI | None = None
+# Vision client is kept as a separate singleton; it does not participate in
+# preset routing (as specified — vision stays on its own `vision:` block).
 _vision_client: AsyncOpenAI | None = None
 
 
@@ -36,8 +40,9 @@ _CALL_TIMEOUTS: dict[str, float] = {
 }
 _DEFAULT_CALL_TIMEOUT: float = 90.0
 
+
 def _get_proxy_url() -> str | None:
-    """读取代理配置，未启用时返回 None"""
+    """读取代理配置，未启用时返回 None（vision client 专用；preset clients 在 model_registry 中建）"""
     proxy_cfg = get_config().get("proxy", {})
     if proxy_cfg.get("enabled", False):
         return proxy_cfg.get("http") or None
@@ -45,9 +50,6 @@ def _get_proxy_url() -> str | None:
 
 
 def _make_http_client(proxy_url: str | None) -> httpx.AsyncClient:
-    """Build httpx client with base connect timeout; per-call read timeout
-    is passed via each completions.create() timeout= kwarg.
-    """
     base_timeout = httpx.Timeout(timeout=_DEFAULT_CALL_TIMEOUT, connect=10.0)
     if proxy_url:
         return httpx.AsyncClient(proxy=proxy_url, timeout=base_timeout)
@@ -55,21 +57,10 @@ def _make_http_client(proxy_url: str | None) -> httpx.AsyncClient:
 
 
 def _get_client() -> AsyncOpenAI:
-    """获取 OpenAI 客户端（单例，含代理配置）"""
-    global _client
-    if _client is None:
-        cfg = get_config()["llm"]
-        proxy_url = _get_proxy_url()
-        http_client = _make_http_client(proxy_url)
-        _client = AsyncOpenAI(
-            api_key=cfg["api_key"],
-            base_url=cfg["base_url"],
-            http_client=http_client,
-        )
-        logger.info(
-            f"[llm_client] 客户端已初始化，代理={'已启用 ' + proxy_url if proxy_url else '未启用'}"
-        )
-    return _client
+    """薄封装：返回 chat preset 的 AsyncOpenAI 实例。
+    保留此函数使外部少数直接调用者（和旧测试）不需要改动。
+    """
+    return get_model_client("chat").client
 
 
 def _get_vision_client() -> AsyncOpenAI | None:
@@ -92,12 +83,12 @@ def _get_vision_client() -> AsyncOpenAI | None:
 
 def reload_client():
     """
-    重置 OpenAI 客户端（代理/API Key 配置变更后调用）
-    下次调用 _get_client() 时会重新按最新配置创建
+    重置所有 LLM 客户端（代理/API Key 配置变更后调用）。
+    下次调用时将按最新 config 重建。
     """
-    global _client, _vision_client
-    _client = None
+    global _vision_client
     _vision_client = None
+    reload_registry()
     logger.info("[llm_client] 客户端已重置，下次请求时按最新配置重建")
 
 
@@ -115,6 +106,7 @@ async def chat(
         messages: OpenAI 格式的消息列表 [{role, content}, ...]
         tools:    工具定义列表（function_calling 模式时使用）
         use_vision: 使用视觉模型处理图片
+        call_category: 路由到对应 preset 的类别名
 
     返回:
         模型生成的文本字符串
@@ -122,19 +114,17 @@ async def chat(
     """
     _timeout = _CALL_TIMEOUTS.get(call_category, _DEFAULT_CALL_TIMEOUT)
 
-    # Strip internal fields (e.g. _layer, _debug) before any message reaches the API.
-    # Never mutates the caller's list.
-    messages = sanitize_messages(messages)
-
-    # vision模式用视觉客户端和模型
+    # vision 模式走独立 vision client，不经过 preset 路由
     if use_vision:
         vision_client = _get_vision_client()
         if vision_client:
             vision_cfg = get_config().get("vision", {})
+            # Vision branch: sanitize only (no prompt_style transform needed)
+            safe_msgs = sanitize_messages(messages)
             try:
                 response = await vision_client.chat.completions.create(
                     model=vision_cfg["model"],
-                    messages=messages,
+                    messages=safe_msgs,
                     max_tokens=1000,
                     timeout=_CALL_TIMEOUTS["vision"],
                 )
@@ -143,25 +133,21 @@ async def chat(
                 log_error("llm_client.chat.vision", e)
                 return ""
 
-    cfg = get_config()["llm"]
-    client = _get_client()
-    model = cfg["model"]
-    mode = cfg.get("tool_call_mode", "function_calling")
+    mc: ModelClient = get_model_client(call_category)
 
-    # 读取生成参数（每次 chat 调用都重新读，支持热重载）
-    temperature       = float(cfg.get("temperature",       0.7))
-    top_p             = float(cfg.get("top_p",             0.9))
-    max_tokens        = max_tokens_override or int(cfg.get("max_tokens", 1000))
-    frequency_penalty = float(cfg.get("frequency_penalty", 0.0))
+    # Phase 2: apply prompt style BEFORE sanitize so _layer is still available
+    messages = apply_prompt_style(messages, mc.prompt_style)
+    messages = sanitize_messages(messages)
 
-    # 公共关键字参数，注入到每种调用模式
-    _gen_kwargs = dict(
-        temperature=temperature,
-        top_p=top_p,
-        max_tokens=max_tokens,
-        frequency_penalty=frequency_penalty,
-        timeout=_timeout,
-    )
+    model = mc.model
+    client = mc.client
+    mode = mc.tool_call_mode
+
+    # Build generation kwargs from preset params; max_tokens_override wins
+    _gen_kwargs: dict[str, Any] = dict(mc.params)
+    if max_tokens_override is not None:
+        _gen_kwargs["max_tokens"] = max_tokens_override
+    _gen_kwargs["timeout"] = _timeout
 
     try:
         # ── function_calling 模式 ──────────────────────────────────────────
@@ -174,7 +160,6 @@ async def chat(
                 **_gen_kwargs,
             )
             choice = response.choices[0]
-            # 模型选择调用工具时，返回工具调用信息的 JSON 字符串
             if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
                 tool_calls = []
                 for tc in choice.message.tool_calls:
@@ -182,13 +167,11 @@ async def chat(
                         "name": tc.function.name,
                         "arguments": json.loads(tc.function.arguments),
                     })
-                # 用特殊前缀标记，让 tool_dispatcher 识别
                 return "__TOOL_CALL__:" + json.dumps(tool_calls, ensure_ascii=False)
             return choice.message.content or ""
 
         # ── xml_fallback 模式（不支持 FC 的模型）────────────────────────────
         elif mode == "xml_fallback" and tools:
-            # 把工具描述注入到 system 消息末尾
             tool_desc = _build_xml_tool_desc(tools)
             msgs = list(messages)
             injected = False
@@ -235,26 +218,22 @@ async def chat_stream(
     失败时抛异常，调用方（run_llm_stream）负责降级。
     """
     _timeout = _CALL_TIMEOUTS.get(call_category, _DEFAULT_CALL_TIMEOUT)
+
+    mc: ModelClient = get_model_client(call_category)
+
+    messages = apply_prompt_style(messages, mc.prompt_style)
     messages = sanitize_messages(messages)
 
-    cfg = get_config()["llm"]
-    client = _get_client()
-    model = cfg["model"]
+    _gen_kwargs: dict[str, Any] = dict(mc.params)
+    if max_tokens_override is not None:
+        _gen_kwargs["max_tokens"] = max_tokens_override
+    _gen_kwargs["timeout"] = _timeout
 
-    temperature       = float(cfg.get("temperature",       0.7))
-    top_p             = float(cfg.get("top_p",             0.9))
-    max_tokens        = max_tokens_override or int(cfg.get("max_tokens", 1000))
-    frequency_penalty = float(cfg.get("frequency_penalty", 0.0))
-
-    stream = await client.chat.completions.create(
-        model=model,
+    stream = await mc.client.chat.completions.create(
+        model=mc.model,
         messages=messages,
-        temperature=temperature,
-        top_p=top_p,
-        max_tokens=max_tokens,
-        frequency_penalty=frequency_penalty,
-        timeout=_timeout,
         stream=True,
+        **_gen_kwargs,
     )
     async for chunk in stream:
         if not chunk.choices:
@@ -274,14 +253,12 @@ def parse_tool_call_response(response: str) -> list[dict] | None:
 
     返回工具调用列表，无工具调用则返回 None
     """
-    # function_calling 模式
     if response.startswith("__TOOL_CALL__:"):
         try:
             return json.loads(response[len("__TOOL_CALL__:"):])
         except json.JSONDecodeError:
             return None
 
-    # xml_fallback 模式
     pattern = r"<tool_call>(.*?)</tool_call>"
     matches = re.findall(pattern, response, re.DOTALL)
     if matches:
@@ -360,7 +337,6 @@ def _rule_fallback(user_msg: str, reply: str = "", tags: list[str] | None = None
 
 
 # 用户和回复合起来低于这个长度才走 fallback；高于则进 LLM 压缩。
-# 取小值是因为中文 8 字 ≈ 一句话信息量；再低 LLM 也产不出好摘要，没必要花 token。
 _SUMMARIZE_MIN_TOTAL_LEN = 8
 
 
@@ -369,16 +345,12 @@ async def summarize_turn(user_msg: str, reply: str, tags: list[str] | None = Non
     user_msg = (user_msg or "").strip()
     reply = (reply or "").strip()
 
-    # 用户和回复合起来都很短，才不调 LLM。
-    # 旧版只看 user_msg < 10，导致用户输入"（锤他胸口）"等短动作时
-    # 即便 reply 很长也跳过 LLM，写入的 summary 就是用户原话，无效记忆。
     if len(user_msg) + len(reply) < _SUMMARIZE_MIN_TOTAL_LEN:
         return _rule_fallback(user_msg, reply, tags)
     try:
-        cfg = get_config()["llm"]
-        client = _get_client()
-        response = await client.chat.completions.create(
-            model=cfg["model"],
+        mc = get_model_client("summary")
+        response = await mc.client.chat.completions.create(
+            model=mc.model,
             messages=[
                 {"role": "system", "content": _SUMMARIZE_SYSTEM},
                 {"role": "user", "content": f"用户:{user_msg}\n回复:{reply}"},
@@ -388,7 +360,7 @@ async def summarize_turn(user_msg: str, reply: str, tags: list[str] | None = Non
             timeout=_CALL_TIMEOUTS["summary"],
         )
         result = (response.choices[0].message.content or "").strip()
-        result = result.strip('"\'"“”‘’')
+        result = result.strip('"\'"""''')
         result = result[:30]
         if not result:
             return _rule_fallback(user_msg, reply, tags)
@@ -411,10 +383,9 @@ async def detect_emotion(text: str) -> str:
         f"文本：{text}"
     )
     try:
-        cfg = get_config()["llm"]
-        client = _get_client()
-        response = await client.chat.completions.create(
-            model=cfg["model"],
+        mc = get_model_client("detect_emotion")
+        response = await mc.client.chat.completions.create(
+            model=mc.model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=10,
             temperature=0.0,
