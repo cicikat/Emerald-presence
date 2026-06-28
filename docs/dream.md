@@ -50,11 +50,12 @@
 - `body_projection`：4 档可见度 + 他情绪张力（yexuan_tension）耦合
 - 前端 BodyState 类型 + 她的赛博感知侧栏面板
 
-**印象回流（impression v1 + patch）**
+**印象回流（impression v2 · D2 细粒度化）**
 - `impression_store`：`data/runtime/dreams/{char_id}/impressions/`，慢衰减（0.02/天），50 条上限
-- `distill_impression`：梦结束结构性剥离场景/世界/身体，生成"我好像在梦里……"低权印象
-- `impression_loader`：**唯一读 impressions/ 的模块**，ambient 取最近 ≤3 条
-- 现实层 `6g_dream_impression`，框定"模糊的梦境印象，非现实发生的事" + 防编造场景约束
+- `distill_impression`（D2）：梦结束提炼剧情概要 + 1–2 句清晰对白 + 情绪总览；输出字段：`plot`（≤80字概要）、`vivid_lines`（≤2条引语）、`impression_text`（80–150字第一人称总览）；仍禁止世界设定专有词和身体数值词；I4 写路径不变（只写 impression_store，不碰任何现实记忆存储）
+- `impression_loader`（D2）：**唯一读 impressions/ 的模块**，ambient 取最近 ≤3 条；渲染为 plot + vivid_lines + impression_text 三段结构，包裹于 `<梦境印象 note="…">` 标签
+- 现实层 `6g_dream_impression`：显式 XML 标签框定"以下是叶瑄做过的梦，不是现实发生的事"，叶瑄可像记得一个梦一样自然提起但绝不当作真实经历复述
+- **D2 新隔离墙（固化端）**：`pipeline.post_process` 检测到当前有活跃 impression 时，在 `summarize_to_midterm` 入队 payload 中加 `dream_echo=True`；`handler_summarize_to_midterm` 收到此标记直接跳过，阻止该轮的梦境剧情通过 mid_term → episodic → identity 链路固化为现实事实
 
 **世界包（v1）**
 - 六世界包 `characters/dream_worlds/{reality_derived,abo,vampire,cat,flower_bud,custom}/`，各含 `ruleset.md` / `mes_example.md` / `vocab.json` / `lorebook.yaml`(骨架)
@@ -274,7 +275,7 @@ WriteEnvelope 双重门控：
 |---|---|---|
 | `6f_dream_afterglow` | 梦境余韵详细层（只读，非现实事实） | 0–2h 注入完整摘要/色调/意象；2–5h 注入模糊摘要/色调；5h 后返回空 |
 | `dream_afterglow_soft_hint` | 梦境余韵软提示（只读，非事实，`may/可能` 限定，TTL 8h） | 详细层为空后接管；读 `afterglow_residue.json`；neutral+空tags 不注入；读取异常 fail-closed |
-| `6g_dream_impression` | 低权"我好像在梦里…"模糊印象 | 慢衰减 |
+| `6g_dream_impression` | 梦境印象（plot + vivid_lines + 情绪总览，`<梦境印象>` XML 标签显式框定非现实） | 慢衰减；有活跃 impression 时注入；对应轮 `dream_echo=True` 跳过 mid_term 固化 |
 
 `6f_dream_afterglow` 与 `dream_afterglow_soft_hint` 在 Reality prompt builder 中互斥，位于层 6e 之后、层 6g 之前。两层均进入 token 裁剪表且优先级最低（最先被裁剪）。写隔离不变：只读，不写 memory / mood / profile / hidden state。
 
@@ -290,7 +291,7 @@ afterglow 完整路径：Dream exit → summary → Reality prompt `6f_dream_aft
 |---|---|---|---|
 | **archive 原文** | 梦境全文 | `archive/dream_*.jsonl` | **仅她复盘，任何 loader 永不读** |
 | **afterglow summary** | 剥场景的情绪余韵 | `summaries/*.summary.json` | `wire_afterglow_from_summary()` 读取后转写 `afterglow_residue.json`（Phase 6 已接线）；summary 本身 never_retrieve |
-| **impression residue** | 低权模糊印象 | `impressions/{uid}.json` → 6g | impression_loader 唯一读 |
+| **impression residue** | 梦境印象（D2：plot + vivid_lines + 情绪总览） | `impressions/{uid}.json` → 6g | impression_loader 唯一读；对应轮 pipeline 标记 `dream_echo=True`，跳过 mid_term 固化 |
 
 `dream_exit` 主动开口不是第四层回流产物：它不自行保存或拼装梦内容，只消费上述现实侧只读注入层并触发一次正常 Reality turn。
 
@@ -374,6 +375,16 @@ REALITY_CHAT → DREAM_ENTRANCE_AVAILABLE → DREAM_ACTIVE → DREAM_CLOSING →
 | `lucid_mode` | lucid_shared / non_lucid |
 | `enable_dream_lorebook` | bool |
 | `jailbreak_preset` | `characters/dream_presets/{name}.md` 的安全 ASCII 名；缺失时回退 `default` |
+| `reality_context_full_turns` | int，默认 3。D4 层 `recent_reality_context` 完整注入的轮数上限（见下方说明）。 |
+
+**D4 `recent_reality_context` 轮数衰减**
+
+入梦后的现实背景注入分两段，以防现实语感随时间带偏梦境：
+
+- **前 N 轮（dream_turn < N）**：D4 注入完整的 `recent_reality_context`（逐字现实对话摘要）。
+- **第 N 轮起（dream_turn ≥ N）**：逐字背景停止注入，改注入一句概括 `（你记得入梦前你们在{gist}）`，其中 `gist` 是 `recent_reality_context` 的一句浓缩，在入梦时冻结于 `context_snapshot["recent_reality_gist"]`，梦中不再二次调 LLM。
+
+N 由 `dream.reality_context_full_turns` 配置（默认 3）。`dream_turn` 是梦内已完成的 assistant 轮次数，在 `dream_pipeline.dream_turn()` 调用 `build_dream_prompt()` 前从 `dream_history` 中统计。
 
 > 破限属梦境独立源（D0），不在 settings 暴露开关（独立 pipeline 天然不漏进现实，工程上最不用操心）。
 

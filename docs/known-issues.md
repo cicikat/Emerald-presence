@@ -1,7 +1,7 @@
 # docs/known-issues.md — 已知问题与技术债
 
-> 最近核对：2026-06-11
-> 核对范围：R1-C QQ adapter 收口；R1-B QQ 主入口 full-convergence 审计；perceive_event P0+P1 收口。已落地事项按当前实现同步；未列出的条目保持原审计结论。
+> 最近核对：2026-06-26
+> 核对范围：F2 窗口标题注入 + peek_screen_content 工具落地。
 >
 > 状态标签：
 > - `now-safe-to-fix`：可按小修推进。
@@ -317,6 +317,23 @@ HTTP 管理面已统一依赖 `admin.auth.verify_token`。本轮最终 P1 补齐
 
 对话记录当前没有右键菜单或快捷历史操作。属于前端体验债，与主链路无关。
 
+### REC1：召回准入闸目前是硬名单，未来应升级为"长度+信息量启发式"
+
+**状态**：`accepted-followup`（P0.5 先用硬名单止血）
+
+**位置**：`core/recall_gate.py` → `is_low_information()`
+
+**现状**：用 backchannel 硬名单判定低信息轮，跳过 event_search / episodic fallback / 日记注入 / 情绪 tag 感受层。优点是可控、零误伤；缺点是覆盖不全——新出现的口头禅、方言、表情字需要手工加词。
+
+**未来方向（待排期）**：改成启发式，综合：
+- 长度（去标点后字符数）；
+- 信息量（实词/命名实体占比，可复用 `text_match.ngram_tokens` + 停用词表的 idf）；
+- 新颖度（与最近 N 轮 short_term 的重复度，纯复读视作低信息）。
+
+给一个连续 score，低于阈值 → 抑制召回；硬名单退化为 score 的强先验词典。
+
+**关联**：tag_rules 里 `"咪"` `"嗯哼"` 这类低精度触发词（`emotion.indirect` 命中单字 "咪"）可在启发式落地后一并收紧，当前靠准入闸在下游兜住。
+
 ---
 
 ## 观察与重构债
@@ -460,10 +477,37 @@ R8-D 实测：当前 DLQ 目录无任何 legacy task 文件（`mid_term_append` 
 
 ---
 
+### SC1：酒馆（SillyTavern）角色卡导入——输出风格冲突 + token 超支（模块已冻结）
+
+**状态**：`boundary-doc-needed`（模块冻结，待重新立项再动）
+
+**相关产物**：`scripts/import_st_card.py`（阶段一转换器，已落地）、`characters/xueyunjing.json`（由 `characters/2.json` 转出）、`cc-tasks/st-card-import.md` / `cc-tasks/st-card-import-phase2.md`（阶段一/二施工单）。
+
+**现象（2026-06-26 实测）**：
+1. 直接用酒馆原卡 `2.json`（在酒馆里）观感最好；转换进本管线后的薛蕴景明显变差。
+2. 转换后**生成端输出格式被带偏**：本项目生成端约定用 `**` 标动作（前端再把 `**` 渲染成 `（）` 显示，是显示层、与本 issue 无关）；酒馆卡用 `""`。转换后的薛蕴景把酒馆的 `""` 习惯带进了生成端，与本项目 `**` 约定冲突。
+3. token 超支：转换后的卡极大（`xueyunjing.json` ~165KB，`post_history_extra` ~5882 字，description 还折进了大量 before 常驻块），叠加管线既有层后撑爆 `build_prompt` 的 20k 字符硬上限。
+
+**根因（初判）**：转换器把酒馆卡**自带的输出风格/格式指令原样搬进了本管线**，而本管线（`core/prompt_builder.py` 层 `11_author_note` 的 roleplay 风格指令）已独占输出格式。两套风格规则重复且冲突：
+- `""` 泄漏源：酒馆卡的 `system_prompt`（为 Gemini 写的反八股段）、`creator_notes`、状态栏格式、after 常驻块，全按酒馆渲染器 + `""` 习惯书写；本项目生成端要的是 `**`。
+- token 膨胀源：上述风格指令与管线同类指令重复堆叠 + 常驻块无脑折进 description。
+
+**为何冻结而非推进阶段二**：阶段二（`11.5_post_history` 注入 `post_history_extra`）会把**更多**酒馆风格文本以高优先级、不可裁剪地注入，直接放大 `""` 泄漏与 token 超支。继续阶段二会让现状更糟，故冻结。
+
+**修复方向（待重新立项，方向是"导入卫生 / 输出端适配"，比阶段二更小）**：
+1. 转换器在导入时**丢弃/隔离**酒馆卡的风格与格式指令（反映酒馆渲染器的 `system_prompt`、`creator_notes`、状态栏格式、`""` 约定），让宿主管线独占输出格式。
+2. token：常驻块不再无脑折进 description；给导入的 lore/常驻内容打 `_drop_priority`，使其在 20k 上限下可被裁剪而非撑爆。
+3. normalize 一遍：把导入文本/示例对白里的 `""` 动作写法清掉，对齐本项目生成端 `**` 约定。
+
+**冻结边界**：阶段一转换器与已转出的 `xueyunjing.json` 保留备查，但**不接入生产选卡**；阶段二施工单（`cc-tasks/st-card-import-phase2.md`）暂缓执行，待本 issue 重新立项。
+
+---
+
 ## 本轮已核对关闭
 
 | 编号 | 结论 |
 |---|---|
+| F1 词级强调 `<hl>/<big>/<sm>` 不出现 | 已修复（2026-06-26）。`prompt_builder.py` 层11 词级强调指令改为正向指派框定（"焦点处用一次"），`characters/default.json` `mes_example` 补 `<hl>` 锚例，few-shot 和指令同步鼓励模型产出。 |
 | P0 Write Envelope v0 | 已完成。写入准入 fail-closed；未 stamp 默认不写 memory / mood；`is_test` / `is_debug` 强制不可写；sensor / watch 原始感知默认不写 profile。该结论不等于完整权限系统或完整字段契约。 |
 | P0 QQ Dream Guard | 已完成。`DREAM_ACTIVE` / `DREAM_CLOSING` 时 QQ owner 消息被拒，不进入现实 pipeline，不写 runtime / memory。P2.4：guard 升级为 fail-closed — 状态文件损坏 / 读失败时同样拒绝 reality turn；`/desktop/chat`、`/mobile/chat`、`/desktop/wake` Path B 同步覆盖。 |
 | P0 Render Tag 收口 | 已完成。QQ / mobile 输出移除 `<say>` 等展示标签；reality memory / event_log 保存纯文本；desktop segments 保持原行为。 |
@@ -479,5 +523,10 @@ R8-D 实测：当前 DLQ 目录无任何 legacy task 文件（`mid_term_append` 
 | Final P1 `/watch/event` query secret | 已关闭。Bearer-only，正确 query secret 也拒绝，OpenAPI 无 secret query 参数。 |
 | short_term 加权裁剪未开 | 已修复。`load_for_prompt()` 使用近场保留和远场加权择优。 |
 | SEC-LOG-001 uvicorn access log 直接泄露 token | 已关闭。access log sanitizer 已安装；SEC-WS-1 final 已拒绝 WS query token。 |
+| X3 web 来源未隔离（污染 episodic/identity）| 已修复（2026-06-28）。`web_echo` 标记位由 `fetch_context` 检测 `web_recall_result` 非空后通过调用链传至 `post_process`，`fixation_pipeline.handler_summarize_to_midterm` 与 `dream_echo` 同等跳过固化。 |
+| P4 世界书 lore id 缺失回填 | 已修复（2026-06-28）。`lore_engine.load()` 在加载每个 lorebook YAML 后调用 `_ensure_lore_ids()`，补发缺失 id 并回写磁盘；admin 路由的 `_read_lorebook()` 已有同等逻辑，两路均幂等。 |
+| D1 梦境 D3 mes_example 每轮打 FALLBACK | 已自然修复（2026-06-28 静态核实）。7 个世界包（abo/cat/custom/flower_bud/reality_derived/vampire/审讯）及 `_default/` 的 `mes_example.md` 均已存在且非空；`load_world()` 双重兜底保证 `world.mes_example` 恒非空；`dream_prompt.py:308` `_mes_from_fallback` 恒为 False，D3 FALLBACK 标记不再触发。判定为早期文件未补齐时的旧观察，代码无需修改。 |
+
+| G2（cc-tasks）显式遗忘空白——各层只增不显式删 | 已修复（2026-06-28）。`vector_store.delete()`、`episodic_memory.delete_episode()`、`user_profile.delete/overwrite_important_fact()`、`user_identity.delete/overwrite_dimension()`、`mid_term.delete_event()`、`user_facts.delete_user_fact()`、`event_log.delete_day()` 均已落地；admin 端点 8 条；每次遗忘记 provenance `trigger_signal="explicit_forget"`。详见 `docs/memory.md §G2 粒度删除 API`。 |
 
 历史已修复项继续以 git 历史和相关测试为准，不再在本文重复堆叠。

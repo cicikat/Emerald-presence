@@ -5,7 +5,7 @@
 > 限制：本文只记录代码和文档事实；未在代码中找到的步骤标为“未找到明确实现 / 待确认”。
 >
 > **2026-05-31 更新说明**：本文保留 2026-05-19 的三仓库审计快照，不作为当前接口清单。
-> 此后 `qq-st-bot` 已拆分 datapath，调度器 proposal 已进入 live winner 执行，
+> 此后 `Emerald-presence` 已拆分 datapath，调度器 proposal 已进入 live winner 执行，
 > `Emerald-client` 已正式接入 Dream overlay。当前事实优先看 `docs/data-taxonomy.md`、
 > `docs/scheduler.md`、`docs/channels.md`、`docs/dream.md` 和客户端自己的
 > `docs/backend-integration.md`。
@@ -21,7 +21,7 @@
 
 | 仓库 | 当前职责 | 证据 |
 |---|---|---|
-| `qq-st-bot` | 后端和核心真相源：QQ/HTTP/WS 入口、Pipeline、LLM、记忆、情绪、调度器、花园、通道广播。 | `<repo-root>\ARCHITECTURE.md`；`<repo-root>\main.py:82`；`<repo-root>\admin\routers\chat.py:29` |
+| `Emerald-presence` | 后端和核心真相源：QQ/HTTP/WS 入口、Pipeline、LLM、记忆、情绪、调度器、花园、通道广播。 | `<repo-root>\ARCHITECTURE.md`；`<repo-root>\main.py:82`；`<repo-root>\admin\routers\chat.py:29` |
 | `Emerald-client` | Tauri + React 桌面客户端：聊天 UI、Tauri HTTP 桥、legacy desktop WS 订阅、桌面 sensor 发布、只读花园/日记/状态面板。 | `<desktop-client-root>\ARCHITECTURE.md`；`<desktop-client-root>\src-tauri\src\lib.rs:26`；`<desktop-client-root>\src\shared\api\ws.ts:9` |
 | `mobile-client` | Flutter/Android 手机薄客户端：`mobile channel` 对话、主动消息轮询、后台通知、无障碍屏幕上下文、移动端行为 metadata 消费。 | `<mobile-client-root>\README.md`；`<mobile-client-root>\lib\main.dart:1563`；`<mobile-client-root>\android\app\src\main\kotlin\com\example\mobile-client\MobileNotificationService.kt:19` |
 
@@ -154,7 +154,7 @@
 
 | 项目 | 主要职责 | 不应承担的职责 | 关键文件/模块 | 当前风险 |
 |---|---|---|---|---|
-| `qq-st-bot` | 角色核心、LLM、prompt、记忆、情绪、花园、scheduler、HTTP/WS 服务、通道 fanout。 | 不应把客户端 UI 状态当真相；不应让未鉴权客户端写真实关系记忆；不应让测试/调试事件默认进入真实记忆。 | `main.py`、`admin/routers/*.py`、`core/pipeline.py`、`core/turn_sink.py`、`core/memory/*`、`core/scheduler/*`、`channels/*` | 仍有多个绕过 `turn_sink` 的写入/发送路径；若 `watch_secret` 为空或无鉴权端口暴露，事件可写真实 profile/记忆/情绪。 |
+| `Emerald-presence` | 角色核心、LLM、prompt、记忆、情绪、花园、scheduler、HTTP/WS 服务、通道 fanout。 | 不应把客户端 UI 状态当真相；不应让未鉴权客户端写真实关系记忆；不应让测试/调试事件默认进入真实记忆。 | `main.py`、`admin/routers/*.py`、`core/pipeline.py`、`core/turn_sink.py`、`core/memory/*`、`core/scheduler/*`、`channels/*` | 仍有多个绕过 `turn_sink` 的写入/发送路径；若 `watch_secret` 为空或无鉴权端口暴露，事件可写真实 profile/记忆/情绪。 |
 | `Emerald-client` | 桌面 UI、Tauri HTTP 桥、desktop WS 连接、桌面 sensor 发布、状态展示。 | 不应拥有 mood/activity/presence 的业务真值；不应伪造 action 成功；不应硬编码长期 token。 | `src/shared/api/backend.ts`、`src/shared/api/ws.ts`、`src-tauri/src/lib.rs`、`src-tauri/src/sensor/*` | `action` 立即成功 ack 但未执行；v1 协议未落地；token 仍硬编码。 |
 | `mobile-client` | 手机 UI、mobile chat/poll、后台通知、无障碍屏幕上下文、悬浮/锁屏确认层。 | 不应定义后端主动行为规则；不应自动升级普通消息为高危动作；不应把屏幕敏感文本默认长期化。 | `lib/main.dart`、`MobileNotificationService.kt`、`YexuanAccessibilityService.kt`、`FloatingBubbleService.kt` | 后台服务和 Flutter 均硬编码 token；debug 行为测试会写入真实 mobile queue；屏幕上下文会进入后端实时状态并参与主动发言裁决。 |
 

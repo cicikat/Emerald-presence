@@ -52,7 +52,7 @@
 
 | 路径 | 说明 |
 |------|------|
-| `characters/他.json` | 角色卡主体（SillyTavern JSON 格式） |
+| `characters/他.json` | 角色卡主体（JSON 格式） |
 | `characters/他.txt` | 角色卡文本版 |
 | `characters/yexuan_author_notes.json` | 当前 author notes 池（同 2a fallback） |
 | `characters/yexuan_author_notes - 副本.json` | author notes 备份副本 |

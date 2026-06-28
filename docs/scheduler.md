@@ -628,6 +628,39 @@ window 拦截、LLM 空回复或发送前异常时，不调用 execute 的 `afte
 
 ---
 
+## 主动触发 Prompt 可观测性（admin-panel-round6）
+
+`_pipeline_send()`（scheduler 触发）和 `desktop_wake` Path B（桌宠重开问候）均在调用
+`build_prompt()` 前，通过 `core/observe/prompt_capture.py` 的 ContextVar `_capture_origin`
+写入主动触发的元数据，`capture()` 随即把这些信息写入快照：
+
+| 字段 | 内容 |
+|---|---|
+| `origin.origin` | `"proactive"` |
+| `origin.trigger_name` | 触发器名，如 `"random_message"`、`"desktop_wake"` |
+| `origin.seed_prompt` | 喂给 `build_prompt` 的用户位消息（第 12 层实际来源） |
+| `origin.search_query` | 驱动 RAG/event 召回的锚点词（`fetch_context` 第二参数）；空字符串表示与 seed_prompt 相同 |
+
+`update_llm_output()` 同样在 `run_llm()` 返回后被调用，配对写入 LLM 回复文本。
+
+### search_query 召回锚点说明
+
+主动触发最容易"乱召回"的机制根源在于：召回锚点不是真实用户输入，而是触发器的种子词。
+以 `daily_journal` 为例，`search_query="今天"` 驱动 `event_log.search("今天")` 和
+`episodic_memory.retrieve("今天")`，拉进来的记忆是被这个宽泛词命中的，和当下对话无关。
+在 **Prompt 层检视** 页查看主动轮次时，快照总览会明确标出 search_query，
+每个 `scored` 层的 `rag_query` 字段也反映了这个锚点。
+
+### 管理面板入口
+
+| 功能 | 页面 |
+|---|---|
+| 查看任意轮 prompt 层（含主动轮）| **Prompt 层检视** → 轮次选择器；主动轮有绿色「主动 · trigger_name」徽章 |
+| 查看主动轮种子 prompt + search_query | 同上，总览卡展开「主动触发详情」面板 |
+| 查看所有触发器最近一次真实快照 | **触发器目录** → `GET /observe/trigger-catalog` |
+
+---
+
 ## 请勿打扰（DND）模块
 
 文件：`core/scheduler/triggers/dnd.py`
