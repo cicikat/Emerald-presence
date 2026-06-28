@@ -122,8 +122,9 @@ async def main():
     mock_create = AsyncMock(return_value=fake_resp)
     mock_client = MagicMock()
     mock_client.chat.completions.create = mock_create
+    fake_mc = SimpleNamespace(model="test-model", client=mock_client)
 
-    with patch("core.scheduler.sensor_judge._get_client", return_value=mock_client):
+    with patch("core.scheduler.sensor_judge.get_model_client", return_value=fake_mc):
         re_ = await sj.judge(_LONG_FOCUS_BASE)
 
     show("LONG_FOCUS / mock-bad-json", re_)

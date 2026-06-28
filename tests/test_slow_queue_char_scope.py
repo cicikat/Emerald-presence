@@ -193,7 +193,7 @@ async def test_handler_summarize_to_midterm_passes_char_id(sandbox):
 
     captured: list[str] = []
 
-    def _spy_append(uid, summary, tags=None, mid_id=None, source_turn_id=None, *, char_id="yexuan"):
+    def _spy_append(uid, summary, tags=None, mid_id=None, source_turn_id=None, *, char_id="yexuan", occurred_at=None, **kw):
         captured.append(char_id)
 
     monkeypatch_mt = patch.object(_mt, "append", side_effect=_spy_append)
@@ -367,7 +367,7 @@ async def test_legacy_payload_missing_char_id_warns_and_falls_back(sandbox, capl
     # --- handler_summarize_to_midterm ---
     st_captured: list[str] = []
 
-    def _spy_mt_append(uid, summary, tags=None, mid_id=None, source_turn_id=None, *, char_id="yexuan"):
+    def _spy_mt_append(uid, summary, tags=None, mid_id=None, source_turn_id=None, *, char_id="yexuan", occurred_at=None, **kw):
         st_captured.append(char_id)
 
     with (

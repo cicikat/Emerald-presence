@@ -367,3 +367,64 @@ async def test_detect_emotion_invalid_falls_back(monkeypatch):
     fake_mc = _make_fake_model_client("confused")
     monkeypatch.setattr(llm_client, "get_model_client", lambda cat: fake_mc)
     assert await llm_client.detect_emotion("some text") == "neutral"
+
+
+# ===========================================================================
+# 7. sensor_judge routing: must use intent preset model, not legacy llm block
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_sensor_judge_uses_intent_preset_model(monkeypatch):
+    """When chat preset routes to model-A and intent preset routes to model-B,
+    sensor_judge must issue the LLM call with model-B (the intent preset's model).
+    Regression guard: before the fix sensor_judge read cfg["model"] from the
+    legacy llm: block regardless of which client _get_client() returned.
+    """
+    import core.scheduler.sensor_judge as sj
+    from core.model_registry import ModelClient
+
+    captured: dict = {}
+
+    async def capturing_create(**kwargs):
+        captured["model"] = kwargs.get("model")
+        captured["category"] = captured.get("_last_cat")
+        msg = types.SimpleNamespace(content='{"score": 55, "reason": "测试"}')
+        choice = types.SimpleNamespace(message=msg)
+        return types.SimpleNamespace(choices=[choice])
+
+    completions = types.SimpleNamespace(create=capturing_create)
+    chat_obj = types.SimpleNamespace(completions=completions)
+    fake_client_obj = types.SimpleNamespace(chat=chat_obj)
+
+    fake_mc = ModelClient(
+        name="intent-preset",
+        provider_kind="deepseek",
+        model="model-B",
+        tool_call_mode="function_calling",
+        prompt_style="narrative",
+        params={},
+        client=fake_client_obj,
+    )
+
+    seen_categories: list = []
+
+    def fake_get_model_client(cat: str) -> ModelClient:
+        seen_categories.append(cat)
+        return fake_mc
+
+    monkeypatch.setattr(sj, "get_model_client", fake_get_model_client)
+
+    event = {
+        "type": "TEST",
+        "narrative": "test narrative",
+        "context": {"local_hour": 14, "presence": "active"},
+    }
+    result = await sj.judge(event)
+
+    assert seen_categories == ["intent"], (
+        f"sensor_judge must call get_model_client('intent'), got {seen_categories}"
+    )
+    assert captured["model"] == "model-B", (
+        f"LLM call must use intent preset model 'model-B', got {captured['model']!r}"
+    )
+    assert result["score"] == 55

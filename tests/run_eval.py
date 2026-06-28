@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-# 切换到 qq-st-bot 目录，与 main.py 保持一致
+# 切换到 Emerald-presence 目录，与 main.py 保持一致
 os.chdir(Path(__file__).parent.parent)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 

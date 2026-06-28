@@ -1,11 +1,12 @@
 """
 tests/test_episodic_fallback_cooldown.py — P0-4 验收
 
-断言覆盖 (P0-4A: fallback occurred_at 窗口):
-- is_core + occurred_at=5天前、strength=0.9 → fallback 不入选
-- is_core + occurred_at=1天内 → fallback 入选
+断言覆盖 (P0-4A: fallback is_core 排除 + occurred_at 窗口):
+- is_core + occurred_at=5天前 → fallback 不入选（is_core 完全排除于 fallback）
+- is_core + occurred_at=1天内 → fallback 仍不入选（is_core 完全排除）
 - occurred_at=8天前（timestamp=现在）→ 7天窗口 fallback 不召回
 - occurred_at 缺失 → 回退 timestamp，行为不回归
+- is_core 不参与 fallback 但仍可经 retrieve() 主召回
 
 断言覆盖 (P0-4B: retrieve 强化冷却):
 - 同一 ep 6h 内二次 allow_strengthen=True → strength 不再增加
@@ -59,19 +60,41 @@ def _ep(ep_id, occurred_at, strength=0.8, is_core=False, **kw):
 # ─── P0-4A: fallback occurred_at 窗口 ────────────────────────────────────────
 
 def test_fallback_core_5days_not_selected(sandbox):
-    """is_core + occurred_at=5天前 → fallback 不入选（> 2天阈值）。"""
+    """is_core + occurred_at=5天前 → fallback 不入选（is_core 完全排除于 fallback）。"""
     write_episode(_UID, _ep("ep_core_old", occurred_at=_NOW - 5 * 86400,
                             strength=0.9, is_core=True), char_id=_CHAR)
     result = retrieve_fallback(_UID, recent_history=[], char_id=_CHAR)
-    assert len(result) == 0, "核心记忆超 2 天不应通过 fallback 复活"
+    assert len(result) == 0, "核心记忆不应通过 fallback 浮现"
 
 
-def test_fallback_core_half_day_selected(sandbox):
-    """is_core + occurred_at=12小时前 → fallback 入选。"""
+def test_fallback_core_half_day_not_selected(sandbox):
+    """is_core + occurred_at=12小时前 → fallback 仍不入选（is_core 完全排除于 fallback）。"""
     write_episode(_UID, _ep("ep_core_recent", occurred_at=_NOW - 12 * 3600,
                             strength=0.9, is_core=True), char_id=_CHAR)
     result = retrieve_fallback(_UID, recent_history=[], char_id=_CHAR)
-    assert len(result) == 1, "核心记忆 12h 内应通过 fallback"
+    assert len(result) == 0, "核心记忆无论年龄均不应通过 fallback 浮现（应经主召回）"
+
+
+def test_fallback_noncore_not_affected_by_core_exclusion(sandbox):
+    """非核心记忆不受 is_core 排除影响，仍可通过 fallback。"""
+    write_episode(_UID, _ep("ep_nc_5d", occurred_at=_NOW - 5 * 86400 + 3600,
+                            strength=0.8, is_core=False), char_id=_CHAR)
+    result = retrieve_fallback(_UID, recent_history=[], char_id=_CHAR)
+    assert len(result) == 1, "非核心记忆在 7 天窗口内应通过 fallback"
+
+
+def test_core_reachable_via_retrieve(sandbox):
+    """is_core 记忆排除于 fallback，但可经 retrieve() 关键词主召回浮现。"""
+    from core.memory.episodic_memory import retrieve
+    ep = _ep("ep_core_kw", occurred_at=_NOW - 12 * 3600, strength=0.9, is_core=True,
+             topic_keywords=["生日", "哭泣"], tags=["生日", "哭泣"])
+    write_episode(_UID, ep, char_id=_CHAR)
+    # fallback 不返回
+    fb = retrieve_fallback(_UID, recent_history=[], char_id=_CHAR)
+    assert len(fb) == 0
+    # 主召回按关键词返回
+    main = retrieve(_UID, topic="生日", top_k=1, char_id=_CHAR)
+    assert len(main) == 1 and main[0]["id"] == "ep_core_kw"
 
 
 def test_fallback_nonecore_8days_not_selected(sandbox):

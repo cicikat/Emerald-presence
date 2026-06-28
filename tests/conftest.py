@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-# 将 qq-st-bot 根目录设为工作目录，保证 config.yaml 等相对路径可被正确读取
+# 将 Emerald-presence 根目录设为工作目录，保证 config.yaml 等相对路径可被正确读取
 _ROOT = Path(__file__).parent.parent
 os.chdir(_ROOT)
 sys.path.insert(0, str(_ROOT))

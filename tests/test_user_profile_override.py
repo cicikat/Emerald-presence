@@ -97,9 +97,11 @@ async def test_important_facts_dedup_append_unchanged(sandbox):
     await _up.update("uid_facts", {"important_facts": ["有猫", "爱喝茶"]})
     profile = _up.load("uid_facts")
 
-    assert "有猫" in profile["important_facts"]
-    assert "爱喝茶" in profile["important_facts"]
-    assert profile["important_facts"].count("有猫") == 1, "去重：已有条目不重复追加"
+    # P3 后 important_facts 元素可能是 str（旧条目）或 dict（新条目），用 text 比较
+    texts = [_up._normalize_fact(f)["text"] for f in profile["important_facts"]]
+    assert "有猫" in texts
+    assert "爱喝茶" in texts
+    assert texts.count("有猫") == 1, "去重：已有条目不重复追加"
 
 
 # ---------------------------------------------------------------------------

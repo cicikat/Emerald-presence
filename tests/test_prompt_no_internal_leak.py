@@ -193,13 +193,10 @@ class TestMemoryProtocolDevVocab:
         block = self._author_note_block()
         assert "工程术语" not in block, "'工程术语' must be replaced with neutral wording"
 
-    def test_memory_protocol_still_exists(self):
+    def test_memory_compact_hint_still_exists(self):
+        # 历史线索约束已压缩为单句注入，验证核心语义仍存在
         src = _src(self._PB)
-        assert "记忆使用协议" in src, "Memory protocol section must still exist"
-
-    def test_memory_confidence_boundary_still_exists(self):
-        src = _src(self._PB)
-        assert "记忆置信边界" in src, "Memory confidence boundary section must still exist"
+        assert "历史线索" in src, "Compact memory hint must still exist in author_note"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

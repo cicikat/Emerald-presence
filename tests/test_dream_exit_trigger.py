@@ -154,5 +154,5 @@ def test_prompt_tone_and_clarity_mapping():
     assert "先确认她好不好" in hard
     assert "温暖松弛" in comfort
     assert "平和自然" in calm
-    assert "梦已经有点模糊" in fuzzy
+    assert "别编造具体情节" in fuzzy
     assert "不要引用梦里的具体内容" in neutral

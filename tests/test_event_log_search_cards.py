@@ -59,14 +59,15 @@ def test_user_and_assistant_cards_are_separate():
     assert len(char_cards) >= 1, "应有角色卡"
     # 渲染文本里用户和角色应分行，各带正确前缀
     lines = result.split("\n")
-    assert any("你提到" in l for l in lines), "应有'你提到'卡"
+    # pronoun defaults to '她' when no user_facts file exists for _UID
+    assert any("提到" in l for l in lines), "应有用户卡（含'提到'标签）"
     assert any(f"{_CHAR_NAME}当时说" in l for l in lines), "应有角色卡"
     # 不应有跨说话人的'; '缝合
     assert "; " not in result, "不得出现'; '跨说话人缝合"
 
 
 def test_user_card_label_correct():
-    """用户行渲染为"你提到："格式。"""
+    """用户行渲染为"{pronoun}提到："格式（pronoun 默认'她'）。"""
     text = _section(0, (
         "## 09:00\n"
         f"**用户**：最近我在学下棋\n"
@@ -74,7 +75,8 @@ def test_user_card_label_correct():
         "---\n"
     ))
     result = _run(text, "下棋")
-    assert "你提到：最近我在学下棋" in result or "你提到" in result
+    # pronoun defaults to '她' when no user_facts file exists for _UID
+    assert "她提到：最近我在学下棋" in result or "她提到" in result
 
 
 def test_assistant_card_label_correct():
@@ -209,3 +211,91 @@ def test_return_trace_items_have_role_and_event_day():
         assert "role" in item, "trace item 缺少 role 字段"
         assert "event_day" in item, "trace item 缺少 event_day 字段"
         assert item["event_day"] == 2
+
+
+# ── P1-1 speaker field tests ─────────────────────────────────────────────────
+
+def test_new_block_attribution_from_speaker_field():
+    """新格式 block（含 speaker: 元字段）：归属来自字段而非正文前缀猜测。"""
+    text = _section(0, (
+        "## 14:00\n"
+        f"**用户**：我最近在学下棋\n"
+        "> speaker:user turn_id:uid_1000\n"
+        f"**{_CHAR_NAME}**：下棋很有意思呢\n"
+        f"> emotion:gentle intensity:2 speaker:assistant turn_id:uid_1000\n"
+        "---\n"
+    ))
+    result, trace = _run(text, "下棋", return_trace=True)
+    assert result != "", "新格式 block 应能召回"
+    user_cards = [c for c in trace if c["role"] == "user"]
+    char_cards = [c for c in trace if c["role"] == "assistant"]
+    assert len(user_cards) >= 1, "应有用户卡"
+    assert len(char_cards) >= 1, "应有角色卡"
+
+
+def test_speaker_meta_line_not_in_recall():
+    """> speaker:user 元行不进召回正文。"""
+    text = _section(0, (
+        "## 10:00\n"
+        "**用户**：今天下棋了\n"
+        "> speaker:user turn_id:uid_2000\n"
+        f"**{_CHAR_NAME}**：下棋真棒\n"
+        f"> emotion:happy intensity:2 speaker:assistant turn_id:uid_2000\n"
+        "---\n"
+    ))
+    result, trace = _run(text, "下棋", return_trace=True)
+    for item in trace:
+        assert "speaker:" not in item["snippet"], \
+            f"元行内容混入召回: {item['snippet']}"
+        assert "turn_id:" not in item["snippet"], \
+            f"turn_id 混入召回: {item['snippet']}"
+
+
+def test_new_block_user_role_attribution():
+    """新格式：用户段（speaker:user）内容渲染为'她提到'而非角色行。"""
+    text = _section(0, (
+        "## 11:00\n"
+        "**用户**：我喜欢下棋\n"
+        "> speaker:user turn_id:uid_3000\n"
+        f"**{_CHAR_NAME}**：嗯嗯\n"
+        f"> emotion:neutral intensity:0 speaker:assistant turn_id:uid_3000\n"
+        "---\n"
+    ))
+    result = _run(text, "下棋")
+    assert "提到" in result or result == "", "用户段应渲染为'提到'格式"
+    if result:
+        assert f"{_CHAR_NAME}当时说：我喜欢下棋" not in result, "用户内容不应被归为角色行"
+
+
+def test_old_block_prefix_fallback_still_works():
+    """旧格式 block（无 speaker 元字段）：退回 prefix 解析，行为同 P0-1。"""
+    text = _section(0, (
+        "## 12:00\n"
+        "**用户**：今天下棋赢了\n"
+        f"**{_CHAR_NAME}**：下棋很厉害\n"
+        "> emotion:happy intensity:2\n"
+        "---\n"
+    ))
+    result, trace = _run(text, "下棋", return_trace=True)
+    assert result != "", "旧格式 block 应能正常召回"
+    user_cards = [c for c in trace if c["role"] == "user"]
+    char_cards = [c for c in trace if c["role"] == "assistant"]
+    assert len(user_cards) >= 1
+    assert len(char_cards) >= 1
+
+
+def test_user_pronoun_rendered_in_speaker_block():
+    """pronoun 设为'他'时，新格式 block 用户卡渲染'他提到'。"""
+    import core.memory.user_facts as _uf
+    text = _section(0, (
+        "## 13:00\n"
+        "**用户**：我在学下棋\n"
+        "> speaker:user turn_id:uid_4000\n"
+        f"**{_CHAR_NAME}**：很好\n"
+        f"> emotion:gentle intensity:1 speaker:assistant turn_id:uid_4000\n"
+        "---\n"
+    ))
+    with mock.patch.object(_uf, "get_user_pronoun", return_value="他"):
+        result = _run(text, "下棋")
+    if result:
+        assert "他提到" in result, f"pronoun='他' 时应渲染'他提到'，实际: {result!r}"
