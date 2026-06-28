@@ -98,10 +98,12 @@ async def _check_diary_inject():
         from core.tools.diary_reader import read_recent
         from core.memory.diary_context import save
         text = read_recent(days=2)
+        save(oid, text)
         if text:
-            save(oid, text)
             _mark("diary_inject")
-            logger.info("[scheduler] 日记内容已存入diary_context")
+            logger.info("[scheduler] 日记内容已存入 diary_context")
+        else:
+            logger.info("[scheduler] 近 2 天无日记，已清空 diary_context 快照")
     except Exception as e:
         log_error("scheduler._check_diary_inject", e)
 

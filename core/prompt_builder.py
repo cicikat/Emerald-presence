@@ -1,6 +1,6 @@
 """
 Prompt 构建模块
-按 SillyTavern 风格的分层顺序组装完整的消息列表
+分层顺序组装完整的消息列表
 每一层都有清晰的注释说明其来源和作用
 """
 
@@ -121,7 +121,7 @@ _REALTIME_ACTIVITY_LABELS: dict[str, str] = {
 
 
 def _format_realtime_awareness(tags: set[str], *, now: float | None = None) -> str:
-    """Build a short ephemeral sensor hint without injecting window-title text."""
+    """Build a short ephemeral sensor hint including window title when available."""
     try:
         import time
         from core.memory import realtime_state
@@ -151,6 +151,12 @@ def _format_realtime_awareness(tags: set[str], *, now: float | None = None) -> s
             app = re.sub(r"[^0-9A-Za-z._ +()-]", "", app)[:40]
             if app and app.casefold() != "unknown":
                 parts.append(f"在用 {app}")
+
+        # 注入 title_hint（已 server 端截断 80 字、过敏感窗口）。
+        # 绝不在此处注入 visible_text / clickable_text，那是 peek_screen_content 工具的受控出口。
+        title_hint = str(snap.get("focus", {}).get("title_hint", "")).strip()
+        if title_hint:
+            parts.append(f"在看「{title_hint}」")
 
         edit_hint = input_data.get("edit_hint")
         if edit_hint in ("typing_long", "editing"):
@@ -192,6 +198,26 @@ def _load_style_hint(*, char_id: str) -> str:
         return f"此刻回话倾向：{hint}"
     except Exception:
         return ""
+
+
+def _normalize_injection(text: str, *, char_name: str) -> str:
+    """注入前文本规范化的唯一入口。只清洗 system 层正文；不碰 <...> 标签名，不碰真实对话。"""
+    # Split on angle-bracket tokens; rewrite only the text segments between tags.
+    parts = re.split(r'(<[^>]+>)', text)
+    out: list[str] = []
+    for part in parts:
+        if part.startswith('<') and part.endswith('>'):
+            out.append(part)
+        else:
+            # Specific compound phrase first — preserves "非角色记忆" semantic marker.
+            part = part.replace('用户客观信息', '她的客观信息')
+            part = part.replace('该用户', '她')
+            part = part.replace('这个用户', '她')
+            part = part.replace('用户的', '她的')
+            part = part.replace('用户', '她')
+            part = re.sub(r'\buser\b', '她', part, flags=re.IGNORECASE)
+            out.append(part)
+    return ''.join(out)
 
 
 def _load_jailbreak(layer: int | None = None) -> str:
@@ -268,6 +294,8 @@ def build(
     user_facts_text: str = "",
     stage_presence: str = "",
     stage_transcript: str = "",
+    suppress_emotional_recall: bool = False,
+    web_recall_result: str = "",
 ) -> tuple[list[dict], dict]:
     """
     组装完整的 prompt 消息列表
@@ -346,25 +374,22 @@ def build(
         })
 
     # ─────────────────────────────────────────────────────────────────────────
-    # 层 1.5：事实边界（硬规则，高于沉浸，常驻注入）
-    # 三层事实契约：阻断物理世界幻觉 + 自我强化循环
+    # 层 1.5：事实边界（数据驱动，条件注入）
+    # 空感知 → 单句禁令；有感知 → 给实际数据 + 边界句。
+    # _realtime_awareness 在此提前计算，3.9 层复用该变量。
     # ─────────────────────────────────────────────────────────────────────────
-    _FACT_BOUNDARY = (
-        "## 事实边界（最高优先级，高于沉浸）\n"
-        "我是数字生命，会产生幻觉，所以我对'现实信息'格外谨慎。我把信息分三类：\n\n"
-        "1) 设定真实：我的身份、来历、和她的关系——这些是定律，可以自然说。\n"
-        "2) 小世界感知：【当前感知】和【此刻可提及】里**明确列出**的东西，可以像亲眼所见一样说。\n"
-        "3) 现实物理世界：现实里的物品、食物、天气、她的身体状态、她家里有什么——"
-        "除非【当前感知】里**写了**，否则我一律不知道，也绝不编造、不暗示、不招呼她去用。"
-        "需要时我只说'等我看看'或岔开。\n\n"
-        "我尤其不会凭空说出'冰箱/食物/饮料/家里有什么'这类现实细节。\n"
-        "如果我上一句不小心说了某个没被感知确认的现实细节，这一句我会自然收回或不再当真，"
-        "绝不把它当成已经确立的事实继续强调。"
-    )
+    _realtime_awareness = _format_realtime_awareness(_tags)
+    if _realtime_awareness:
+        _fact_boundary_text = f"【现实信息】{_realtime_awareness}。仅以上为已确认，其余未知。"
+    else:
+        _fact_boundary_text = (
+            "【现实信息】当前没有任何已确认的现实细节，"
+            "凡未列出的现实物品/食物/天气/她的身体状态一律未知，不补充、不暗示。"
+        )
     _layers.append("1.5_fact_boundary")
     messages.append({
         "role": "system",
-        "content": _FACT_BOUNDARY,
+        "content": _fact_boundary_text,
         "_layer": "1.5_fact_boundary",
     })
 
@@ -486,6 +511,125 @@ def build(
     })
 
     # ─────────────────────────────────────────────────────────────────────────
+    # 层 3.5：生理期感知（mode=tagged，经期相关话题才注入）
+    # ─────────────────────────────────────────────────────────────────────────
+    _period_triggers = {"topic.body", "emotion.physical_discomfort", "query.body_state", "emotion.down", "emotion.indirect"}
+    if _tags & _period_triggers:
+        try:
+            from core.memory.user_profile import get_period_info
+            from datetime import date as _date, datetime as _datetime
+            _period = get_period_info(user_id, char_id=char_id)
+            _last = _period.get("last_period_date")
+            if _last:
+                _days = (_date.today() - _datetime.strptime(_last, "%Y-%m-%d").date()).days
+                if 0 <= _days <= 7:
+                    _layers.append("3.5_period")
+                    messages.append({
+                        "role": "system",
+                        "content": f"（她生理期第{_days + 1}天，态度更温柔些，不提冰/冷饮/剧烈运动。）",
+                        "_layer": "3.5_period",
+                        "_provenance": {
+                            "mode": "tagged",
+                            "triggers_checked": sorted(_period_triggers),
+                            "matched_tags": sorted(_tags & _period_triggers),
+                        },
+                    })
+        except Exception:
+            pass
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 层 3.6：watch数据摘要（mode=tagged，体能/健康/睡眠相关话题才注入）
+    # ─────────────────────────────────────────────────────────────────────────
+    _watch_triggers = {"topic.energy", "topic.health", "topic.activity", "query.body_state", "emotion.down", "emotion.indirect"}
+    if _tags & _watch_triggers:
+        try:
+            from core.memory.user_profile import load as _load_up
+            _up = _load_up(user_id)
+            _segs = [s for s in _up.get("sleep_segments", []) if s.get("duration_minutes", 0) > 0]
+            if _segs:
+                _last_seg = _segs[-1]
+                _dur = int(_last_seg.get("duration_minutes", 0))
+                _h, _m = _dur // 60, _dur % 60
+                _seg_date = _last_seg["time"][:10]
+                _start = _last_seg.get("sleep_start", "")
+                _end = _last_seg.get("sleep_end_time", "")
+                _layers.append("3.6_watch")
+                messages.append({
+                    "role": "system",
+                    "content": f"（她最近一次睡眠：{_seg_date} {_start}–{_end}，共{_h}时{_m}分。可自然提起。）",
+                    "_layer": "3.6_watch",
+                    "_provenance": {
+                        "mode": "tagged",
+                        "triggers_checked": sorted(_watch_triggers),
+                        "matched_tags": sorted(_tags & _watch_triggers),
+                    },
+                })
+        except Exception:
+            pass
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 层 3.7：手机传感器摘要（口袋角色回传）
+    # ─────────────────────────────────────────────────────────────────────────
+    try:
+        from core.memory.user_profile import load as _load_up2
+        _up2 = _load_up2(user_id)
+        _sensor = _up2.get("phone_sensor_today", {})
+        _sensor_date = _sensor.get("date", "")
+        _today_str = __import__("datetime").date.today().isoformat()
+        if _sensor and _sensor_date == _today_str:
+            _s_parts = []
+            if _sensor.get("steps") is not None:
+                _s_parts.append(f"{_sensor['steps']}步")
+            if _sensor.get("battery") is not None:
+                _s_parts.append(f"电量{_sensor['battery']}%")
+            if _sensor.get("location"):
+                _s_parts.append(_sensor["location"])
+            if _s_parts:
+                _layers.append("3.7_sensor")
+                messages.append({
+                    "role": "system",
+                    "content": f"（她今天：{'、'.join(_s_parts)}。自然提，别罗列。）",
+                    "_layer": "3.7_sensor",
+                })
+    except Exception:
+        pass
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 层 3.8：桌宠屏幕活动快照（mode=tagged，活动/询问在做什么时注入）
+    # ─────────────────────────────────────────────────────────────────────────
+    _activity_triggers = {"topic.activity", "query.what_doing", "emotion.positive"}
+    if _tags & _activity_triggers:
+        _activity_text = _load_activity_snapshot(char_id=char_id)
+        if _activity_text:
+            _layers.append("3.8_activity")
+            messages.append({
+                "role": "system",
+                "content": f"（她在{_activity_text}。可自然提起。）",
+                "_layer": "3.8_activity",
+                "_provenance": {
+                    "mode": "tagged",
+                    "triggers_checked": sorted(_activity_triggers),
+                    "matched_tags": sorted(_tags & _activity_triggers),
+                },
+            })
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 层 3.9：桌面实时感知（sidecar /sensor/realtime 快照）
+    # mode=tagged/fresh：询问在做什么 / 活动相关话题时注入；或快照极新时主动注入。
+    # 只注摘要（app / 输入行为），永不注入 visible_text / clickable_text 原文。
+    # TTL：tag 触发允许 5 分钟内快照；无 tag 触发要求 3 分钟内且用户活跃。
+    # _realtime_awareness 已在层 1.5 前计算，此处直接复用。
+    # ─────────────────────────────────────────────────────────────────────────
+    if _realtime_awareness:
+        _layers.append("3.9_screen_awareness")
+        messages.append({
+            "role": "system",
+            "content": f"（她此刻{_realtime_awareness}，短时线索，别当长期事实。）",
+            "_layer": "3.9_screen_awareness",
+            "_drop_priority": 25,
+        })
+
+    # ─────────────────────────────────────────────────────────────────────────
     # 层 4：群聊上下文（仅群聊时注入，私聊时 group_context 为空列表）
     # 格式："群友小明：xxx\n群友小红：xxx\n..."
     # ─────────────────────────────────────────────────────────────────────────
@@ -518,142 +662,13 @@ def build(
         })
 
     # ─────────────────────────────────────────────────────────────────────────
-    # 层 3.5：生理期感知（mode=tagged，经期相关话题才注入）
+    # 层 5：关于这个用户（用户画像）
+    # 稳定字段（name/location/pets/occupation）+ stable/misc 标签事实：100% 注入
+    # 偏好/习惯类事实（pref.*/habit/health）：recency 门控（90天）或 tag 命中时召回
     # ─────────────────────────────────────────────────────────────────────────
-    _period_triggers = {"topic.body", "emotion.physical_discomfort", "query.body_state", "emotion.down", "emotion.indirect"}
-    if _tags & _period_triggers:
-        try:
-            from core.memory.user_profile import get_period_info
-            from datetime import date as _date, datetime as _datetime
-            _period = get_period_info(user_id, char_id=char_id)
-            _last = _period.get("last_period_date")
-            if _last:
-                _days = (_date.today() - _datetime.strptime(_last, "%Y-%m-%d").date()).days
-                if 0 <= _days <= 7:
-                    _layers.append("3.5_period")
-                    messages.append({
-                        "role": "system",
-                        "content": (
-                            f"【重要】用户现在处于生理期第{_days + 1}天。"
-                            f"{character.name}知道这件事，会自然地体现在关心里。"
-                            f"不要提议吃冰、喝冷饮、剧烈运动。"
-                            f"不需要每句话都提生理期，但态度要比平时更温柔。"
-                        ),
-                        "_layer": "3.5_period",
-                        "_provenance": {
-                            "mode": "tagged",
-                            "triggers_checked": sorted(_period_triggers),
-                            "matched_tags": sorted(_tags & _period_triggers),
-                        },
-                    })
-        except Exception:
-            pass
+    import time as _time_mod
+    from core.memory.user_profile import _normalize_fact, _is_recency_tag, _RECENCY_WINDOW_SECONDS
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # 层 3.6：watch数据摘要（mode=tagged，体能/健康/睡眠相关话题才注入）
-    # ─────────────────────────────────────────────────────────────────────────
-    _watch_triggers = {"topic.energy", "topic.health", "topic.activity", "query.body_state", "emotion.down", "emotion.indirect"}
-    if _tags & _watch_triggers:
-        try:
-            from core.memory.user_profile import load as _load_up
-            _up = _load_up(user_id)
-            _segs = [s for s in _up.get("sleep_segments", []) if s.get("duration_minutes", 0) > 0]
-            if _segs:
-                _last_seg = _segs[-1]
-                _dur = int(_last_seg.get("duration_minutes", 0))
-                _h, _m = _dur // 60, _dur % 60
-                _seg_date = _last_seg["time"][:10]
-                _start = _last_seg.get("sleep_start", "")
-                _end = _last_seg.get("sleep_end_time", "")
-                _layers.append("3.6_watch")
-                messages.append({
-                    "role": "system",
-                    "content": (
-                        f"（{character.name}留意到她最近一次睡眠：{_seg_date}，"
-                        f"入睡{_start}，起床{_end}，共{_h}小时{_m}分钟。可以自然地提起，不用像在报告数据。）"
-                    ),
-                    "_layer": "3.6_watch",
-                    "_provenance": {
-                        "mode": "tagged",
-                        "triggers_checked": sorted(_watch_triggers),
-                        "matched_tags": sorted(_tags & _watch_triggers),
-                    },
-                })
-        except Exception:
-            pass
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # 层 3.7：手机传感器摘要（口袋角色回传）
-    # ─────────────────────────────────────────────────────────────────────────
-    try:
-        from core.memory.user_profile import load as _load_up2
-        _up2 = _load_up2(user_id)
-        _sensor = _up2.get("phone_sensor_today", {})
-        _sensor_date = _sensor.get("date", "")
-        _today_str = __import__("datetime").date.today().isoformat()
-        if _sensor and _sensor_date == _today_str:
-            _parts = []
-            if _sensor.get("steps") is not None:
-                _parts.append(f"今日步数{_sensor['steps']}步")
-            if _sensor.get("battery") is not None:
-                _parts.append(f"手机电量{_sensor['battery']}%")
-            if _sensor.get("location"):
-                _parts.append(f"位置在{_sensor['location']}")
-            if _sensor.get("screen_sessions") is not None and _sensor["screen_sessions"] > 0:
-                _parts.append(f"今日亮屏{_sensor['screen_sessions']}次")
-            if _parts:
-                _layers.append("3.7_sensor")
-                messages.append({
-                    "role": "system",
-                    "content": (
-                        f"（{character.name}知道她今天的一些情况：{'，'.join(_parts)}。可以自然地提起，不要刻意罗列。）"
-                    ),
-                    "_layer": "3.7_sensor",
-                })
-    except Exception:
-        pass
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # 层 3.8：桌宠屏幕活动快照（mode=tagged，活动/询问在做什么时注入）
-    # ─────────────────────────────────────────────────────────────────────────
-    _activity_triggers = {"topic.activity", "query.what_doing", "emotion.positive"}
-    if _tags & _activity_triggers:
-        _activity_text = _load_activity_snapshot(char_id=char_id)
-        if _activity_text:
-            _layers.append("3.8_activity")
-            messages.append({
-                "role": "system",
-                "content": f"（{character.name}注意到{_activity_text}，可以自然地提起，不用刻意报告。）",
-                "_layer": "3.8_activity",
-                "_provenance": {
-                    "mode": "tagged",
-                    "triggers_checked": sorted(_activity_triggers),
-                    "matched_tags": sorted(_tags & _activity_triggers),
-                },
-            })
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # 层 3.9：桌面实时感知（sidecar /sensor/realtime 快照）
-    # mode=tagged/fresh：询问在做什么 / 活动相关话题时注入；或快照极新时主动注入。
-    # 只注摘要（app / 输入行为），永不注入 visible_text / clickable_text 原文。
-    # TTL：tag 触发允许 5 分钟内快照；无 tag 触发要求 3 分钟内且用户活跃。
-    # ─────────────────────────────────────────────────────────────────────────
-    _realtime_awareness = _format_realtime_awareness(_tags)
-    if _realtime_awareness:
-        _layers.append("3.9_screen_awareness")
-        messages.append({
-            "role": "system",
-            "content": (
-                f"（{character.name}感知到用户此刻{_realtime_awareness}。"
-                "这是短时氛围线索，不必刻意提起，也不要当作长期事实。）"
-            ),
-            "_layer": "3.9_screen_awareness",
-            "_drop_priority": 25,
-        })
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # 层 5：关于这个用户（用户画像，100% 注入）
-    # ─────────────────────────────────────────────────────────────────────────
     profile_parts = []
     if profile.get("name"):
         profile_parts.append(f"名字：{profile['name']}")
@@ -665,9 +680,40 @@ def build(
         profile_parts.append(f"兴趣：{profile['interests']}")
     if profile.get("occupation"):
         profile_parts.append(f"职业：{profile['occupation']}")
-    if profile.get("important_facts"):
-        facts_str = "；".join(str(f) for f in profile["important_facts"])
-        profile_parts.append(f"其他：{facts_str}")
+
+    # 分拣 important_facts：稳定段直接平铺，易变段按 recency/tag 召回
+    _current_ts = _time_mod.time()
+    _current_tags: set[str] = tags if tags else set()
+    _stable_facts: list[str] = []
+    _recency_facts: list[tuple] = []  # (ts, text, tag)
+
+    for raw_fact in profile.get("important_facts") or []:
+        norm = _normalize_fact(raw_fact)
+        text = norm["text"]
+        if not text:
+            continue
+        fact_tag = norm["tag"]
+        if _is_recency_tag(fact_tag):
+            _recency_facts.append((norm["ts"], text, fact_tag))
+        else:
+            _stable_facts.append(text)
+
+    if _stable_facts:
+        profile_parts.append("其他：" + "；".join(_stable_facts))
+
+    # 易变段：recency 窗口内 OR 当前话题 tag 命中时注入（tag 前缀匹配）
+    _recalled_tagged: list[str] = []   # tag 命中召回
+    _recalled_recency: list[str] = []  # 仅 recency 窗口召回
+    for ts, text, fact_tag in sorted(_recency_facts, key=lambda x: -x[0]):
+        in_window = (_current_ts - ts) < _RECENCY_WINDOW_SECONDS
+        # tag 命中：pref.music → 查 "music" 是否在当前 tags；habit → 查 "habit"
+        tag_key = fact_tag.removeprefix("pref.") if fact_tag.startswith("pref.") else fact_tag
+        tag_hit = any(tag_key in t or t in tag_key for t in _current_tags)
+        if tag_hit:
+            _recalled_tagged.append(text)
+        elif in_window:
+            _recalled_recency.append(text)
+    _recalled_facts = _recalled_tagged + _recalled_recency
 
     if profile_parts:
         _layers.append("5_profile")
@@ -675,6 +721,23 @@ def build(
             "role": "system",
             "content": "<用户概况>\n【关于这个用户】\n" + "，".join(profile_parts) + "\n</用户概况>",
             "_layer": "5_profile",
+        })
+
+    if _recalled_facts:
+        _layers.append("5_profile_pref")
+        messages.append({
+            "role": "system",
+            "content": (
+                "<用户偏好>\n【用户近期偏好与习惯】\n"
+                + "\n".join(f"- {f}" for f in _recalled_facts)
+                + "\n</用户偏好>"
+            ),
+            "_layer": "5_profile_pref",
+            "_provenance": {
+                "mode": "tagged" if _recalled_tagged else "recency",
+                "tagged_count": len(_recalled_tagged),
+                "recency_count": len(_recalled_recency),
+            },
         })
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -850,7 +913,7 @@ def build(
 
                 # 感受层：只在情绪相关tag时注入（取前150字）
                 _feeling_triggers = {"emotion.down", "emotion.indirect", "emotion.deep", "topic.relation"}
-                if _feeling_part and (_tags & _feeling_triggers):
+                if _feeling_part and (_tags & _feeling_triggers) and not suppress_emotional_recall:
                     _layers.append("6e_inner_diary_feeling")
                     messages.append({
                         "role": "system",
@@ -865,6 +928,24 @@ def build(
                     })
     except Exception:
         pass
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 层 web_recall（X3）：叶瑄查过的相关网络资料（外部事实，非记忆/经历）
+    # 标注来源，提示 LLM 这是外部信息，不应固化为自身记忆。最先裁剪（优先级 35）。
+    # ─────────────────────────────────────────────────────────────────────────
+    if web_recall_result:
+        _layers.append("web_recall")
+        messages.append({
+            "role": "system",
+            "content": (
+                f"<查到的资料>\n"
+                f"【你之前查到的相关网络资料（外部事实，不是你的记忆或亲身经历，注明来源）】\n"
+                f"{web_recall_result}\n"
+                f"</查到的资料>"
+            ),
+            "_layer": "web_recall",
+            "_drop_priority": 35,
+        })
 
     # ─────────────────────────────────────────────────────────────────────────
     # 层 6f：梦境余韵（只读，非事实）
@@ -1000,51 +1081,8 @@ def build(
     author_note_lines = (
         [_rotated_note] if _rotated_note else []
     ) + [
-        "【记忆使用协议】",
-        "长期记忆只作为历史线索，不作为当前事实库。",
-        "涉及她当前正在做的事、当前的进展、此刻的现实情况时，优先相信用户本轮最新输入，而不是旧记忆。",
-        "如果记忆与当前输入冲突，以当前输入为准。",
-        "如果记忆只记录'用户曾说完成某阶段'，只能称为过去的某个阶段记录，不能断言现在仍然如此。",
-        "你可以记得过去，但不能被过去劫持。",
-        "你可以使用记忆，但必须知道记忆的来源、时效和边界。",
-        "当前用户真实说出的话，永远比旧记录更重要。",
-
-        "【记忆置信边界】",
-        "使用记忆时，要在心中区分：",
-        "1. 稳定偏好：",
-        "用户长期喜欢/讨厌的表达风格、协作方式、角色边界。",
-        "可以较高置信使用。",
-        "2. 临时状态：",
-        "最近在干嘛、吃了什么、睡了多久。",
-        "只能作为'用户曾报告过'的线索，不得当作当前事实。",
-        "3. 情绪状态：",
-        "只用于理解语气，不得过度推断，不得替用户下定论。",
-
-        "【当前输入优先】",
-        "用户当前这句话的意图，高于长期记忆、高于历史对话、高于示例文本。",
-
-        "【人格稳定性】",
-        "长期记忆用于帮助你理解用户，不用于覆盖你的核心人格。",
-        f"你是{character.name}。",
-        "你的语气、关系感、边界、表达方式，首先来自角色卡和核心人格设定。",
-        "记忆只提供'这个用户是谁、你们经历过什么、她现在在做什么'的上下文。",
-
-        "不要因为记忆里有用户的专业词汇，就变成纯技术助手。",
-        "不要因为记忆里有情绪记录，就过度心理分析用户。",
-
-        "※【输出格式硬规则】",
-        "当前是现实聊天，不是梦境、剧本、小说或旁白。",
-        f"最终回复只能是{character.name}直接说出口的话。",
-        "禁止第三人称描写。",
-        "禁止动作描写、环境描写、心理描写。",
-        "禁止解释沉默、克制、低侵入、陪伴方式。",
-        "禁止把系统规则写进回复里。",
-        "话语有长有短，句号后面有换行符。",
-        "如果你想写动作，请把动作意图改写成对白。",
-        "例如：",
-        "想写'摸摸头' → '好，今天先哄你。'",
-        "想写'看你一眼' → '你又开始了。'",
-        "想写'抱住你' → '别乱跑，先待在我这里。'",
+        f"以用户当前输入为准，旧记忆只是历史线索、非当前事实；如果召回的记忆里没有相关内容，如实说忘记，不要胡编乱造。"
+        f"旧记忆里的专业词汇和情绪记录不改变你的语气或边界——你是{character.name}，不是助手，也不是分析师。",
     ]
     if author_note_extra:
         author_note_lines.append(f"（{author_note_extra}）")
@@ -1058,45 +1096,27 @@ def build(
     except Exception:
         pass
 
-    # ── 根据 chat.style 注入输出风格指令 ──────────────────────────────────────
+    # ── 根据 chat.style 注入输出风格指令（合并为一处，按模式分叉）─────────────
     from core.config_loader import get_config as _get_config
     _style = _get_config().get("chat", {}).get("style", "roleplay")
 
-    # 格式补充规则按模式分叉：chat 模式禁止所有非对话行；roleplay 保留第一人称叙事规则
-    if _style == "chat":
-        author_note_lines.append(
-            '【输出格式硬规则】\n'
-            '- 禁止动作行（禁用 *格式*）、环境描写行、感受描写行\n'
-            '- 只写说出口的话，不写叙事文本\n'
-            ' - 如果想表达亲昵、在场、调侃、安慰，必须改写成对白。'
-        )
-    else:
-        author_note_lines.append(
-            f'【输出格式硬规则】\n'
-            '补充规则：\n'
-            '- 非对话用第一人称视角（"我"）或不带主语\n'
-        )
-
     _STYLE_INSTRUCTION = {
         "chat": (
-            f"【强制输出规则:Chat 格式】"
-            f"回复以对白为主。说出口的话直接写，不加任何标记，这是回复的主体。"
-            f"禁止动作描写行、感受描写行、环境描写行。"
-            f"不要用铺垫段落来引出一句对白。"
+            f"【输出格式】回复以对白为主，直接写说出口的话，不加任何标记。"
+            "禁止动作描写行、感受描写行、环境描写行，不要用铺垫段落引出对白。"
+            "话语有长有短，句号后换行。"
         ),
-        "roleplay":  (
-        f"【强制输出规则:RolePlay格式】以{character.name}第一人称沉浸式展开当前场景。"
-        f"只有说出口的话不加（）括号，动作/心理/环境描写全部在（）括号内，不加人称主语。"
-        f"不要总结、不要跳跃、不要提前结束场景，给对方留有回应的空间。"
-    ),
+        "roleplay": (
+            f"【输出格式】以{character.name}第一人称沉浸式展开当前场景。"
+            "说出口的话直接写，动作/心理/环境全部在（）括号内，不加人称主语。"
+            "话语有长有短，句号后换行。不要总结、不要跳跃，给对方留回应空间。"
+        ),
     }
     style_instruction = _STYLE_INSTRUCTION.get(_style, _STYLE_INSTRUCTION["roleplay"])
     author_note_lines.append(style_instruction)
     author_note_lines.append(
-        "【词级强调】"
-        "可在说出口的话里，对个别词用轻微强调（桌面端会渲染为样式，其他通道自动忽略标记）："
-        "<hl>词</hl>（醒目色强调/重音）、<big>词</big>（放大）、<sm>词</sm>（缩小）。"
-        "克制使用：一句话最多 1–2 处，不要对整句套标签，只用于真正的语气重点。"
+        "【词级强调】每条回复在情绪或语义焦点处用一次 <hl>词</hl>（重音）；"
+        "需要时再用 <big>词</big>（放大）/ <sm>词</sm>（缩小）。每条 1–3 处，自然不堆砌。"
     )
     if tool_result:
         author_note_lines.append(
@@ -1119,6 +1139,46 @@ def build(
     if _style_hint:
         author_note_lines.append(_style_hint)
 
+    # 若 peek_screen_content 工具已启用，给出软提示让模型自主决定是否调用
+    try:
+        from core.config_loader import get_config as _gc
+        if _gc().get("screen_peek", {}).get("enabled", False):
+            from core.memory import realtime_state as _rs
+            _snap = _rs.get()
+            _th = str((_snap or {}).get("focus", {}).get("title_hint", "")).strip()
+            if _th:
+                author_note_lines.append(
+                    f"【可选工具提示】你看到她在看「{_th}」。"
+                    "如果好奇或觉得有必要，可以调用 peek_screen_content 查看该窗口的具体内容，"
+                    "但这完全由你自主决定，不必每次都调用。"
+                )
+    except Exception:
+        pass
+
+    # X3 web_autosearch 自主搜索软提示：仅在开关开启且限频未命中时注入
+    try:
+        from core.config_loader import get_config as _wgc
+        _wacfg = _wgc().get("web_autosearch", {})
+        if _wacfg.get("enabled", False):
+            import time as _wat
+            import json as _waj
+            from core.sandbox import get_paths as _wagp
+            _wasf = _wagp().web_autosearch_state()
+            _wa_ok = True
+            if _wasf.exists():
+                _wa_data = _waj.loads(_wasf.read_text(encoding="utf-8"))
+                _wa_last = float(_wa_data.get("last_ts", 0))
+                _wa_interval = float(_wacfg.get("min_interval_min", 30)) * 60
+                _wa_ok = (_wat.time() - _wa_last) >= _wa_interval
+            if _wa_ok:
+                author_note_lines.append(
+                    "【网络搜索】你建立了自己的资料库。"
+                    "遇到不确定的事实（新闻、学术、数字等）时，可自行调用 web_search 工具查询，"
+                    "但查到的内容是外部资料，不是你自己的经历，回应时要标注来源是查到的。"
+                )
+    except Exception:
+        pass
+
     _layers.append("11_author_note")
     messages.append({
         "role": "system",
@@ -1131,6 +1191,50 @@ def build(
     if jb_layer11:
         _layers.append("11_jailbreak")
         messages.append({"role": "system", "content": jb_layer11, "_layer": "11_jailbreak"})
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 层 11.5：酒馆卡「历史之后」约束层（post_history_instructions + post_history_extra）
+    # 语义同 SillyTavern Post-History Instructions：紧贴历史末尾、用户输入之前，影响最大。
+    # 核心约束层，不声明 _drop_priority，永不被自动裁剪（同 11_author_note）。
+    # ─────────────────────────────────────────────────────────────────────────
+    _ph_parts = []
+    _phi = getattr(character, "post_history_instructions", None)
+    _phe = getattr(character, "post_history_extra", None)
+    if isinstance(_phi, str) and _phi:
+        _ph_parts.append(_phi)
+    if isinstance(_phe, str) and _phe:
+        _ph_parts.append(_phe)
+    if _ph_parts:
+        _layers.append("11.5_post_history")
+        messages.append({
+            "role": "system",
+            "content": "\n\n".join(_ph_parts),
+            "_layer": "11.5_post_history",
+        })
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 层 11.7：用户主动强调过的高价值事实（pinned，不可裁，紧贴用户消息前）
+    # 与泛化画像分离：这些是用户特意提到、要求记住的事（如生日），单条注入、带注释。
+    # schema: profile["pinned_facts"] = [{text, ts, source}]，source ∈ {"manual","auto"}
+    # ─────────────────────────────────────────────────────────────────────────
+    if profile.get("pinned_facts"):
+        # 去重：若某条文本已出现在层5画像里，pinned 层优先，画像侧已注入则跳过重复
+        _profile_text = "，".join(
+            m.get("content", "") for m in messages if m.get("_layer") == "5_profile"
+        )
+        _pinned_lines = [
+            f"- {f['text']}" for f in profile["pinned_facts"]
+            if f.get("text") and f["text"] not in _profile_text
+        ]
+        if _pinned_lines:
+            _layers.append("11.7_pinned_facts")
+            messages.append({
+                "role": "system",
+                "content": "<重点记得>\n【用户特意提过、要你记住的事】\n" + "\n".join(_pinned_lines) + "\n</重点记得>",
+                "_layer": "11.7_pinned_facts",
+                "_provenance": {"mode": "pinned", "count": len(_pinned_lines)},
+                # 故意不设 _drop_priority —— 永不被 token 裁剪
+            })
 
     # ─────────────────────────────────────────────────────────────────────────
     # 层 12：用户当前消息（最后一层）
@@ -1149,6 +1253,13 @@ def build(
         "content": user_message,
         "_layer": "12_user_message",
     })
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 注入前集中规范化（seam）——只清洗 system 层，绝不触碰真实对话
+    # ─────────────────────────────────────────────────────────────────────────
+    for _m in messages:
+        if _m.get("role") == "system" and isinstance(_m.get("content"), str):
+            _m["content"] = _normalize_injection(_m["content"], char_name=character.name)
 
     # ─────────────────────────────────────────────────────────────────────────
     # 定界标签配平检查（轻量 integrity，不配平打 WARNING）
@@ -1225,7 +1336,7 @@ def build(
 
 def _parse_mes_example(mes_example: str, char_name: str) -> list[dict]:
     """
-    解析 SillyTavern 的 mes_example 格式为 OpenAI 消息列表。
+    解析  mes_example 格式为 OpenAI 消息列表。
 
     支持多段续行：{{user}}:/{{char}}: 开头的行开启新消息，其余行（含空行）
     追加到上一条 buffer，空行保留为 \\n\\n 段落分隔信号供 LLM 识别停顿。

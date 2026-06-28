@@ -199,11 +199,7 @@ def _build_dream_exit_prompt(
     else:
         tone_hint = "余韵还在，怎么说由你此刻的状态决定。"
 
-    detail_option = (
-        "· 梦已经有点模糊，若提起它，只说感受或朦胧印象，不必抓住具体片段；\n"
-        if age_hours >= 2.0
-        else "· 提一个梦里具体的片段，比如她那时候的神情；\n"
-    )
+    detail_option = "· 说说梦里那种感觉，但别编造具体情节（梦已经记不清细节了）；\n"
     return (
         f"（你刚从一场梦里回到现实，{char_name}。{tone_hint}\n"
         "现在你想主动对她说点什么。怎么说由你此刻的状态决定，比如可以——\n"

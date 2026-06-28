@@ -500,6 +500,10 @@ class DataPaths:
         """data/runtime/meta_mode.json — global safe/danger mode switch."""
         return self._p("runtime", "meta_mode.json")
 
+    def web_autosearch_state(self) -> Path:
+        """data/runtime/web_autosearch_state.json — rate-limit state for autonomous web search (X3)."""
+        return self._p("runtime", "web_autosearch_state.json")
+
     def very_formal_project_dir(self) -> Path:
         """data/very_formal_project/ — whitelisted toy files only."""
         return self._p("very_formal_project")

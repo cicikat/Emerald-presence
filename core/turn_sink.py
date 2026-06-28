@@ -161,6 +161,7 @@ async def record_assistant_turn(
     pending_paths: Optional[list] = None,
     frozen_scope=None,
     char_id: Optional[str] = None,
+    web_echo: bool = False,
 ) -> TurnResult:
     """
     Record one completed assistant turn and deliver it to the requested channels.
@@ -216,6 +217,7 @@ async def record_assistant_turn(
                 envelope=envelope,
                 audit_extras=audit_extras,
                 frozen_scope=frozen_scope,
+                web_echo=web_echo,
             )
         else:
             asyncio.create_task(
@@ -230,6 +232,7 @@ async def record_assistant_turn(
                     envelope=envelope,
                     audit_extras=audit_extras,
                     frozen_scope=frozen_scope,
+                    web_echo=web_echo,
                 )
             )
 

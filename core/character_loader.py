@@ -1,6 +1,6 @@
 """
 角色卡加载模块
-解析 SillyTavern 格式的角色卡 JSON 文件
+解析 SillyTavern 和 Presence 格式的角色卡 JSON 文件
 支持角色一致性检测
 """
 
@@ -22,7 +22,7 @@ _consistency_counter: dict[str, int] = {}
 
 @dataclass
 class Character:
-    """角色卡数据类，对应 SillyTavern 的核心字段"""
+    """角色卡数据类字段"""
     name: str = "AI"
     description: str = ""        # 外貌/背景描述
     personality: str = ""        # 性格描述
@@ -39,6 +39,10 @@ class Character:
     # 性别标识，用于推导人称代词（"male" → 他，"female" → 她，"neutral" → ta）。
     # 默认 "neutral" 保持向后兼容，不影响 name/personality 已迁移的卡。
     gender: str = "neutral"
+    # SillyTavern 导入字段（酒馆卡适配，阶段二）。老卡缺省即空，不影响现有流程。
+    post_history_instructions: str = ""   # 酒馆 Post-History Instructions
+    post_history_extra: str = ""          # 常驻 after 型世界书条目（折叠存储）
+    alternate_greetings: list[str] = field(default_factory=list)  # 备用开场白
 
 
 def load(filename_or_id: str) -> Character:
@@ -98,8 +102,12 @@ def load(filename_or_id: str) -> Character:
         anniversaries=data.get("anniversaries"),
         birthday=data.get("birthday"),
         gender=data.get("gender", "neutral"),
+        post_history_instructions=data.get("post_history_instructions") or "",
+        post_history_extra=data.get("post_history_extra") or "",
+        alternate_greetings=data.get("alternate_greetings") or [],
     )
-    for field_name in ("system_prompt", "description", "personality", "scenario"):
+    for field_name in ("system_prompt", "description", "personality", "scenario",
+                       "post_history_instructions", "post_history_extra"):
         val = getattr(char, field_name)
         if isinstance(val, list):
             setattr(char, field_name, "".join(val))

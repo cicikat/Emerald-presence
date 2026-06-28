@@ -97,9 +97,9 @@ def _weather_wrapper(city: str):
     return get_weather(city)
 
 
-def _web_search_wrapper(query: str):
+def _web_search_wrapper(query: str, uid: str | None = None, char_id: str | None = None):
     from core.tools.web_search import search
-    return search(query)
+    return search(query, uid=uid, char_id=char_id)
 
 
 async def _read_diary_wrapper(user_id: str, date: str = "") -> str:
@@ -348,6 +348,11 @@ async def _write_toy_file_wrapper(
     return write_toy_file(file_key=file_key, content=content, mode=mode)
 
 
+async def _peek_screen_content_wrapper() -> str:
+    from core.tools.screen_peek import peek_screen_content
+    return await peek_screen_content()
+
+
 _TOOL_REGISTRY["get_time"] = {
     "func": _get_current_time,
     "description": "获取当前准确时间，当用户询问时间、日期时调用.不确定时间时优先调用此工具,禁止猜测。",
@@ -457,6 +462,7 @@ _TOOL_REGISTRY["read_diary"] = {
     ),
     "dangerous": False,
     "category": "info",
+    "persist": True,
     "examples": [
         "帮我看看今天的日记",
         "你来读读我写的日记",
@@ -482,6 +488,7 @@ _TOOL_REGISTRY["read_watch"] = {
     "description": "当用户或{char}想了解用户的睡眠、心率、运动等身体数据时调用。可以查最近记录或历史趋势。",
     "dangerous": False,
     "category": "memory",
+    "persist": True,
     "parameters": {
         "type": "object",
         "properties": {
@@ -499,6 +506,7 @@ _TOOL_REGISTRY["search_diary"] = {
     "description": "按主题或关键词检索用户最近30天的日记内容。当{char}想回忆用户写过的某个话题、情绪、事件时主动调用，不需要用户明确要求。",
     "dangerous": False,
     "category": "memory",
+    "persist": True,
     "parameters": {
         "type": "object",
         "properties": {
@@ -676,6 +684,24 @@ _TOOL_REGISTRY["water_garden"] = {
     "keywords": ["浇花", "花园", "浇水"],
 }
 
+_TOOL_REGISTRY["peek_screen_content"] = {
+    "func": _peek_screen_content_wrapper,
+    "description": (
+        "{char}主动查看用户当前窗口的屏幕文字内容（如 Obsidian 文档、代码文件正文等）。"
+        "看到窗口标题后，若好奇或在意，可自主调用。无需用户提出。"
+        "功能未开启或冷却中时自动返回提示，不会出错。"
+    ),
+    "dangerous": False,
+    "category": "desktop",
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+    "examples": ["看看她在写什么", "翻一下那篇内容", "你好奇她在写的东西吗"],
+    "keywords": ["看看内容", "翻一下", "看她在写什么", "屏幕内容"],
+}
+
 _TOOL_REGISTRY["toy_vibrate"] = {
     "func": _toy_vibrate_wrapper,
     "description": "控制已连接的 Intiface 振动设备。仅在用户明确要求振动并给出或接受强度、时长时调用。",
@@ -738,6 +764,7 @@ _TOOL_REGISTRY["read_toy_file"] = {
     ),
     "dangerous": False,
     "category": "desktop",
+    "persist": True,
     "parameters": {
         "type": "object",
         "properties": {
@@ -941,6 +968,7 @@ async def execute(
     session_state,
     *,
     origin: str,
+    char_id: str = "yexuan",
 ) -> tuple[str | None, str | None]:
     """
     执行工具，返回 (tool_result, ask_confirm_text)
@@ -951,6 +979,7 @@ async def execute(
     origin 必填，不在白名单则 fail-closed：返回 (None, None) + 记 warning。
     白名单：user_live（Path A 用户发起）/ assistant_intent（Path B 意图执行，附加门控）。
     漏传 → TypeError，杜绝静默绕过。
+    char_id: 当前活跃角色桶 id，用于 persist=True 工具的已读指纹检查和 short_term 回写。
     """
     if origin not in _EXECUTE_ALLOWED_ORIGINS:
         logger.warning(
@@ -995,6 +1024,22 @@ async def execute(
             session_state.set_waiting_confirm(tool_name, tool_args)
             return None, _build_confirm_ask(tool_name, tool_args)
 
+    # ── persist 工具：指纹去重检查 ────────────────────────────────────────────
+    _is_persist = bool(tool_info.get("persist", False))
+    _fingerprint: str | None = None
+    if _is_persist:
+        try:
+            from core.memory.tool_read_log import build_fingerprint, is_recently_read
+            _fingerprint = build_fingerprint(tool_name, tool_args)
+            if _fingerprint and is_recently_read(user_id, char_id, _fingerprint):
+                logger.info(
+                    "[tool_dispatcher] persist 工具已读，跳过: tool=%s fp=%s",
+                    tool_name, _fingerprint,
+                )
+                return f"（刚读过这个，这次跳过）", None
+        except Exception as _fp_err:
+            logger.debug("[tool_dispatcher] fingerprint check error: %s", _fp_err)
+
     # 执行工具
     try:
         func = tool_info["func"]
@@ -1003,9 +1048,39 @@ async def execute(
             "get_profile", "get_episodic", "get_growth",
         ):
             result = await func(user_id=user_id, **tool_args)
+        elif tool_name == "web_search":
+            result = await func(uid=user_id, char_id=char_id, **tool_args)
+            # X3: record last search timestamp for autosearch rate-limit
+            try:
+                import time as _wt
+                import json as _wj
+                from core.sandbox import get_paths as _wgp
+                _wsf = _wgp().web_autosearch_state()
+                _wsf.parent.mkdir(parents=True, exist_ok=True)
+                _wstate = {}
+                if _wsf.exists():
+                    _wstate = _wj.loads(_wsf.read_text(encoding="utf-8"))
+                _wstate["last_ts"] = _wt.time()
+                _wsf.write_text(_wj.dumps(_wstate), encoding="utf-8")
+            except Exception:
+                pass
         else:
             result = await func(**tool_args)
         logger.info(f"[tool_dispatcher] 工具 {tool_name} 执行完毕，结果: {result}")
+
+        # ── persist 工具：执行成功后记录指纹 + 回写 short_term ───────────────
+        if _is_persist and _fingerprint:
+            try:
+                from core.memory.tool_read_log import record_read, format_read_memo
+                record_read(user_id, char_id, _fingerprint)
+                memo = format_read_memo(tool_name, tool_args)
+                if memo:
+                    from core.memory.short_term import append as _st_append, _sanitize_assistant_message
+                    sanitized = _sanitize_assistant_message(memo, uid=user_id)
+                    _st_append(user_id, "assistant", sanitized, char_id=char_id)
+            except Exception as _rec_err:
+                logger.warning("[tool_dispatcher] persist record error: %s", _rec_err)
+
         return f"工具已执行：{tool_name}，结果：{result}", None
     except TypeError as e:
         log_error("tool_dispatcher.execute", e)
@@ -1035,7 +1110,7 @@ class ToolDispatcher:
     def get_tools_schema(self, categories: list[str] | None = None) -> list:
         return get_tools_schema(categories=categories)
 
-    async def execute(self, tool_name, tool_args, user_id, target_id, is_group, session_state, *, origin: str):
+    async def execute(self, tool_name, tool_args, user_id, target_id, is_group, session_state, *, origin: str, char_id: str = "yexuan"):
         return await execute(
             tool_name=tool_name,
             tool_args=tool_args,
@@ -1044,4 +1119,5 @@ class ToolDispatcher:
             is_group=is_group,
             session_state=session_state,
             origin=origin,
+            char_id=char_id,
         )

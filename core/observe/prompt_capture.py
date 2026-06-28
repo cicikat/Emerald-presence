@@ -6,7 +6,10 @@ inspect which layers were activated, their sizes, and which were pruned.
 Also captures the LLM output for the same turn via update_llm_output().
 
 Usage:
-    from core.observe.prompt_capture import capture, get_snapshots
+    from core.observe.prompt_capture import capture, get_snapshots, set_capture_origin
+
+    # Before build_prompt() at each entry point (optional — defaults to {"origin":"user"}):
+    set_capture_origin({"origin": "proactive", "trigger_name": "random_message", ...})
 
     # After build_prompt() in pipeline:
     capture(uid, messages, meta)
@@ -19,8 +22,27 @@ Usage:
 """
 
 from collections import deque
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
+
+# Per-async-task origin metadata for the current build_prompt() call.
+# Each caller sets this before invoking build_prompt(); capture() reads it.
+# Default = user-originated turn so existing call sites need no changes.
+_capture_origin: ContextVar[dict] = ContextVar(
+    "_capture_origin", default={"origin": "user"}
+)
+
+
+def set_capture_origin(info: dict) -> None:
+    """Set origin metadata for the upcoming capture() call in this async context.
+
+    Call this immediately before pipeline.build_prompt() at each entry point.
+    Proactive/scheduler callers set {"origin":"proactive","trigger_name":...,
+    "seed_prompt":...,"search_query":...}.  Desktop callers set {"origin":"desktop"}.
+    User QQ paths rely on the default {"origin":"user"}.
+    """
+    _capture_origin.set(info)
 
 RING_SIZE = 5
 SOFT_WARN = 15000
@@ -80,6 +102,7 @@ def capture(uid: str, messages: list[dict], meta: dict) -> None:
     snap = {
         "uid": uid,
         "captured_at": datetime.now(timezone.utc).isoformat(),
+        "origin": _capture_origin.get(),   # set by caller before build_prompt
         "token_estimate": token_estimate,
         "soft_warn_threshold": SOFT_WARN,
         "hard_trigger_threshold": HARD_TRIGGER,
@@ -112,3 +135,19 @@ def get_snapshots(uid: str) -> list[dict]:
 def list_uids() -> list[str]:
     """Return all uids that have at least one snapshot."""
     return [uid for uid, ring in _rings.items() if ring]
+
+
+def get_latest_proactive_by_trigger() -> dict[str, dict]:
+    """Return the most recent proactive snapshot per trigger_name across all uids."""
+    result: dict[str, dict] = {}
+    for ring in _rings.values():
+        for snap in ring:
+            origin = snap.get("origin") or {}
+            if origin.get("origin") != "proactive":
+                continue
+            tname = origin.get("trigger_name", "")
+            if not tname:
+                continue
+            if tname not in result or snap["captured_at"] > result[tname]["captured_at"]:
+                result[tname] = snap
+    return result

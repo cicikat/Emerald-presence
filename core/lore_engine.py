@@ -4,7 +4,7 @@
 
 数据来源（两个都会加载，取并集）：
   1. characters/reality/lorebook.yaml  — authored reality 世界书（admin 面板可编辑）
-  2. 角色卡 JSON 的 world_book 字段    — SillyTavern 格式的内嵌世界书
+  2. 角色卡 JSON 的 world_book 字段    — 内嵌世界书
 
 YAML 条目格式：
   keyword: ["圣塞西尔", "学院"]   ← 列表字段名是 keyword（单数）
@@ -21,6 +21,7 @@ YAML 条目格式：
 
 import logging
 import re
+import uuid
 
 import yaml
 
@@ -48,12 +49,25 @@ def _normalize_entry(entry: dict) -> dict | None:
     if not kws:
         return None
 
-    return {
+    result: dict = {
         "keywords":        kws,
         "content":         content,
         "regex":           bool(entry.get("regex", False)),
         "insertion_order": int(entry.get("insertion_order", 100)),
     }
+    if entry.get("id"):
+        result["id"] = entry["id"]
+    return result
+
+
+def _ensure_lore_ids(raw_entries: list, file_path) -> bool:
+    """Add a stable 8-char uuid to any entry that lacks an id. Returns True if any were added."""
+    changed = False
+    for entry in raw_entries:
+        if not entry.get("id"):
+            entry["id"] = str(uuid.uuid4())[:8]
+            changed = True
+    return changed
 
 
 class LoreEngine:
@@ -118,6 +132,15 @@ class LoreEngine:
             if not isinstance(raw_entries, list):
                 logger.warning(f"[lore_engine] {stem}.yaml entries 字段不是列表，跳过")
                 continue
+
+            if _ensure_lore_ids(raw_entries, file_path):
+                try:
+                    data["entries"] = raw_entries
+                    with open(file_path, "w", encoding="utf-8") as _wf:
+                        yaml.dump(data, _wf, allow_unicode=True, default_flow_style=False, sort_keys=False)
+                    logger.info(f"[lore_engine] {stem}.yaml: 补发缺失 id 并回写")
+                except Exception as _we:
+                    log_error(f"lore_engine.ensure_ids.{stem}", _we)
 
             loaded = 0
             for entry in raw_entries:

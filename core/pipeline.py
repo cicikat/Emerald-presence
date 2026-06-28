@@ -212,11 +212,39 @@ class Pipeline:
         from core.memory import user_identity, user_facts
         from core import user_relation, llm_client
 
+        from core.recall_gate import is_low_information as _is_low_info
+        _low_info = _is_low_info(content)
+
+        # X2: compute query embedding once (fail-open), then get all semantic hits sync.
+        # query_vec is passed down to event_log.search and episodic.retrieve so each
+        # can do a source-filtered vs.query internally without re-embedding.
+        _query_vec: list | None = None
+        _semantic_hits: list = []
+        if not _low_info:
+            try:
+                from core.memory.embedding import embed
+                _q_vecs = await embed([content])
+                _query_vec = _q_vecs[0]
+                from core.memory import vector_store as _vs
+                _semantic_hits = _vs.query(uid, char_id, _query_vec, k=8)
+                if _semantic_hits:
+                    logger.debug(
+                        "[pipeline.semantic_recall] uid=%s top-%d: %s",
+                        uid, len(_semantic_hits),
+                        [(h[0], round(h[1], 4)) for h in _semantic_hits],
+                    )
+            except Exception as _ee:
+                logger.debug("[pipeline.fetch_context] embedding/vs.query skip: %s", _ee)
+
         # 需要 IO 的任务并发进行
         loop = asyncio.get_event_loop()
-        event_search_task = asyncio.create_task(
-            event_log.search(uid, content, llm_client, char_id=char_id, return_trace=True)
-        )
+        if _low_info:
+            event_search_task = None
+        else:
+            event_search_task = asyncio.create_task(
+                event_log.search(uid, content, llm_client, char_id=char_id,
+                                 return_trace=True, query_vec=_query_vec)
+            )
         profile_future = loop.run_in_executor(
             None, lambda: user_profile.load(uid, char_id=char_id)
         )
@@ -243,6 +271,8 @@ class Pipeline:
         # N2-A: fetch_context 是读路径，传 allow_strengthen=False 禁止写回 strength，
         # 避免"召回→增强→更易召回"的永动机效应。写回仍由写路径触发（post_process 等）。
         from core.memory.episodic_memory import retrieve, format_for_prompt
+        from core.memory.user_facts import get_user_pronoun as _get_pronoun
+        _user_pronoun = _get_pronoun(uid)
         episodic_memories, _episodic_trace = retrieve(
             user_id=uid,
             topic=content,
@@ -251,33 +281,42 @@ class Pipeline:
             char_name=scoped_character.name,
             allow_strengthen=False,
             return_trace=True,
+            query_vec=_query_vec,
         )
         from core.memory.mood_state import get_current as _get_mood
         episodic_result = format_for_prompt(
             episodic_memories,
             char_name=scoped_character.name,
             current_emotion=_get_mood(char_id=char_id),
+            user_pronoun=_user_pronoun,
         )
 
         # 兜底召回：tag 未命中时备用，存入 context 供 prompt_builder 判断
         from core.memory.episodic_memory import retrieve_fallback
-        _recent_texts = [h.get("content", "") for h in history[-5:]]
-        episodic_fallback, _episodic_fallback_trace = retrieve_fallback(
-            user_id=uid,
-            recent_history=_recent_texts,
-            top_k=1,
-            char_id=char_id,
-            return_trace=True,
-        )
+        if _low_info:
+            episodic_fallback, _episodic_fallback_trace = [], []
+        else:
+            _recent_texts = [h.get("content", "") for h in history[-5:]]
+            episodic_fallback, _episodic_fallback_trace = retrieve_fallback(
+                user_id=uid,
+                recent_history=_recent_texts,
+                top_k=1,
+                char_id=char_id,
+                return_trace=True,
+            )
         from core.memory.mood_state import get_current as _get_mood2
         episodic_fallback_result = format_for_prompt(
             episodic_fallback,
             char_name=scoped_character.name,
             current_emotion=_get_mood2(char_id=char_id),
+            user_pronoun=_user_pronoun,
         ) if episodic_fallback else ""
 
         # 等待异步任务
-        event_search_result, _event_log_trace  = await event_search_task
+        if event_search_task is None:
+            event_search_result, _event_log_trace = "", []
+        else:
+            event_search_result, _event_log_trace = await event_search_task
         profile              = await profile_future
         mid_term_text        = await mid_term_future
         user_identity_text   = await user_identity.format_for_prompt(uid, char_id=char_id)
@@ -286,8 +325,25 @@ class Pipeline:
 
         from core.tools.reminder import get_reminders
         reminders = get_reminders(uid)
-        from core.memory.diary_context import load as _load_diary
+        from core.memory.diary_context import load as _load_diary, load_meta as _load_diary_meta
         diary_context = _load_diary(uid)
+        if diary_context:
+            from datetime import date as _date
+            _meta = _load_diary_meta(uid)
+            _latest = _meta.get("latest_entry_date")
+            _fresh = False
+            if _latest:
+                try:
+                    from core.config_loader import get_config as _get_config
+                    _max_age = _get_config().get("diary", {}).get("context_max_age_days", 4)
+                    _age = (_date.today() - _date.fromisoformat(_latest)).days
+                    _fresh = _age <= _max_age
+                except ValueError:
+                    _fresh = False
+            if not _fresh:
+                diary_context = ""
+        if _low_info:
+            diary_context = ""
 
         # N2-A: sleepy mood 已迁出 — 见 Pipeline.post_process 开头的
         #        maybe_mark_sleepy_from_time() 调用。fetch_context 是读路径，不写 mood。
@@ -327,6 +383,29 @@ class Pipeline:
         except Exception as _te:
             logger.warning("[pipeline.fetch_context] recall trace write failed: %s", _te)
 
+        # X3: web-sourced semantic recall — query vector_store for source="web" items
+        _web_recall_text = ""
+        if not _low_info and _query_vec:
+            try:
+                from core.memory import vector_store as _vs_web
+                _web_hits = _vs_web.query_with_preview(
+                    uid, char_id, _query_vec, k=3, sources=["web"]
+                )
+                if _web_hits:
+                    _web_parts = []
+                    for _url, _preview, _dist in _web_hits:
+                        if _preview:
+                            _web_parts.append(
+                                f"• {_preview.strip()}\n  来源：{_url}"
+                            )
+                    if _web_parts:
+                        _web_recall_text = "\n\n".join(_web_parts)
+                        logger.debug(
+                            "[pipeline.web_recall] uid=%s hits=%d", uid, len(_web_hits)
+                        )
+            except Exception as _we:
+                logger.debug("[pipeline.fetch_context] web_recall skip: %s", _we)
+
         return {
             "history":             history,
             "profile":             profile,
@@ -343,6 +422,12 @@ class Pipeline:
             "mid_term":                 mid_term_text,
             "dream_impression_text":    dream_impression_text,
             "_scoped_character":        scoped_character,
+            "suppress_emotional_recall": _low_info,
+            # 语义召回候选（X2 接管 score_recall；X3 复用 query_vec）
+            "semantic_hits":    _semantic_hits,
+            "query_vec":        _query_vec,
+            # X3: web 资料召回（外部事实，已标注来源，不进 episodic/identity）
+            "web_recall_result": _web_recall_text,
         }
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -427,6 +512,8 @@ class Pipeline:
             char_id=_char_id,
             stage_presence=context.get("stage_presence", ""),
             stage_transcript=context.get("stage_transcript", ""),
+            suppress_emotional_recall=context.get("suppress_emotional_recall", False),
+            web_recall_result=context.get("web_recall_result", ""),
         )
         if _char_id == self._active_character_id:
             self.author_note_extra = ""
@@ -498,6 +585,7 @@ class Pipeline:
         envelope=None,
         audit_extras: dict | None = None,
         frozen_scope: "MemoryScope | None" = None,
+        web_echo: bool = False,
     ):
         """
         关键写入在 uid_lock 内同步完成，慢任务（LLM调用）入 slow_queue 异步执行。
@@ -600,6 +688,17 @@ class Pipeline:
                 _turn_id = _capture_turn(user_id, content, reply, _emotion, turn_id=_turn_id, trigger_name=trigger_name, envelope=envelope, char_id=char_id, audit_extras=audit_extras)
                 _critical_written = True
                 logger.debug(f"[pipeline.post_process] capture_turn: {_turn_id}")
+                # 语义索引：event_log 条目异步写入向量库（fail-open）
+                if envelope.can_write_memory:
+                    try:
+                        import time as _time
+                        from core.memory import vector_store as _vs
+                        _el_text = f"{content}\n{reply}".strip()
+                        asyncio.create_task(
+                            _vs.upsert(user_id, char_id, "event_log", _turn_id, _time.time(), _el_text)
+                        )
+                    except Exception as _vs_e:
+                        logger.debug("[pipeline.post_process] vector_store upsert schedule error: %s", _vs_e)
             except Exception as e:
                 log_error("post_process.capture_turn", e)
                 if envelope.can_write_memory:
@@ -618,10 +717,19 @@ class Pipeline:
         from core.tag_rules import get_tags as _get_tags
         _mt_tags = list(_get_tags(content))
 
+        # D2 isolation: if dream impressions were active this turn, flag the
+        # mid-term job so consolidation doesn't promote dream facts into episodic/identity.
+        _dream_echo = False
+        try:
+            from core.dream.impression_store import get_active_impressions as _get_active_imp
+            _dream_echo = bool(_get_active_imp(user_id, char_id=char_id))
+        except Exception:
+            pass
+
         # summarize_to_midterm 替代旧的 mid_term_append；
         # 若 emotion 显著，handler 内部会自动入队 reflect_to_episodic（eager）
         if envelope.can_write_memory:
-            slow_queue.enqueue("summarize_to_midterm", {
+            _mt_payload: dict = {
                 "turn_id": _turn_id,
                 "uid": user_id,
                 "user_content": content,
@@ -630,7 +738,14 @@ class Pipeline:
                 "emotion": _emotion,
                 "char_id": char_id,
                 "scope": scope_payload,
-            })
+            }
+            if trigger_name:
+                _mt_payload["trigger_name"] = trigger_name
+            if _dream_echo:
+                _mt_payload["dream_echo"] = True
+            if web_echo:
+                _mt_payload["web_echo"] = True
+            slow_queue.enqueue("summarize_to_midterm", _mt_payload)
         slow_queue.enqueue("consistency_check", {
             "reply": reply,
         })
@@ -647,6 +762,13 @@ class Pipeline:
                 "uid": user_id,
                 "char_id": char_id,
                 "scope": scope_payload,
+            })
+        if envelope.can_write_memory:
+            slow_queue.enqueue("toy_autogrow", {
+                "uid": user_id,
+                "char_id": char_id,
+                "user_content": content,
+                "reply": reply,
             })
 
         # ── side effects：保持 asyncio.create_task ────────────────────────────
@@ -1086,3 +1208,5 @@ def register_slow_handlers() -> None:
     slow_queue.register_handler("consistency_check",       _handler_consistency_check)
     slow_queue.register_handler("user_profile_update",     _handler_user_profile_update)
     slow_queue.register_handler("trait_tracker_update",    _handler_trait_tracker_update)
+    from core.post_process.toy_autogrow import handler_toy_autogrow
+    slow_queue.register_handler("toy_autogrow",            handler_toy_autogrow)

@@ -402,11 +402,28 @@ async def _pipeline_send(
             context = await _pipeline.fetch_context(
                 oid, search_query or prompt, frozen_scope=_frozen_scope
             )
+            # Tag this build_prompt() call as proactive so prompt_capture records
+            # the trigger origin, seed prompt, and search query alongside the layers.
+            try:
+                from core.observe.prompt_capture import set_capture_origin as _set_capture_origin
+                _set_capture_origin({
+                    "origin": "proactive",
+                    "trigger_name": trigger_name,
+                    "seed_prompt": prompt,
+                    "search_query": search_query or "",
+                })
+            except Exception:
+                pass
             messages, _ = _pipeline.build_prompt(
                 oid, prompt, context, char_id=_frozen_scope.character_id
             )
             reply = await _pipeline.run_llm(messages)
             if reply:
+                try:
+                    from core.observe.prompt_capture import update_llm_output as _upd_prompt_out
+                    _upd_prompt_out(oid, reply)
+                except Exception:
+                    pass
                 # 在 assistant 回复落盘前写一条最低权重的 user stub，
                 # 让后续轮次的 LLM 有上下文锚点（"角色上次是因为 X 主动说话的"）。
                 # _source="trigger_stub" 使 _score_turn_group 对其评 0 分，远场不占位。

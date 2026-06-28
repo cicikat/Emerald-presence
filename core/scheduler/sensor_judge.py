@@ -9,8 +9,7 @@ import json
 import logging
 from typing import Optional
 
-from core.config_loader import get_config
-from core.llm_client import _get_client
+from core.model_registry import get_model_client
 
 logger = logging.getLogger(__name__)
 
@@ -134,11 +133,9 @@ async def judge(event: dict) -> dict:
     audit_prompt = f"[SYSTEM]\n{_SYSTEM}\n\n[USER]\n{user_text}"
 
     try:
-        cfg    = get_config()["llm"]
-        client = _get_client()
-        # TODO: 待支持模型切换参数后改 deepseek-chat（当前 cfg["model"] 已是 deepseek-chat）
-        response = await client.chat.completions.create(
-            model=cfg["model"],
+        mc = get_model_client("intent")
+        response = await mc.client.chat.completions.create(
+            model=mc.model,
             messages=messages,
             max_tokens=80,
             temperature=0.1,
