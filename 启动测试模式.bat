@@ -8,7 +8,7 @@ echo ║  不会污染角色的真实记忆              ║
 echo ╚══════════════════════════════════════╝
 echo.
 
-cd /d D:\ai\qq-st-bot
+cd /d D:\ai\Emerald-presence
 
 C:\Users\10434\AppData\Local\Python\pythoncore-3.14-64\python.exe run_test.py
 

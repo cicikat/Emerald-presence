@@ -1,5 +1,5 @@
 """
-run_test.py — 以 test 模式启动 qq-st-bot。
+run_test.py — 以 test 模式启动 Emerald-presence。
 数据全部写入 data/test_sandbox/{session_id}/，不污染 production 数据。
 代替 main.py 使用；结束后询问是否清理沙盒目录。
 """
@@ -9,7 +9,7 @@ import os
 import sys
 from pathlib import Path
 
-# ── 1. 切换到 qq-st-bot 目录，与 main.py 保持一致 ────────────────────────────
+# ── 1. 切换到 Emerald-presence 目录，与 main.py 保持一致 ────────────────────────────
 os.chdir(Path(__file__).parent)
 
 # ── 2. 初始化沙盒（必须在所有项目模块导入之前）────────────────────────────────

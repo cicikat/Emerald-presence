@@ -6,7 +6,7 @@
 
 ## 项目定位
 
-角色（qq-st-bot）是一个单用户 AI 陪伴系统，通过 QQ、桌宠和手机轮询通道与用户交互。
+角色（Emerald-presence）是一个单用户 AI 陪伴系统，通过 QQ、桌宠和手机轮询通道与用户交互。
 
 ---
 
@@ -89,7 +89,12 @@
 | 元数据规则纠察 | `core/integrity_check.py` |
 | user_identity 文件 | `data/user_identity/{uid}.yaml`（当前 prompt 层6a 主入口） |
 | character_growth 三文件（legacy） | `角色_{uid}.md`（observer源）/ `.fingerprint.txt`（派生，存前150字）/ `.felt.md`（派生；当前主 prompt 不注入） |
+| toy 自主写入（自生长，走 post_process，非探针） | `core/post_process/toy_autogrow.py` → `handler_toy_autogrow`；配置 `toy_autogrow:` |
+| web 搜索沉淀（X3）：结果写入 vector_store source="web" | `core/tools/web_search.py` → `vector_store.upsert`；限频配置 `web_autosearch:` |
+| web 资料召回（X3）：semantic 召回 web 来源，注入 `web_recall` 层 | `core/pipeline.py` `fetch_context()` → `vector_store.query_with_preview(sources=["web"])` → `web_recall_result` → `prompt_builder.build(web_recall_result=)` |
+| web 与梦境来源同等隔离，不固化 | `web_recall_result` 非空时 `post_process` 携带 `web_echo=True`，`fixation_pipeline.handler_summarize_to_midterm` 与 dream_echo 同路跳过 mid_term/episodic/identity 写入 |
 | 工具探针（声明式） | `core/tool_dispatcher.py` → `get_probe_prompt()` / `_TOOL_REGISTRY` |
+| 工具已读指纹日志（P2，去重防重读） | `core/memory/tool_read_log.py`（`persist=True` 工具：read_diary / read_watch / read_toy_file / search_diary） |
 | trusted_user_text / probe grounding | `main.py` `_trusted_user_text` 在 media merge 前捕获；`admin/routers/chat.py` `run_owner_chat_turn(trusted_user_text=)` |
 | execute() origin 闸门 | `core/tool_dispatcher.py` → `_EXECUTE_ALLOWED_ORIGINS` / `execute(origin=)` |
 | Path B 守卫（意图反射去重） | `core/pipeline.py` → `_parse_and_execute_intent()` guards (a/b/c) + `_INTENT_LAST_ACTION` c2 幂等 |
@@ -119,7 +124,8 @@ python run_test.py
 3. **新增 prompt 层必须加 `_layer` 字段，裁剪逻辑才能识别。**
 4. **tag 规则改动后，用 `python tests/run_eval.py` 验证层激活情况。**
 5. **改 assistant 消息写入或截断逻辑前，必须先看 `_sanitize_assistant_message`，避免绕过脱敏。**
-6. WebSocket 客户端必须绕过系统代理。`websocket-client` 库会自动读取
+6. **新增记忆写入点（identity / episodic / mid_term / trait / author_note）时，必须同步调用 `provenance_log.append()`（fail-open），否则改动无法追溯。详见 `docs/memory.md` §改动溯源。**
+7. WebSocket 客户端必须绕过系统代理。`websocket-client` 库会自动读取
    `HTTP_PROXY` / `HTTPS_PROXY` 环境变量，必须在 `run_forever` 调用前
    临时清除（连接结束后恢复）。`http_proxy_host=""` 这种参数不顶用。
 

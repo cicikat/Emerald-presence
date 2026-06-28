@@ -1,5 +1,5 @@
 """
-QQ-SillyTavern Bot 主程序
+Emerald-Presence 主程序
 整合所有模块，实现完整的消息处理流程
 
 启动方式：python main.py
@@ -287,6 +287,7 @@ async def handle_message(message: dict):
                 is_group=is_group,
                 session_state=state,
                 origin="user_live",
+                char_id=_char_id,
             )
             state.clear()
             if tool_result:
@@ -309,6 +310,7 @@ async def handle_message(message: dict):
             is_group=is_group,
             session_state=state,
             origin="user_live",
+            char_id=_char_id,
         )
         state.clear()
         if ask_text:
@@ -402,23 +404,38 @@ async def handle_message(message: dict):
                 "fast_path_risk": tool_dispatcher.tool_fast_path_risk(_fast_tool),
                 "user_message": _trusted_user_text,
                 "tool_calls": list(tool_calls),
+                "channel": "qq",
             }
         else:
-            # 注入最近 2 轮（最多 4 条）真实对话，帮助探针解析代词指代
-            # 过滤 trigger_stub 条目，避免系统占位符混入探针上下文
+            # 上下文降格为只读参考块：不喂 role:assistant 回合，避免分类器被表演台词带跑
+            import re as _re_probe
             from core.memory import short_term as _st_probe
+            from core.character_name_provider import get_active_char_name as _get_probe_char_name
+            _probe_char_name = _get_probe_char_name()
             _probe_ctx_raw = _st_probe.load(user_id, char_id=_char_id)
-            _probe_ctx = [
-                {"role": m["role"], "content": m.get("content", "")}
-                for m in _probe_ctx_raw
-                if m.get("_source") != "trigger_stub"
-            ][-4:]
+            _ref_lines: list[str] = []
+            for _m in _probe_ctx_raw[-4:]:
+                if _m.get("_source") == "trigger_stub":
+                    continue
+                _txt = (_m.get("content") or "").strip()
+                if _m.get("role") == "assistant":
+                    # strip action/stage-direction text to avoid biasing the classifier
+                    _txt = _re_probe.sub(r"（[^）]*）|\([^)]*\)", "", _txt).strip()
+                    if not _txt:
+                        continue
+                    _ref_lines.append(f"{_probe_char_name}：{_txt}")
+                else:
+                    _ref_lines.append(f"用户：{_txt}")
+            _ref_block = "\n".join(_ref_lines)
+
+            _probe_system = tool_dispatcher.get_probe_prompt(_location)
+            if _ref_block:
+                _probe_system += (
+                    "\n\n【最近对话（仅供解析指代词等，不要续写、不要表演、不要进入角色）】\n"
+                    + _ref_block
+                )
             tool_detection_messages = [
-                {
-                    "role": "system",
-                    "content": tool_dispatcher.get_probe_prompt(_location),
-                },
-                *_probe_ctx,
+                {"role": "system", "content": _probe_system},
                 {"role": "user", "content": _trusted_user_text},
             ]
             tools_schema = tool_dispatcher.get_tools_schema(categories=["info", "desktop"])
@@ -431,8 +448,8 @@ async def handle_message(message: dict):
             logger.info(f"[handle_message] probe_response type={type(probe_response)} tool_calls={tool_calls}")
             _probe_snap = {
                 "is_fast_path": False,
-                "probe_system": tool_dispatcher.get_probe_prompt(_location),
-                "probe_context": _probe_ctx,
+                "probe_system": _probe_system,
+                "probe_context": _ref_block,
                 "user_message": _trusted_user_text,
                 "tools_available": [
                     (t.get("function") or t).get("name", "")
@@ -440,6 +457,7 @@ async def handle_message(message: dict):
                 ],
                 "probe_response_raw": probe_response if isinstance(probe_response, str) else "",
                 "tool_calls": tool_calls or [],
+                "channel": "qq",
             }
         _probe_tool_results: list[dict] = []
         if tool_calls:
@@ -461,6 +479,7 @@ async def handle_message(message: dict):
                     is_group=is_group,
                     session_state=state,
                     origin="user_live",
+                    char_id=_char_id,
                 )
                 if ask_text:
                     logger.info(f"[handle_message] 高危工具 {t_name}，等待用户确认")
@@ -531,6 +550,7 @@ async def handle_message(message: dict):
             segments, user_id, content, target_id, is_group,
             frozen_scope=_frozen_scope,
             pending_paths=_meta.get("pending_paths", []),
+            web_echo=bool(context.get("web_recall_result")),
         )
 
 
@@ -710,6 +730,7 @@ async def _qq_reality_reply_adapter(
     is_group: bool,
     frozen_scope,
     pending_paths: list | None = None,
+    web_echo: bool = False,
 ) -> None:
     """
     QQ LLM_ASSISTANT_REPLY 统一出口（R1-D: turn_sink 统一链路）。
@@ -773,6 +794,7 @@ async def _qq_reality_reply_adapter(
             pending_paths=pending_paths,
             frozen_scope=frozen_scope,
             pipeline=_pipeline,
+            web_echo=web_echo,
         )
     except Exception as _ts_err:
         _log_error("qq_reality_reply_adapter.turn_sink", _ts_err)
@@ -788,7 +810,7 @@ async def _qq_reality_reply_adapter(
 
 async def main():
     logger.info("=" * 60)
-    logger.info("  QQ-SillyTavern Bot 启动中...")
+    logger.info("  Emerald-Presence 启动中...")
     logger.info("=" * 60)
 
     _init_modules()
