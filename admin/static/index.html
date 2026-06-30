@@ -263,6 +263,9 @@ textarea { resize: vertical; min-height: 72px; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.nav-group-header{padding:8px 20px 2px;font-size:11px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase;cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px}
+.nav-group-header:hover{color:var(--text)}
+.nav-caret{display:inline-block;font-size:9px;width:10px}
 </style>
 </head>
 <body>
@@ -285,30 +288,40 @@ textarea { resize: vertical; min-height: 72px; }
       <h2>运维控制台</h2>
       <p id="nav-host">127.0.0.1:8080</p>
     </div>
-    <div style="padding:4px 20px 2px;font-size:11px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase;margin-top:4px">🎭 <span id="nav-char-label">叶瑄</span></div>
+    <div class="nav-group-header" onclick="toggleNavGroup('create')"><span class="nav-caret" id="caret-create">▾</span>🎨 创作</div>
+    <div class="nav-group" id="navgroup-create">
+      <a data-page="character"      onclick="goto('character')">      <span class="icon">🃏</span>角色卡</a>
+      <a data-page="lorebook"       onclick="goto('lorebook')">       <span class="icon">🌍</span>现实设定</a>
+      <a data-page="dream-settings" onclick="goto('dream-settings')"> <span class="icon">🌙</span>梦境设定</a>
+    </div>
 
-    <div style="padding:8px 20px 2px;font-size:11px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase">🎨 创作</div>
-    <a data-page="character"      onclick="goto('character')">      <span class="icon">🃏</span>角色卡</a>
-    <a data-page="lorebook"       onclick="goto('lorebook')">       <span class="icon">🌍</span>现实设定</a>
-    <a data-page="dream-settings" onclick="goto('dream-settings')"> <span class="icon">🌙</span>梦境设定</a>
+    <div class="nav-group-header" onclick="toggleNavGroup('ops')"><span class="nav-caret" id="caret-ops">▾</span>🛠 运维</div>
+    <div class="nav-group" id="navgroup-ops">
+      <a class="active" data-page="status" onclick="goto('status')"><span class="icon">📊</span>系统状态</a>
+      <a data-page="scheduler" onclick="goto('scheduler')"><span class="icon">⏰</span>调度器</a>
+      <a data-page="users"     onclick="goto('users')">    <span class="icon">👤</span>用户管理</a>
+      <a data-page="logs"      onclick="goto('logs')">     <span class="icon">📋</span>错误日志</a>
+    </div>
 
-    <div style="padding:8px 20px 2px;font-size:11px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase">🛠 运维</div>
-    <a class="active" data-page="status"    onclick="goto('status')">   <span class="icon">📊</span>系统状态</a>
-    <a data-page="scheduler" onclick="goto('scheduler')"><span class="icon">⏰</span>调度器</a>
-    <a data-page="users"     onclick="goto('users')">    <span class="icon">👤</span>用户管理</a>
-    <a data-page="logs"      onclick="goto('logs')">     <span class="icon">📋</span>错误日志</a>
+    <div class="nav-group-header" onclick="toggleNavGroup('state')"><span class="nav-caret" id="caret-state">▾</span>🔬 内部状态</div>
+    <div class="nav-group" id="navgroup-state">
+      <a data-page="observe-mood"    onclick="goto('observe-mood')">   <span class="icon">🌸</span>情绪·花园</a>
+      <a data-page="observe-dream"   onclick="goto('observe-dream')">  <span class="icon">🌙</span>梦境状态</a>
+      <a data-page="observe-memory"  onclick="goto('observe-memory')"> <span class="icon">🧠</span>记忆探查</a>
+      <a data-page="observe-hidden"  onclick="goto('observe-hidden')"> <span class="icon">🔬</span>隐性状态</a>
+      <a data-page="observe-chatlog" onclick="goto('observe-chatlog')"><span class="icon">💬</span>聊天日志</a>
+      <a data-page="observe-runtime" onclick="goto('observe-runtime')"><span class="icon">⚙️</span>运行时内部态</a>
+    </div>
 
-    <div style="padding:8px 20px 2px;font-size:11px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase">🔍 观测/调试</div>
-    <a data-page="observe-mood"    onclick="goto('observe-mood')">   <span class="icon">🌸</span>情绪·花园</a>
-    <a data-page="observe-dream"   onclick="goto('observe-dream')">  <span class="icon">🌙</span>梦境状态</a>
-    <a data-page="observe-memory"  onclick="goto('observe-memory')"> <span class="icon">🧠</span>记忆探查</a>
-    <a data-page="observe-hidden"  onclick="goto('observe-hidden')"> <span class="icon">🔬</span>隐性状态</a>
-    <a data-page="observe-chatlog" onclick="goto('observe-chatlog')"><span class="icon">💬</span>聊天日志</a>
-    <a data-page="observe-runtime" onclick="goto('observe-runtime')"><span class="icon">⚙️</span>运行时内部态</a>
-    <a data-page="observe-prompt"  onclick="goto('observe-prompt')"> <span class="icon">🗂️</span>Prompt 层检视</a>
-    <a data-page="observe-probe"   onclick="goto('observe-probe')">  <span class="icon">🔭</span>探针观测</a>
-    <a data-page="observe-dream-prompt" onclick="goto('observe-dream-prompt')"><span class="icon">💭</span>梦境 Prompt</a>
-    <a data-page="observe-trigger-catalog" onclick="goto('observe-trigger-catalog')"><span class="icon">📡</span>触发器目录</a>
+    <div class="nav-group-header" onclick="toggleNavGroup('observe')"><span class="nav-caret" id="caret-observe">▾</span>🔍 观测</div>
+    <div class="nav-group" id="navgroup-observe">
+      <a data-page="observe-prompt"  onclick="goto('observe-prompt')"> <span class="icon">🗂️</span>Prompt 层检视</a>
+      <a data-page="observe-probe"   onclick="goto('observe-probe')">  <span class="icon">🔭</span>探针观测</a>
+      <a data-page="observe-dream-prompt" onclick="goto('observe-dream-prompt')"><span class="icon">💭</span>梦境 Prompt</a>
+      <a data-page="observe-trigger-catalog" onclick="goto('observe-trigger-catalog')"><span class="icon">📡</span>触发器目录</a>
+      <a data-page="observe-vector"     onclick="goto('observe-vector')">    <span class="icon">🧬</span>向量库</a>
+      <a data-page="observe-provenance" onclick="goto('observe-provenance')"><span class="icon">🧾</span>印象溯源</a>
+    </div>
 
     <a data-page="pet"    onclick="goto('pet')"    style="display:none"><span class="icon">🐾</span>宠物</a>
     <a data-page="yexuan" onclick="goto('yexuan')" style="display:none"><span class="icon">💬</span>与<span class="nav-char-name">叶瑄</span></a>
@@ -1164,6 +1177,35 @@ textarea { resize: vertical; min-height: 72px; }
       <div id="trigger-catalog-content"></div>
     </div>
 
+    <!-- ── 印象溯源 ── -->
+    <div class="page" id="page-observe-provenance">
+      <h1 class="page-title">印象溯源 <span style="font-size:13px;font-weight:400;color:var(--muted)">只读 · 每条概括何时·因何·从哪条聊天记录改动</span></h1>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+        <select id="prov-uid" class="input" style="max-width:180px"></select>
+        <input id="prov-artifact" class="input" placeholder="artifact（如 identity，可空）" style="max-width:200px">
+        <input id="prov-field" class="input" placeholder="field（如 trust_pattern，可空）" style="max-width:200px">
+        <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px"><input type="checkbox" id="prov-scope"> 仅叶瑄自身漂移</label>
+        <button class="btn btn-ghost btn-sm" onclick="loadProvenance()">查询</button>
+      </div>
+      <div id="prov-content"></div>
+    </div>
+
+    <!-- ── 向量库 ── -->
+    <div class="page" id="page-observe-vector">
+      <h1 class="page-title">向量库 <span style="font-size:13px;font-weight:400;color:var(--muted)">只读 · sqlite-vec 语义索引</span></h1>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+        <select id="vec-uid" class="input" style="max-width:180px"></select>
+        <select id="vec-source" class="input" style="max-width:160px"><option value="">全部 source</option></select>
+        <button class="btn btn-ghost btn-sm" onclick="loadVector()">刷新</button>
+      </div>
+      <div id="vec-stats" style="margin-bottom:12px"></div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <input id="vec-q" class="input" placeholder="语义检索：输入一句话，找最相近的记忆…" style="flex:1">
+        <button class="btn btn-ghost btn-sm" onclick="searchVector()">检索</button>
+      </div>
+      <div id="vec-content"></div>
+    </div>
+
   </main>
 </div>
 
@@ -1322,6 +1364,7 @@ async function doLogin() {
     document.getElementById('nav-host').textContent = window.location.host;
     document.getElementById('nav-key-hint').textContent = '密钥: ' + key.slice(0,4) + '…';
     goto('status');
+    restoreNavGroups();
     _initCharName().catch(() => {});
   } catch(e) {
     document.getElementById('auth-err').textContent = '连接失败: ' + e.message;
@@ -1335,6 +1378,30 @@ document.getElementById('key-input').addEventListener('keydown', e => {
 // Auto-login if key stored
 if (TOKEN) {
   doLogin().catch(() => {});
+}
+
+// ══════════════════════════════════════════════════════════
+//  Nav group collapse
+// ══════════════════════════════════════════════════════════
+function toggleNavGroup(key){
+  const g=document.getElementById('navgroup-'+key), c=document.getElementById('caret-'+key);
+  if(!g) return;
+  const willShow = g.style.display==='none';
+  g.style.display = willShow?'':'none';
+  if(c) c.textContent = willShow?'▾':'▸';
+  const st=JSON.parse(localStorage.getItem('navGroupsCollapsed')||'{}');
+  st[key]=!willShow;
+  localStorage.setItem('navGroupsCollapsed',JSON.stringify(st));
+}
+function restoreNavGroups(){
+  const st=JSON.parse(localStorage.getItem('navGroupsCollapsed')||'{}');
+  for(const key of ['create','ops','state','observe']){
+    if(st[key]){
+      const g=document.getElementById('navgroup-'+key), c=document.getElementById('caret-'+key);
+      if(g) g.style.display='none';
+      if(c) c.textContent='▸';
+    }
+  }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1366,6 +1433,8 @@ function goto(page) {
     'observe-probe':   () => loadObserveProbeUidList(),
     'observe-dream-prompt': () => loadObserveDreamPromptUidList(),
     'observe-trigger-catalog': () => loadTriggerCatalog(),
+    'observe-vector':          () => loadVector(),
+    'observe-provenance':      () => loadProvenance(),
   };
   if (page !== 'scheduler') _stopWatchStatusPoller();
   if (loaders[page]) loaders[page]();
@@ -3855,6 +3924,192 @@ async function deleteDreamLoreEntry(idx) {
     loadDreamLore();
   } catch(e) {
     toast('删除失败: ' + e.message, 'err');
+  }
+}
+// ══════════════════════════════════════════════════════════
+//  印象溯源（observe-provenance）
+// ══════════════════════════════════════════════════════════
+async function loadProvenance() {
+  const el = document.getElementById('prov-content');
+  if (!el) return;
+
+  // populate uid dropdown once
+  const uidSel = document.getElementById('prov-uid');
+  if (uidSel && !uidSel.options.length) {
+    try {
+      const d = await api('GET', '/users');
+      (d.users || []).forEach(u => {
+        const o = document.createElement('option');
+        o.value = o.textContent = u;
+        uidSel.appendChild(o);
+      });
+    } catch(e) { /* non-fatal */ }
+  }
+
+  const uid = uidSel ? uidSel.value : '';
+  if (!uid) { el.innerHTML = '<div class="empty">请先选择 uid</div>'; return; }
+
+  const artifact = (document.getElementById('prov-artifact')||{}).value || '';
+  const field    = (document.getElementById('prov-field')||{}).value || '';
+  const scope    = (document.getElementById('prov-scope')||{}).checked ? 'yexuan_self' : '';
+
+  el.innerHTML = '<div style="color:var(--muted)">加载中…</div>';
+  try {
+    const params = new URLSearchParams({ limit: 100 });
+    if (artifact) params.set('artifact', artifact);
+    if (field)    params.set('field', field);
+    if (scope)    params.set('scope', scope);
+    const d = await api('GET', `/provenance/${encodeURIComponent(uid)}?${params}`);
+    const records = d.records || [];
+    if (!records.length) {
+      el.innerHTML = '<div class="empty">该 uid 暂无溯源记录（日志从接入当日起前向积累）</div>';
+      return;
+    }
+    let html = '';
+    records.forEach((r, i) => {
+      const ts = r.ts ? new Date(r.ts * 1000).toLocaleString('zh-CN') : '—';
+      const artBadge = r.artifact ? `<span style="background:var(--bg-secondary);padding:1px 6px;border-radius:8px;font-size:11px">${escapeHtml(r.artifact)}</span>` : '';
+      const fldBadge = r.field ? `<span style="background:var(--bg-secondary);padding:1px 6px;border-radius:8px;font-size:11px">${escapeHtml(r.field)}</span>` : '';
+      const trigger  = r.trigger_signal ? `<span style="font-size:11px;color:var(--muted)">${escapeHtml(r.trigger_signal)}</span>` : '';
+      const before = r.before_gist ? escapeHtml(r.before_gist) : '<em style="color:var(--muted)">（无）</em>';
+      const after  = r.after_gist  ? escapeHtml(r.after_gist)  : '<em style="color:var(--muted)">（无）</em>';
+      const originId = `prov-origin-${i}`;
+      const originJson = JSON.stringify(r.origin || {}, null, 2);
+      html += `<div class="card" style="margin-bottom:10px;padding:12px 14px">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <span style="font-size:12px;color:var(--muted)">${ts}</span>
+          ${artBadge}${fldBadge}${trigger}
+        </div>
+        <div style="font-size:12px;margin-bottom:6px">
+          <span style="color:#9ca3af">改动前：</span><span style="color:#fca5a5">${before}</span>
+          <span style="margin:0 8px;color:var(--muted)">→</span>
+          <span style="color:#86efac">${after}</span>
+        </div>
+        <div style="font-size:12px">
+          <span style="cursor:pointer;color:var(--muted)" onclick="togglePromptLayer('${originId}')">▶ 来源聊天（origin）</span>
+          <div id="${originId}" style="display:none;margin-top:6px">
+            <pre style="font-size:11px;white-space:pre-wrap;word-break:break-all;background:var(--bg-secondary);padding:8px;border-radius:4px;max-height:160px;overflow:auto">${escapeHtml(originJson)}</pre>
+          </div>
+        </div>
+      </div>`;
+    });
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div style="color:#ef4444">加载失败：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  向量库（observe-vector）
+// ══════════════════════════════════════════════════════════
+async function _vecEnsureUids() {
+  const sel = document.getElementById('vec-uid');
+  if (!sel || sel.options.length) return;
+  try {
+    const d = await api('GET', '/users');
+    (d.users || []).forEach(u => {
+      const o = document.createElement('option');
+      o.value = o.textContent = u;
+      sel.appendChild(o);
+    });
+  } catch(e) { /* non-fatal */ }
+}
+
+async function loadVector() {
+  await _vecEnsureUids();
+  const uid = (document.getElementById('vec-uid')||{}).value || '';
+  if (!uid) return;
+  const source  = (document.getElementById('vec-source')||{}).value || '';
+  const statsEl = document.getElementById('vec-stats');
+  const contEl  = document.getElementById('vec-content');
+  if (statsEl) statsEl.innerHTML = '<span style="color:var(--muted)">加载中…</span>';
+  if (contEl)  contEl.innerHTML  = '';
+  try {
+    const params = new URLSearchParams({ limit: 100 });
+    if (source) params.set('source', source);
+    const d = await api('GET', `/observe/vector/${encodeURIComponent(uid)}?${params}`);
+    const st = d.stats || {};
+    const by = st.by_source || {};
+
+    // update source dropdown
+    const srcSel = document.getElementById('vec-source');
+    if (srcSel) {
+      const cur = srcSel.value;
+      srcSel.innerHTML = '<option value="">全部 source</option>';
+      Object.keys(by).forEach(k => {
+        const o = document.createElement('option');
+        o.value = o.textContent = k;
+        srcSel.appendChild(o);
+      });
+      if (cur) srcSel.value = cur;
+    }
+
+    // stats bar
+    const badges = Object.entries(by).map(([k,v]) =>
+      `<span style="background:var(--bg-secondary);padding:2px 8px;border-radius:8px;font-size:11px">${escapeHtml(k)} ${v}</span>`
+    ).join(' ');
+    if (statsEl) statsEl.innerHTML =
+      `<span style="font-size:13px">总条数 <strong>${st.total||0}</strong> · 维度 <strong>${st.dim||'—'}</strong></span> ${badges}`;
+
+    // entries list
+    const entries = d.entries || [];
+    if (!entries.length) {
+      if (contEl) contEl.innerHTML = '<div class="empty">暂无条目</div>';
+      return;
+    }
+    let html = '';
+    entries.forEach((e, i) => {
+      const ts = e.ts ? new Date(e.ts * 1000).toLocaleString('zh-CN') : '—';
+      const prevId = `vec-prev-${i}`;
+      const preview = e.text_preview || '';
+      html += `<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:12px">
+        <span style="background:var(--bg-secondary);padding:1px 6px;border-radius:6px;margin-right:6px">${escapeHtml(e.source||'—')}</span>
+        <code style="font-size:11px">${escapeHtml((e.source_id||'').slice(0,60))}</code>
+        <span style="color:var(--muted);margin-left:8px">${ts}</span>
+        ${preview.length > 80
+          ? `<div style="cursor:pointer;color:var(--muted);margin-top:4px" onclick="togglePromptLayer('${prevId}')">▶ 预览</div>
+             <div id="${prevId}" style="display:none"><pre style="font-size:11px;white-space:pre-wrap;word-break:break-all;background:var(--bg-secondary);padding:6px;border-radius:4px;margin-top:4px;max-height:120px;overflow:auto">${escapeHtml(preview)}</pre></div>`
+          : preview ? `<div style="color:var(--muted);margin-top:2px">${escapeHtml(preview)}</div>` : ''
+        }
+      </div>`;
+    });
+    if (contEl) contEl.innerHTML = html;
+  } catch(e) {
+    if (statsEl) statsEl.innerHTML = '';
+    if (contEl)  contEl.innerHTML = `<div style="color:#ef4444">加载失败：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function searchVector() {
+  await _vecEnsureUids();
+  const uid = (document.getElementById('vec-uid')||{}).value || '';
+  const q   = (document.getElementById('vec-q')||{}).value || '';
+  const src = (document.getElementById('vec-source')||{}).value || '';
+  const el  = document.getElementById('vec-content');
+  if (!el) return;
+  if (!uid || !q.trim()) { el.innerHTML = '<div class="empty">请选择 uid 并输入检索词</div>'; return; }
+  el.innerHTML = '<div style="color:var(--muted)">检索中…</div>';
+  try {
+    const params = new URLSearchParams({ q, k: 8 });
+    if (src) params.set('source', src);
+    const d = await api('GET', `/observe/vector/${encodeURIComponent(uid)}/search?${params}`);
+    if (d.error === 'embed_failed') {
+      el.innerHTML = '<div style="color:#ef4444">嵌入模型未配置或调用失败</div>'; return;
+    }
+    const results = d.results || [];
+    if (!results.length) { el.innerHTML = '<div class="empty">无匹配结果</div>'; return; }
+    let html = '';
+    results.forEach((r, i) => {
+      const sim = ((r.similarity||0)*100).toFixed(1);
+      html += `<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:12px">
+        <span style="background:#1a3a1a;color:#86efac;padding:1px 8px;border-radius:8px;font-size:11px">${sim}%</span>
+        <code style="margin-left:8px;font-size:11px">${escapeHtml((r.source_id||'').slice(0,60))}</code>
+        ${r.preview ? `<div style="color:var(--muted);margin-top:4px;font-size:11px">${escapeHtml((r.preview||'').slice(0,200))}${(r.preview||'').length>200?'…':''}</div>` : ''}
+      </div>`;
+    });
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div style="color:#ef4444">检索失败：${escapeHtml(e.message)}</div>`;
   }
 }
 </script>

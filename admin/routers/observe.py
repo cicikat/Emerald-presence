@@ -1,5 +1,5 @@
 """
-只读观测接口（运行时内部态 + Prompt 层检视器 + 探针 + 梦境 Prompt）。
+只读观测接口（运行时内部态 + Prompt 层检视器 + 探针 + 梦境 Prompt + 向量库）。
 
 GET /observe/runtime              — 运行时内部态快照（队列/锁/通道/感知暂存/DLQ/情绪）
 GET /observe/prompt-layers/{uid}  — 最近 N 轮 build_prompt 层级明细（含召回溯源 + LLM 输出）
@@ -9,6 +9,9 @@ GET /observe/probe                — 有探针快照的 uid 列表
 GET /observe/dream-prompt/{uid}   — 最近 N 轮梦境 Prompt 层级快照（D0-D10 + LLM 输出）
 GET /observe/dream-prompt         — 有梦境快照的 uid 列表
 GET /observe/trigger-catalog      — 触发器目录：全部 proposer + 最近真实捕获快照（seed prompt / search_query）
+GET /observe/vector               — 列出有向量库的 uid
+GET /observe/vector/{uid}         — 向量库统计 + 条目浏览（支持 source 过滤 + 分页）
+GET /observe/vector/{uid}/search  — 向量库语义检索（q= 参数，k 结果数）
 """
 
 import logging
@@ -320,3 +323,52 @@ async def get_trigger_catalog(auth=Depends(verify_token)):
         })
 
     return {"proposers": catalog}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /observe/vector  —  向量库只读观测
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/observe/vector", summary="列出有向量库的 uid", tags=["观测"])
+async def list_vector_uids(auth=Depends(verify_token)):
+    from admin.routers.users import _get_known_users
+    return {"uids": _get_known_users()}
+
+
+@router.get("/observe/vector/{uid}", summary="向量库统计 + 条目浏览", tags=["观测"])
+async def get_vector_overview(uid: str, source: str = "", limit: int = 100,
+                              char_id: str = "", auth=Depends(verify_token)):
+    from core.memory import vector_store as vs
+    from admin.routers.provenance import _resolve_char_id
+    cid = _resolve_char_id(char_id)
+    lim = min(max(limit, 1), 500)
+    return {
+        "uid": uid, "char_id": cid,
+        "stats": vs.stats(uid, cid),
+        "entries": vs.list_entries(uid, cid, source=source or None, limit=lim),
+    }
+
+
+@router.get("/observe/vector/{uid}/search", summary="向量库语义检索", tags=["观测"])
+async def search_vector(uid: str, q: str, k: int = 8, source: str = "",
+                        char_id: str = "", auth=Depends(verify_token)):
+    from core.memory import vector_store as vs
+    from core.memory import embedding
+    from admin.routers.provenance import _resolve_char_id
+    cid = _resolve_char_id(char_id)
+    if not q.strip():
+        return {"uid": uid, "char_id": cid, "query": q, "results": []}
+    try:
+        vecs = await embedding.embed([q])
+    except Exception:
+        return {"uid": uid, "char_id": cid, "query": q, "results": [], "error": "embed_failed"}
+    if not vecs:
+        return {"uid": uid, "char_id": cid, "query": q, "results": [], "error": "embed_failed"}
+    hits = vs.query_with_preview(uid, cid, vecs[0], min(max(k, 1), 50),
+                                 sources=[source] if source else None)
+    return {
+        "uid": uid, "char_id": cid, "query": q,
+        "results": [{"source_id": sid, "preview": prev,
+                     "distance": dist, "similarity": vs.dist_to_sim(dist)}
+                    for sid, prev, dist in hits],
+    }

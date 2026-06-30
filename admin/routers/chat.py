@@ -222,7 +222,7 @@ async def _probe_and_execute_tools(message: str, user_id: str, *, char_id: str =
 
     try:
         logger.info(f"[owner_chat] 工具探针，channel消息={message[:20]!r}")
-        probe_raw = await _llm.chat(probe_messages, tools=tools_schema)
+        probe_raw = await _llm.chat(probe_messages, tools=tools_schema, call_category="probe")
         logger.info(f"[owner_chat] 探针回复={probe_raw[:60] if probe_raw else 'empty'!r}")
         tool_calls = _llm.parse_tool_call_response(probe_raw)
         _probe_snap = {

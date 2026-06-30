@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from admin.auth import verify_token
 from core.asset_registry import get_registry, reload_registry, _AVATARS_DIR, _AVATAR_EXTS
+from core.dream.world_loader import discover_worlds, _WORLDS_BASE
 from core.sandbox import get_paths
 from core.safe_write import safe_write_bytes
 
@@ -59,6 +60,20 @@ def _write_active(data: dict):
     p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _load_world_cards() -> list[dict]:
+    result = []
+    for wid in discover_worlds():
+        label = wid
+        meta_path = _WORLDS_BASE / wid / "meta.json"
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            label = meta.get("label", wid)
+        except Exception:
+            pass
+        result.append({"id": wid, "label": label})
+    return result
+
+
 def _reload_lore_engine():
     try:
         from core.pipeline_registry import get as _get_pipeline
@@ -93,6 +108,7 @@ async def get_prompt_assets(auth=Depends(verify_token)):
         "lorebooks":     [e.as_ui_dict() for e in reg.list_ui("reality_lorebook")],
         "jailbreaks":    [e.as_ui_dict() for e in reg.list_ui("reality_jailbreak")],
         "dream_presets": [e.as_ui_dict() for e in reg.list_ui("dream_preset")],
+        "world_cards":   _load_world_cards(),
         "active":        _read_active(),
     }
 

@@ -76,6 +76,15 @@ async def put_sched_config(body: dict, auth=Depends(verify_token)):
             raise HTTPException(status_code=422, detail="presence_nag_minutes 必须是正整数")
         cfg["presence_nag_minutes"] = minutes
 
+    if "global_proactive_min_gap_hours" in body:
+        try:
+            hours = float(body["global_proactive_min_gap_hours"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="global_proactive_min_gap_hours 必须是数字")
+        if not (0 < hours <= 24):
+            raise HTTPException(status_code=422, detail="global_proactive_min_gap_hours 需在 (0, 24] 小时内")
+        cfg["global_proactive_min_gap_seconds"] = int(round(hours * 3600))
+
     if "signatures" in body:
         sigs = body["signatures"]
         if not isinstance(sigs, list):
