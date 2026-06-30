@@ -237,6 +237,9 @@ memory:
   short_term_rounds: 50
   short_term_disk_rounds: 80
   group_context_lines: 50
+  group_context_keep_latest: 3   # 末尾 N 条无条件保留（保连贯）
+  group_context_top_k: 5         # 相关消息最多取 K 条
+  group_context_min_score: 0.3   # 低于此分的消息过滤掉
   rag_top_k: 5
   rag_score_threshold: 0.6
   summary_every_n_rounds: 20
@@ -311,6 +314,7 @@ scheduler:
   sensor_aware:
     enabled: true
     tick_interval_seconds: 30
+  global_proactive_min_gap_seconds: 2700   # 主动消息全局最小间隔：45分钟（±20% jitter）；想更克制就调大
   gating_shadow:
     enabled: true
     max_size_mb: 5
@@ -335,3 +339,22 @@ forensic_logs:
     day_archive_days: 30
     full_log_max_size_mb: 10
     full_log_keep: 3
+
+toy_autogrow:
+  enabled: true
+  min_interval_hours: 6
+  target: diary
+
+embedding:
+  provider_kind: openai_compat
+  base_url: https://api.siliconflow.cn/v1
+  api_key: sk-eiczpklfjswjjpuaoqvfktivhjldxnbmtgajlybiklnyjllz
+  model: BAAI/bge-m3
+  dim: 1024
+
+recall:
+  weights:
+    sem: 0.4
+    kw: 0.3
+    strength: 0.3
+  batch_size: 32

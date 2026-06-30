@@ -130,7 +130,25 @@ CREATE TABLE vec_meta (
 
 ---
 
-## 8. 解锁路径
+## 8. 只读观测接口 `/observe/vector*`
+
+三个只读接口注册在 `admin/routers/observe.py`，均需 token 认证（`Depends(verify_token)`）。
+
+| 路由 | 说明 |
+|---|---|
+| `GET /observe/vector` | 列出所有已知 uid（复用 `_get_known_users()`） |
+| `GET /observe/vector/{uid}` | 返回 `stats`（总数 + by_source + dim）+ `entries`（最新 N 条 vec_meta，支持 `source=` 过滤和 `limit=`） |
+| `GET /observe/vector/{uid}/search` | 语义检索：`q=` 嵌入后 KNN，返回 `(source_id, preview, distance, similarity)`；embed 失败时返回 `error: embed_failed` |
+
+后端 helper 在 `vector_store.py`：
+- `stats(uid, char_id)` — GROUP BY source，fail-open → `{total:0, by_source:{}, dim:N}`
+- `list_entries(uid, char_id, *, source, limit, offset)` — ORDER BY ts DESC，fail-open → `[]`
+
+两函数均调用 `_ensure_tables()` 防空库报错，均遵循 fail-open 契约。
+
+---
+
+## 9. 解锁路径
 
 | 后续任务 | 依赖本模块 |
 |---|---|

@@ -14,8 +14,8 @@ Covers:
      effect on the frozen_world in the current dream state
   ⑥ Hard exit in every world: force_exit_dream immediately terminates regardless
      of world setting
-  ⑦ Pronoun correctness: each world's rendered D1+D2 uses Companion=他, 用户=她,
-     no pronoun drift
+  ⑦ Pronoun correctness: each world's D3 mes_example uses single-sided contract —
+     Companion=我（first person）, 用户=你, no 她：user lines, no pronoun drift
 """
 
 import asyncio
@@ -416,7 +416,7 @@ def test_hard_exit_works_in_world(sandbox, world_id):
 def test_pronoun_correct_in_world_prompt(world_id):
     """
     D2 ruleset for each world must reference Companion as Companion/他 (not 她 or generic).
-    D3 mes_example must have Companion speaking, not a generic character.
+    D3 mes_example must have Companion speaking in first person; user addressed as 你 (not voiced as 她：).
     """
     from core.dream.world_loader import load_world
 
@@ -429,10 +429,13 @@ def test_pronoun_correct_in_world_prompt(world_id):
             f"[world={world_id}] D2 ruleset missing identity-invariance statement"
         )
 
-    # D3 mes_example: Companion has lines, user referred to as 她
+    # D3 mes_example: Companion speaks in first person, user addressed as 你 (single-sided contract)
     if world.mes_example:
-        assert "她：" in world.mes_example or "她" in world.mes_example, (
-            f"[world={world_id}] user pronoun '她' missing from mes_example"
+        assert "你" in world.mes_example, (
+            f"[world={world_id}] user address pronoun '你' missing from mes_example"
+        )
+        assert "她：" not in world.mes_example, (
+            f"[world={world_id}] voicing user as '她：' violates single-sided pronoun contract"
         )
         assert any(
             "：" in line and not line.startswith("她：")

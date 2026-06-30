@@ -82,6 +82,35 @@ conversation_lock(uid)
 
 ---
 
+## 全局主动间隔（B1 / B3）
+
+`core/scheduler/loop.py` 维护 `_GLOBAL_PROACTIVE_KEY = "__any_proactive__"` 键，在
+`_last_trigger` 中记录每一条主动消息的发出时间。
+
+`_mark_global_proactive()`：由 `execution.execute_prompt()` 在真实发送成功后调用，
+同步写入 `scheduler_cooldowns.json`。
+
+`_global_proactive_gap_ready()`：在 `gating._decide()` 的 cooldown 过滤之后被调用；
+若距上次主动发送未超过 `global_proactive_min_gap_seconds`（默认 45 分钟，±20% jitter），
+则非 emergency 触发器全部被 `global_gap_filtered`，一条都不发。
+
+**Emergency 豁免**：`_policy_is_emergency()`（即 `priority=="emergency"` 的触发器，
+如 `hr_critical`、生日系列等）不受全局间隔限制。
+
+**B3 承接感**：每次真实发送后，`_append_proactive_recent()` 将本次 gist（前 40 字）
+追加到 `data/runtime/proactive_recent.json`（最近 3 条）。下一次主动 prompt 生成时，
+`_proactive_continuity_hint()` 读取最近一条并在 prompt 尾部注入软提示，
+引导模型不重复上条话题，像真人一样有连贯的心思。该提示 fail-open：读取失败不注入。
+
+**配置**（`scheduler:` 块）：
+
+```yaml
+scheduler:
+  global_proactive_min_gap_seconds: 2700   # 45 分钟；想更克制就调大
+```
+
+---
+
 ## Overflow 主动互动
 
 `core/scheduler/overflow_bucket.py` 每个 tick 只读计算五类 `0~1` 信号：

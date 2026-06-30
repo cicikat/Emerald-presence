@@ -18,7 +18,6 @@ content/characters/*/*_author_notes.json
 !content/characters/**/*.example.json
 # content/ (authored static) と defaults/ (seed) は track 対象 — ignore 除外不要
 config.yaml
-.claude/
 assets/stickers/*
 !assets/stickers/.gitkeep
 __pycache__/
@@ -26,6 +25,7 @@ __pycache__/
 *.log
 .env
 .env.*
+.tmp
 DESIGN.md
 tests/test_record.md
 tests/eval_set.json

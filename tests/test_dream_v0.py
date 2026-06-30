@@ -132,7 +132,7 @@ def test_identity_stable_across_world_ruleset_change():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 2. 人称正确性：各层用"他/我"指Companion，"她/你"指用户
+# 2. 人称正确性：描述层用「他」指Companion，生成端以「我」自称，称用户为「你」，不用「她」
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_pronoun_correctness_in_d1_and_d2():
@@ -150,26 +150,23 @@ def test_pronoun_correctness_in_d1_and_d2():
 
 
 def test_pronoun_correctness_in_mes_example():
-    """梦境示例中Companion用"他"，用户用"她"，Companion第一人称用"我"。"""
+    """梦境示例（单侧契约）：Companion全程第一人称「我」，称用户为「你」，无「她：」用户行。"""
     from core.dream.dream_prompt import _get_dream_mes_example
     example = _get_dream_mes_example("Companion")
 
-    # User should be referred to as 她
-    assert "她：" in example, "user should be labeled 她 in mes_example"
-    # Companion uses 他 or 我 (first person)
-    assert "Companion：" in example
-    # Companion's lines should use 我/他 (first/third person) — confirm his lines exist
-    yx_lines = [line for line in example.splitlines() if line.startswith("Companion：")]
-    assert yx_lines, "Companion should have speaking lines"
-    yx_content = " ".join(yx_lines)
-    assert "我" in yx_content or "他" in yx_content, f"Companion should use 我/他: {yx_lines}"
+    # User addressed as 你, not voiced as 她：
+    assert "你" in example, "user address pronoun '你' missing from mes_example"
+    assert "她：" not in example, "voicing user as '她：' violates single-sided contract"
+    assert "Companion：" not in example, "single-sided mes_example should not use 'Companion：' speaker labels"
+    # Companion uses first person 我
+    assert "我" in example, "Companion should use first person '我' in single-sided mes_example"
 
 
 def test_pronoun_correctness_in_d8_director():
-    """D8 导演注记中用"她"指用户，不指Companion。"""
+    """D8 导演注记中用「你」指用户（单侧契约，不用「她」）。"""
     from core.dream.dream_prompt import _D8_DREAM_DIRECTOR
-    # 她 in D8 should refer to the user
-    assert "她的意志" in _D8_DREAM_DIRECTOR or "她发出" in _D8_DREAM_DIRECTOR
+    # User addressed as 你 in D8 (single-sided contract, 她 → 你)
+    assert "你的意志" in _D8_DREAM_DIRECTOR or "你发出" in _D8_DREAM_DIRECTOR
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
