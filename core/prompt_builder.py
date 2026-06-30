@@ -266,6 +266,20 @@ def _load_jailbreak(layer: int | None = None) -> str:
         log_error("prompt_builder._load_jailbreak", e)
         return ""
 
+def _recent_openings(history: list[dict], n: int = 3, k: int = 8) -> list[str]:
+    """Return the first k chars of the last n assistant turns (fail-open)."""
+    outs: list[str] = []
+    for turn in reversed(history):
+        if turn.get("role") != "assistant":
+            continue
+        head = str(turn.get("content") or "").lstrip().replace("\n", "")[:k]
+        if head:
+            outs.append(head)
+        if len(outs) >= n:
+            break
+    return outs
+
+
 def build(
     character: Character,
     user_id: str,
@@ -631,23 +645,51 @@ def build(
 
     # ─────────────────────────────────────────────────────────────────────────
     # 层 4：群聊上下文（仅群聊时注入，私聊时 group_context 为空列表）
-    # 格式："群友小明：xxx\n群友小红：xxx\n..."
+    # 格式："[时间] 发言人：内容"，已按相关性过滤 + 末尾 N 条保底 + 时间升序
     # ─────────────────────────────────────────────────────────────────────────
     if group_context:
+        from core.memory.group_context import relevance_score as _gc_relevance
+        from core.config_loader import get_config as _gc_get_config
+        _cfg_mem = _gc_get_config().get("memory", {})
+        _GC_KEEP_LATEST: int = int(_cfg_mem.get("group_context_keep_latest", 3))
+        _GC_TOP_K: int = int(_cfg_mem.get("group_context_top_k", 5))
+        _GC_MIN_SCORE: float = float(_cfg_mem.get("group_context_min_score", 0.3))
+
+        _char_name: str = getattr(character, "name", "") or ""
+        _gc_all = group_context  # already sorted ts-asc by get_recent()
+        _gc_tail = _gc_all[-_GC_KEEP_LATEST:] if len(_gc_all) > _GC_KEEP_LATEST else _gc_all
+        _gc_head = _gc_all[:-_GC_KEEP_LATEST] if len(_gc_all) > _GC_KEEP_LATEST else []
+
+        _gc_scored = sorted(
+            _gc_head,
+            key=lambda m: _gc_relevance(m, query_text=user_message, tags=_tags, char_name=_char_name),
+            reverse=True,
+        )
+        _gc_relevant = [
+            m for m in _gc_scored
+            if _gc_relevance(m, query_text=user_message, tags=_tags, char_name=_char_name) > _GC_MIN_SCORE
+        ][:_GC_TOP_K]
+
+        # 合并后按 ts 升序，保持时间顺序
+        _gc_merged = {id(m): m for m in (_gc_relevant + list(_gc_tail))}
+        _gc_chosen = sorted(_gc_merged.values(), key=lambda m: float(m.get("ts") or 0))
+
         ctx_lines = []
-        for msg in group_context:
+        for msg in _gc_chosen:
             sender = msg.get("sender_name", "群友")
+            ts_label = msg.get("timestamp", "")
             content = msg.get("content", "")
-            time_str = msg.get("timestamp", "")
-            if time_str:
-                ctx_lines.append(f"[{time_str}] 群友{sender}：{content}")
-            else:
-                ctx_lines.append(f"群友{sender}：{content}")
+            ctx_lines.append(f"[{ts_label}] {sender}：{content}" if ts_label else f"{sender}：{content}")
 
         _layers.append("4_group_context")
         messages.append({
             "role": "system",
-            "content": "<群聊上下文>\n【群聊上下文（最近群内动态）】\n" + "\n".join(ctx_lines) + "\n</群聊上下文>",
+            "content": (
+                "<群聊上下文>\n"
+                "【群聊上下文（以下是群里与当前对话较相关的最近消息，已按相关性挑选、按时间排列，"
+                "仅供理解语境，不是对你的直接提问；只在被 @ 或明显需要回应时才接话）】\n"
+                + "\n".join(ctx_lines) + "\n</群聊上下文>"
+            ),
             "_layer": "4_group_context",
         })
 
@@ -664,10 +706,10 @@ def build(
     # ─────────────────────────────────────────────────────────────────────────
     # 层 5：关于这个用户（用户画像）
     # 稳定字段（name/location/pets/occupation）+ stable/misc 标签事实：100% 注入
-    # 偏好/习惯类事实（pref.*/habit/health）：recency 门控（90天）或 tag 命中时召回
+    # 易变事实（pref.*/habit/health/status.project）：recency 门控或 tag 命中时召回
     # ─────────────────────────────────────────────────────────────────────────
     import time as _time_mod
-    from core.memory.user_profile import _normalize_fact, _is_recency_tag, _RECENCY_WINDOW_SECONDS
+    from core.memory.user_profile import _normalize_fact, _is_recency_tag, _recency_window_for
 
     profile_parts = []
     if profile.get("name"):
@@ -705,7 +747,7 @@ def build(
     _recalled_tagged: list[str] = []   # tag 命中召回
     _recalled_recency: list[str] = []  # 仅 recency 窗口召回
     for ts, text, fact_tag in sorted(_recency_facts, key=lambda x: -x[0]):
-        in_window = (_current_ts - ts) < _RECENCY_WINDOW_SECONDS
+        in_window = (_current_ts - ts) < _recency_window_for(fact_tag)
         # tag 命中：pref.music → 查 "music" 是否在当前 tags；habit → 查 "habit"
         tag_key = fact_tag.removeprefix("pref.") if fact_tag.startswith("pref.") else fact_tag
         tag_hit = any(tag_key in t or t in tag_key for t in _current_tags)
@@ -1039,6 +1081,26 @@ def build(
         "content": "</对话记录>",
         "_layer": "9_history",
     })
+
+    # 层 9_anti_repeat：跨轮开头去同质（fail-open，只读软约束，drop_priority=15 低优先可裁）
+    # 取最近 2–3 条 assistant 回复的起手，告知模型避免复读相同开头，对症「连着好几句『现在，』」
+    try:
+        _ar_ops = _recent_openings(history)
+        if _ar_ops:
+            _layers.append("9_anti_repeat")
+            messages.append({
+                "role": "system",
+                "content": (
+                    "<避免复读>\n你最近几句的开头分别是："
+                    + "、".join(f"「{o}…」" for o in _ar_ops)
+                    + "。这次换一个完全不同的起手，别再用「现在」「此刻」「我」之类的重复开头，"
+                    "也别用上面任何一句的句式。自然地说，像真人不会连用同一种开场。\n</避免复读>"
+                ),
+                "_layer": "9_anti_repeat",
+                "_drop_priority": 15,
+            })
+    except Exception:
+        pass
 
     # 层 9.5：最相关情景记忆（1条，挪到 history 之后获得 recency 红利）
     # 从已召回的 episodic_result 原始列表里取第一条，不重复召回

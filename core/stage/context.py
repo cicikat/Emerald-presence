@@ -6,12 +6,18 @@ from core.stage.models import Stage, TranscriptEntry
 
 
 def render_presence(stage: Stage, *, viewer_id: str) -> str:
-    others = [get_char_name(char_id) for char_id in stage.roster if char_id != viewer_id]
+    me = get_char_name(viewer_id)
+    others = [get_char_name(c) for c in stage.roster if c != viewer_id]
     joined = "、".join(others) if others else "没有其他角色"
     return (
         "【群聊在场感】\n"
-        f"现在你进入了群聊，在场的其他角色有：{joined}。"
-        "你说的话不只 owner 看得到，其他在场角色也看得到。"
+        f"现在你进入了群聊，你是「{me}」，在场的还有：{joined}。"
+        "你说的话其他在场角色也看得到。\n"
+        f"保持「{me}」自己的性格、说话方式和立场——"
+        "看到别人怎么说，不要趋同、不要附和复述别人刚说过的话；"
+        "有不同就表达不同，有自己的角度就说出来。"
+        "你可以直接回应、反驳、补充或调侃其他角色（点名也行），"
+        "像真实的多人对话那样彼此接话，而不是各说各的。"
     )
 
 
@@ -21,8 +27,10 @@ def render_transcript(
     *,
     viewer_id: str,
     limit: int = 40,
+    current_turn_id: str | None = None,
 ) -> str:
     lines: list[str] = []
+    last_other: tuple[str, str] | None = None
     for entry in transcript[-limit:]:
         if entry.speaker_id == "owner":
             speaker = "owner"
@@ -30,8 +38,23 @@ def render_transcript(
             speaker = "你"
         else:
             speaker = get_char_name(entry.speaker_id)
-        lines.append(f"{speaker}：{entry.content}")
-    return "\n".join(lines)
+            last_other = (speaker, entry.content)
+        fresh = (
+            current_turn_id is not None
+            and entry.turn_id == current_turn_id
+            and entry.speaker_id not in ("owner", viewer_id)
+        )
+        prefix = "（刚说）" if fresh else ""
+        lines.append(f"{prefix}{speaker}：{entry.content}")
+    text = "\n".join(lines)
+    if last_other is not None:
+        name, content = last_other
+        snippet = content[:30]
+        text += (
+            f"\n\n（注意：{name} 刚说了「{snippet}…」。"
+            "别复述或简单附和这句，从你自己的立场出发回应或另起话头。）"
+        )
+    return text
 
 
 def render_projection_segment(stage: Stage, transcript: list[TranscriptEntry]) -> str:

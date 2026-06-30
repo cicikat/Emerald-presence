@@ -12,7 +12,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _SWITCH_INTERVAL_MINUTES = 30
-_SWITCH_INTERVAL_ROUNDS = 6  # 同一 note 连续使用超过此回合数也触发切换
+_SWITCH_INTERVAL_ROUNDS = 2   # 同一 note 最多连用此回合数（密集对话防注入层静止）
+_JITTER_SWITCH_PROB = 0.35    # 未到硬阈值时每轮提前切换概率，使切换点不可预测
 
 
 _DEFAULT_POOL_PATH = Path(__file__).parent.parent / "characters" / "default_author_notes.json"
@@ -53,8 +54,13 @@ def _should_switch(state: dict) -> bool:
         elapsed = (datetime.now() - last).total_seconds() / 60
         if elapsed >= _SWITCH_INTERVAL_MINUTES:
             return True
-        # 同一 note 连续使用回合数超过阈值时也切换（密集对话防风格静止）
-        return state.get("current_use_count", 0) >= _SWITCH_INTERVAL_ROUNDS
+        rounds = state.get("current_use_count", 0)
+        if rounds >= _SWITCH_INTERVAL_ROUNDS:
+            return True
+        # 未到硬阈值时每轮以小概率提前切换，使逐轮注入层不可预测
+        if rounds >= 1 and random.random() < _JITTER_SWITCH_PROB:
+            return True
+        return False
     except Exception:
         return True
 

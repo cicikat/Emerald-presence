@@ -31,12 +31,38 @@ YANDERE_KEYWORDS = (
 # priority 字段量纲：stranger=1，已认识的用户通常 >=2
 YANDERE_RELATION_THRESHOLD = 2
 
+# Phase A v8: avatar directive throttle — same emotion within cooldown window is skipped
+_AVATAR_DIRECTIVE_LAST: dict[str, tuple[str, float]] = {}  # char_id → (emotion, sent_at)
+_AVATAR_DIRECTIVE_COOLDOWN_SEC = 5.0
+
 
 def _check_yandere_trigger(user_message: str, reply: str, relation_priority: int) -> bool:
     if relation_priority < YANDERE_RELATION_THRESHOLD:
         return False
     text = user_message + " " + reply
     return any(kw in text for kw in YANDERE_KEYWORDS)
+
+
+async def _maybe_push_avatar_directive(mood_state: dict, char_id: str) -> None:
+    """Phase A v8: push avatar_directive to desktop client when mood changes."""
+    import time as _t
+    try:
+        from core.tool_dispatcher import _push_desktop_action
+        emotion = mood_state.get("current", "neutral")
+        intensity = float(mood_state.get("intensity", 0.0))
+        now = _t.time()
+        last_emotion, last_sent = _AVATAR_DIRECTIVE_LAST.get(char_id, (None, 0.0))
+        if last_emotion == emotion and (now - last_sent) < _AVATAR_DIRECTIVE_COOLDOWN_SEC:
+            return
+        _AVATAR_DIRECTIVE_LAST[char_id] = (emotion, now)
+        await _push_desktop_action({
+            "type": "avatar_directive",
+            "expression": emotion,
+            "intensity": round(min(1.0, max(0.0, intensity)), 3),
+            "ttl_ms": 6000,
+        })
+    except Exception as e:
+        logger.debug("[pipeline] avatar_directive push skipped: %s", e)
 
 
 def _intent_action_key(user_id: str, action: str, params: dict) -> str:
@@ -665,22 +691,27 @@ class Pipeline:
                 _emotion = "neutral"
 
             # ── mood_state 更新（全局锁，嵌套在 uid_lock 内）────────────────
+            _mood_state_after: dict | None = None
             if envelope.can_affect_mood:
                 async with _locks.global_lock("mood_state"):
                     try:
                         from core.memory.mood_state import update as _update_mood
-                        _update_mood(_emotion, source="detect", char_id=char_id)
+                        _mood_state_after = _update_mood(_emotion, source="detect", char_id=char_id)
 
                         try:
                             from core import user_relation as _user_relation
                             _relation = _user_relation.get_relation(user_id)
                             if _check_yandere_trigger(content, reply, _relation.get("priority", 1)):
                                 from core.memory.mood_state import update as _update_mood_y
-                                _update_mood_y("yandere", source="trigger", char_id=char_id)
+                                _mood_state_after = _update_mood_y("yandere", source="trigger", char_id=char_id)
                         except Exception as e:
                             log_error("post_process.yandere", e)
                     except Exception as e:
                         log_error("post_process.mood_state", e)
+
+            # Phase A v8: push avatar directive (fail-open, outside locks)
+            if _mood_state_after is not None:
+                asyncio.create_task(_maybe_push_avatar_directive(_mood_state_after, char_id))
 
             # ── capture_turn：写 short_term + event_log（含 turn_id 血缘）───
             try:

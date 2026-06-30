@@ -6,6 +6,8 @@
 
 import json
 import logging
+import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +16,37 @@ from core.error_handler import log_error
 from core.sandbox import get_paths
 
 logger = logging.getLogger(__name__)
+
+
+def _keyword_overlap(text: str, query: str) -> float:
+    """2-gram 字符重叠率（中文友好，无需分词库）。"""
+    if not text or not query:
+        return 0.0
+    clean = re.compile(r"[^\w一-鿿]")
+    t = clean.sub("", text)
+    q = clean.sub("", query)
+    if not t or not q:
+        return 0.0
+    t_grams = {t[i : i + 2] for i in range(len(t) - 1)} | set(t)
+    q_grams = {q[i : i + 2] for i in range(len(q) - 1)} | set(q)
+    if not q_grams:
+        return 0.0
+    return len(t_grams & q_grams) / len(q_grams)
+
+
+def relevance_score(msg: dict, *, query_text: str, tags: set, char_name: str) -> float:
+    """为单条群消息计算与当前对话的相关性分（fail-safe：异常返回 0）。"""
+    try:
+        text = str(msg.get("content") or "")
+        score = 0.0
+        score += _keyword_overlap(text, query_text) * 1.0
+        if any(t.split(".")[-1] in text for t in tags):
+            score += 0.5
+        if char_name and char_name in text:
+            score += 0.8
+        return score
+    except Exception:
+        return 0.0
 
 
 def _ctx_path(group_id: str) -> Path:
@@ -52,7 +85,8 @@ def append(group_id: str, sender_name: str, content: str):
     messages.append({
         "sender_name": sender_name,
         "content": content,
-        "timestamp": datetime.now().strftime("%H:%M"),  # 只保留时分，省空间
+        "ts": time.time(),
+        "timestamp": datetime.now().strftime("%m-%d %H:%M"),
     })
 
     # 裁剪到最大条数
@@ -71,7 +105,9 @@ def get_recent(group_id: str | None) -> list[dict]:
     """
     if not group_id:
         return []
-    return _load_raw(group_id)
+    msgs = _load_raw(group_id)
+    msgs.sort(key=lambda m: float(m.get("ts") or 0))
+    return msgs
 
 
 def _save(group_id: str, messages: list[dict]):

@@ -44,6 +44,7 @@ REGISTRY: dict[str, PathMeta] = {
     "dreams_tmp_dir":         PathMeta("runtime",   "dream",           "per_char_user", "ignore"),
     "scheduler_cooldowns":    PathMeta("canonical", "shared",          "global",        "ignore"),
     "scheduler_user_state":   PathMeta("runtime",   "shared",          "global",        "ignore"),
+    "proactive_recent":       PathMeta("runtime",   "shared",          "global",        "ignore"),
     "wake_delivery_ledger":   PathMeta("canonical", "shared",          "per_user",      "ignore"),
 
     # ── forensic: 日志 / 观测 / DLQ，业务可丢 ────────────────────────────────

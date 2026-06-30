@@ -351,6 +351,54 @@ def delete(uid: str, char_id: str, source: str, source_id: str) -> bool:
         db.close()
 
 
+def stats(uid: str, char_id: str) -> dict:
+    """向量库概览：总条数 + 按 source 分组计数。fail-open → 全 0。"""
+    db = _open_db(uid, char_id)
+    if db is None:
+        return {"total": 0, "by_source": {}, "dim": _configured_dim()}
+    try:
+        _ensure_tables(db, _configured_dim())
+        rows = db.execute(
+            "SELECT source, COUNT(*) FROM vec_meta GROUP BY source"
+        ).fetchall()
+        by_source = {(r[0] or "unknown"): r[1] for r in rows}
+        return {"total": sum(by_source.values()), "by_source": by_source, "dim": _configured_dim()}
+    except Exception as e:
+        logger.warning("[vector_store] stats error uid=%s: %s", uid, e)
+        return {"total": 0, "by_source": {}, "dim": _configured_dim()}
+    finally:
+        db.close()
+
+
+def list_entries(uid: str, char_id: str, *, source: str | None = None,
+                 limit: int = 100, offset: int = 0) -> list[dict]:
+    """浏览 vec_meta，按 ts 倒序（新→旧）。fail-open → []。"""
+    db = _open_db(uid, char_id)
+    if db is None:
+        return []
+    try:
+        _ensure_tables(db, _configured_dim())
+        if source:
+            rows = db.execute(
+                "SELECT rowid, source, source_id, ts, text_preview FROM vec_meta"
+                " WHERE source = ? ORDER BY ts DESC LIMIT ? OFFSET ?",
+                (source, limit, offset),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT rowid, source, source_id, ts, text_preview FROM vec_meta"
+                " ORDER BY ts DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+        return [{"rowid": r[0], "source": r[1], "source_id": r[2],
+                 "ts": r[3], "text_preview": r[4] or ""} for r in rows]
+    except Exception as e:
+        logger.warning("[vector_store] list_entries error uid=%s: %s", uid, e)
+        return []
+    finally:
+        db.close()
+
+
 def dist_to_sim(dist: float) -> float:
     """Convert L2 distance to similarity ∈ (0, 1]. Smaller distance → larger similarity."""
     return 1.0 / (1.0 + dist)

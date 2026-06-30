@@ -90,6 +90,7 @@ async def _fanout(
     exclude_origin_channel: Optional[str] = None,
     ws_msg_id: Optional[str] = None,
     char_id: Optional[str] = None,
+    source: Optional[TurnSource] = None,
 ) -> tuple[list[str], dict[str, str]]:
     from channels import registry
 
@@ -98,6 +99,18 @@ async def _fanout(
         targets = registry.get_active()
         if exclude_origin_channel:
             targets = [ch for ch in targets if ch.name != exclude_origin_channel]
+
+        # Durable mobile fallback: proactive turns (not USER_CHAT) must reach the
+        # mobile durable queue even when the phone is offline (is_active=False).
+        # mobile.send() only writes to the persistent queue + fires relay signal —
+        # safe to call for an offline phone. is_active should gate live poll
+        # responses, not whether we bother leaving a message in the queue.
+        _is_proactive = source is not None and source != TurnSource.USER_CHAT
+        if _is_proactive and exclude_origin_channel != "mobile":
+            mobile_ch = registry.get("mobile")
+            already = any(getattr(t, "name", "") == "mobile" for t in targets)
+            if mobile_ch is not None and not already:
+                targets.append(mobile_ch)
     elif isinstance(fanout, str):
         channel = registry.get(fanout)
         if channel is not None and channel.is_active:
@@ -256,6 +269,7 @@ async def record_assistant_turn(
         exclude_origin_channel=exclude_origin_channel,
         ws_msg_id=_ws_msg_id,
         char_id=char_id,
+        source=source,
     )
 
     # Narrative segments: push a parallel message_segments envelope to the

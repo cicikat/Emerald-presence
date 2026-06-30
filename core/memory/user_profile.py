@@ -31,9 +31,21 @@ _DEFAULT_PROFILE = {
 # important_facts 中受控 tag 集合
 # pref.* 类（易变偏好）、habit（行为习惯）、health（身体/精神状态）走 recency 召回；
 # stable（稳定事实）/ misc（未分类）/ 空字符串始终平铺注入
-_RECENCY_TAGS: frozenset[str] = frozenset({"pref.music", "pref.food", "pref.media", "habit", "health"})
+_RECENCY_TAGS: frozenset[str] = frozenset({
+    "pref.music", "pref.food", "pref.media", "habit", "health",
+    "status.project",   # 正在做的事 / 近期项目 / 临时近况
+})
 _PREF_PREFIX = "pref."
-_RECENCY_WINDOW_SECONDS = 90 * 86400  # 90 天
+_RECENCY_WINDOW_SECONDS = 90 * 86400  # 90 天默认
+
+# 按 tag 定制新鲜度窗口：近况类 30 天过期，避免旧项目常驻
+_RECENCY_WINDOW_BY_TAG: dict[str, int] = {
+    "status.project": 30 * 86400,
+}
+
+
+def _recency_window_for(tag: str) -> int:
+    return _RECENCY_WINDOW_BY_TAG.get(tag, _RECENCY_WINDOW_SECONDS)
 
 
 def _normalize_fact(fact) -> dict:
@@ -223,7 +235,8 @@ async def extract_and_update(user_id: str, recent_messages: list[dict], *, char_
                 "JSON 格式：\n"
                 '{"name": null或字符串, "location": null或字符串, "pets": null或字符串, "interests": null或字符串, "occupation": null或字符串, "important_facts": [条目列表]}\n'
                 "important_facts 中每条为对象 {\"text\": \"事实内容\", \"tag\": \"分类标签\", \"ts\": 时间戳数字}。\n"
-                "tag 从以下受控集合中选择：pref.music（音乐偏好）/ pref.food（饮食偏好）/ pref.media（影视/游戏偏好）/ habit（日常习惯）/ health（身体/精神状态）/ stable（稳定客观事实）/ misc（其他）。\n"
+                "tag 从以下受控集合中选择：pref.music（音乐偏好）/ pref.food（饮食偏好）/ pref.media（影视/游戏偏好）/ habit（日常习惯）/ health（身体/精神状态）/ status.project（用户最近在做的事、在开发的项目、临时近况）/ stable（稳定的性格/观点/情感/关系等长期概况）/ misc（其他）。\n"
+                "情感、价值观、性格、关系定位 → stable；具体口味、在追的作品、手头项目、近期状态 → 对应 pref.*/status.project，不要塞进 stable。\n"
                 "ts 填写当前 Unix 时间戳（秒），用于判断事实新鲜度。\n"
                 "important_facts 只记录稳定的、有意义的个人事实，例如：性格特点、生活习惯、重要经历、身体状况（包括精神状态）、明确的偏好（喜欢/不喜欢）。\n"
                 "绝对不要记录：用户测试AI功能的行为、单次询问某件事、临时状态、对话中的玩笑或表情包、已经在其他字段记录的信息。\n"

@@ -47,6 +47,7 @@ class StageCharacterView:
             stage,
             transcript,
             viewer_id=self.char_id,
+            current_turn_id=turn_id,
         )
         from core.tag_rules import get_tags
         from core.author_note_rotator import get_current_note
