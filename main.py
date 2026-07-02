@@ -843,10 +843,13 @@ async def main():
     from channels.registry import register as _reg_channel
     from channels.desktop import DesktopChannel
     from channels.mobile import MobileChannel
+    from channels.device import DeviceChannel
     _desktop_channel = DesktopChannel()
     _reg_channel(_desktop_channel)
     _mobile_channel = MobileChannel()
     _reg_channel(_mobile_channel)
+    _device_channel = DeviceChannel()
+    _reg_channel(_device_channel)
 
     if qq_runtime_enabled:
         from core import tool_dispatcher, qq_adapter, message_queue

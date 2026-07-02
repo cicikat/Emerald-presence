@@ -7,6 +7,7 @@ POST /chat — 接收消息，走完整 Pipeline，返回回复 + 好感度
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
@@ -74,17 +75,35 @@ async def run_owner_chat_turn(
         logger.error("[owner_chat] scope freeze 失败，本轮中止: %s", _scope_err)
         raise HTTPException(status_code=503, detail="active character 状态异常，本轮中止")
 
+    _t_start = time.monotonic()
     async with conversation_lock(user_id):
-        tool_result_text = await _probe_and_execute_tools(_probe_text, user_id, char_id=_frozen_scope.character_id)
+        # probe（探针自读 short_term 最近 4 条，不吃 context）与 fetch_context
+        # 互不依赖，并行跑掉其中较短的一段；两者都在 conversation_lock 内，
+        # gather 不改变锁语义。各自计时供 [owner_chat/timing] 打点使用。
+        _t_probe = 0.0
+        _t_ctx = 0.0
 
-        context = await pipeline.fetch_context(
-            user_id, message, frozen_scope=_frozen_scope
-        )
+        async def _timed_probe():
+            nonlocal _t_probe
+            _t0 = time.monotonic()
+            result = await _probe_and_execute_tools(_probe_text, user_id, char_id=_frozen_scope.character_id)
+            _t_probe = time.monotonic() - _t0
+            return result
+
+        async def _timed_ctx():
+            nonlocal _t_ctx
+            _t0 = time.monotonic()
+            result = await pipeline.fetch_context(user_id, message, frozen_scope=_frozen_scope)
+            _t_ctx = time.monotonic() - _t0
+            return result
+
+        tool_result_text, context = await asyncio.gather(_timed_probe(), _timed_ctx())
         try:
             from core.observe.prompt_capture import set_capture_origin as _set_capture_origin
             _set_capture_origin({"origin": "desktop"})
         except Exception:
             pass
+        _t0 = time.monotonic()
         messages, _ = pipeline.build_prompt(
             user_id,
             message,
@@ -93,26 +112,41 @@ async def run_owner_chat_turn(
             channel=channel_name,
             char_id=_frozen_scope.character_id,
         )
+        _t_prompt = time.monotonic() - _t0
         # ── 流式 vs 非流式分支 ──────────────────────────────────────────────────
-        # desktop channel 且 WS 已连接时走流式：逐 token 推送，最终用 scrub 后文本替换。
-        # 其余 channel（mobile、QQ 触发路径）和 WS 离线时保持非流式，确保完整消息语义。
+        # desktop channel 且任一 UI 客户端（桌宠/设备）已连接时走流式：逐 token 推送，
+        # 最终用 scrub 后文本替换。其余 channel（mobile、QQ 触发路径）和全部离线时
+        # 保持非流式，确保完整消息语义。
         from channels import desktop_ws as _dws
+        from channels import ui_push as _ui_push
 
-        _use_stream = (channel_name == "desktop") and _dws.is_connected()
+        _t_first_delta = None
+        _t_stream = None
+        _t_llm = None
+        _use_stream = (channel_name == "desktop") and _ui_push.any_connected()
         if _use_stream:
             _stream_msg_id = _dws._new_msg_id()
-            await _dws.push_stream_start(_stream_msg_id)
+            await _ui_push.push_stream_start(_stream_msg_id)
             _chunks: list[str] = []
+            _t_stream_launch = time.monotonic()
+            _t_first_delta_ts = None
             try:
                 async for piece in pipeline.run_llm_stream(messages):
+                    if _t_first_delta_ts is None:
+                        _t_first_delta_ts = time.monotonic()
+                        _t_first_delta = _t_first_delta_ts - _t_stream_launch
                     _chunks.append(piece)
-                    await _dws.push_stream_delta(_stream_msg_id, piece)
+                    await _ui_push.push_stream_delta(_stream_msg_id, piece)
             finally:
-                await _dws.push_stream_end(_stream_msg_id)
+                await _ui_push.push_stream_end(_stream_msg_id)
+            if _t_first_delta_ts is not None:
+                _t_stream = time.monotonic() - _t_first_delta_ts
             reply = "".join(_chunks)
         else:
             _stream_msg_id = None
+            _t0 = time.monotonic()
             reply = await pipeline.run_llm(messages)
+            _t_llm = time.monotonic() - _t0
         if not reply:
             reply = ""
 
@@ -136,6 +170,7 @@ async def run_owner_chat_turn(
         from core.turn_sink import TurnSource, record_assistant_turn
         from core.write_envelope import stamp_user_chat
         _web_echo = bool(context.get("web_recall_result"))
+        _t0 = time.monotonic()
         turn_result = await record_assistant_turn(
             assistant_text=reply,
             uid=user_id,
@@ -149,6 +184,7 @@ async def run_owner_chat_turn(
             frozen_scope=_frozen_scope,
             web_echo=_web_echo,
         )
+        _t_post = time.monotonic() - _t0
 
         from core.memory.user_profile import get_affection_level
         info = get_affection_level(user_id)
@@ -166,6 +202,40 @@ async def run_owner_chat_turn(
                 visible_reply,
                 msg_id=_stream_msg_id,
                 char_id=_frozen_scope.character_id,
+            )
+            # Optional say-only segments, same msg_id as the canonical channel_message
+            # above so the client can correlate them; failure never affects the main
+            # flow (same fault-tolerance stance as turn_sink's fanout push).
+            try:
+                if _ui_push.any_connected():
+                    from core.narrative_parser import build_say_segments
+                    _say_content, _say_segs = build_say_segments(reply)
+                    await _dws.push_segments(
+                        _say_content,
+                        _say_segs,
+                        msg_id=_stream_msg_id,
+                        char_id=_frozen_scope.character_id,
+                    )
+            except Exception:
+                logger.debug("[owner_chat] message_segments push failed", exc_info=True)
+
+        # 纯 logging，不改任何行为。字段含义见 cc-tasks/18。
+        _chars = len(reply) if reply else 0
+        _t_total = time.monotonic() - _t_start
+        if _use_stream:
+            _cps = (_chars / _t_stream) if _t_stream else 0.0
+            logger.info(
+                f"[owner_chat/timing] probe={_t_probe:.2f}s ctx={_t_ctx:.2f}s "
+                f"prompt={_t_prompt:.2f}s first_delta={(_t_first_delta or 0.0):.2f}s "
+                f"stream={(_t_stream or 0.0):.2f}s chars={_chars} ({_cps:.1f} c/s) "
+                f"post={_t_post:.2f}s total={_t_total:.2f}s"
+            )
+        else:
+            _cps = (_chars / _t_llm) if _t_llm else 0.0
+            logger.info(
+                f"[owner_chat/timing] probe={_t_probe:.2f}s ctx={_t_ctx:.2f}s "
+                f"prompt={_t_prompt:.2f}s llm={(_t_llm or 0.0):.2f}s "
+                f"chars={_chars} ({_cps:.1f} c/s) post={_t_post:.2f}s total={_t_total:.2f}s"
             )
 
         return {

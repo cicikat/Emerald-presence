@@ -398,6 +398,29 @@ async def detect_emotion(text: str) -> str:
         return "neutral"
 
 
+async def detect_affection(text: str) -> bool:
+    """判断这条回复是否在【表达爱意/喜欢/亲昵】（表白、撒娇、比心、想念、深情）。
+    轻量调用，失败返回 False。"""
+    prompt = (
+        "下面是角色对用户说的话。判断她是否在直接向用户表达"
+        "爱意/喜欢/亲昵（如表白、撒娇、比心、想你、深情告白）。"
+        "只回一个词：yes 或 no。\n"
+        f"文本：{text}"
+    )
+    try:
+        mc = get_model_client("detect_emotion")   # 复用轻量档，无需新模型
+        resp = await mc.client.chat.completions.create(
+            model=mc.model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=3, temperature=0.0,
+            timeout=_CALL_TIMEOUTS["detect_emotion"],
+        )
+        return (resp.choices[0].message.content or "").strip().lower().startswith("y")
+    except Exception as e:
+        log_error("llm_client.detect_affection", e)
+        return False
+
+
 class LLMClient:
     """LLM 客户端类，封装模块级函数，供外部按类方式导入使用"""
 
@@ -415,6 +438,9 @@ class LLMClient:
 
     async def detect_emotion(self, text: str) -> str:
         return await detect_emotion(text)
+
+    async def detect_affection(self, text: str) -> bool:
+        return await detect_affection(text)
 
     def parse_tool_call_response(self, response: str) -> list | None:
         return parse_tool_call_response(response)

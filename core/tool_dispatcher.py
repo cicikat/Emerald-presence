@@ -202,16 +202,17 @@ def _is_desktop_active() -> bool:
 
 
 async def _push_desktop_action(action: dict) -> str:
-    """推送桌面动作：优先 WS + ack，失败降级到文件队列。"""
-    if not _is_desktop_active():
-        return "桌宠端离线，动作未执行"
-    # 路径 1：WS push + 等 ack
-    from channels import desktop_ws
-    if desktop_ws.is_connected():
-        ok, err = await desktop_ws.push_action_and_wait(action, timeout=5.0)
+    """推送桌面/设备动作：优先 WS + ack（桌宠、设备任一成功即算成功），失败降级到文件队列。"""
+    from channels import desktop_ws, device_ws
+    targets = [w for w in (desktop_ws, device_ws) if w.is_connected()]
+    if not targets and not _is_desktop_active():
+        return "端离线，动作未执行"
+    # 路径 1：WS push + 等 ack，任一目标 ack 成功即返回
+    for w in targets:
+        ok, err = await w.push_action_and_wait(action, timeout=5.0)
         if ok:
             return "ok"
-        logger.warning(f"[_push_desktop_action] WS ack 失败: {err}，降级到文件")
+        logger.warning(f"[_push_desktop_action] WS ack 失败: {err}，尝试下一目标/降级到文件")
     # 路径 2：文件队列 fallback
     try:
         from core.sandbox import get_paths

@@ -71,6 +71,20 @@ def parse_narrative_segments(reply: str) -> NarrativeParseResult:
         }
 
 
+def build_say_segments(reply: str) -> tuple[str, list]:
+    """
+    Say-only projection used for the `message_segments` transport envelope:
+    parse *reply*, keep only `type == "say"` segments, and join their text
+    with "\\n" so paragraph boundaries match how `channel_message` splits
+    bubbles.  Shared by `core/turn_sink.py` (trigger/fanout path) and
+    `admin/routers/chat.py` (desktop stream path) so both stay in sync.
+    """
+    parsed = parse_narrative_segments(reply)
+    say_segs = [s for s in parsed["segments"] if s.get("type") == "say"]
+    say_content = "\n".join(s.get("text", "") for s in say_segs).strip() or parsed["content"]
+    return say_content, say_segs
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _parse(reply: str) -> NarrativeParseResult:

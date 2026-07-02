@@ -138,9 +138,10 @@ async def _fanout(
             send_kwargs = {"behavior": behavior}
             if char_id is not None:
                 send_kwargs["char_id"] = char_id
-            # Desktop and mobile share the canonical turn id so clients can
-            # correlate the same assistant turn across transports.
-            if ws_msg_id is not None and name in ("desktop", "mobile"):
+            # Desktop, mobile, and device share the canonical turn id so clients
+            # can correlate the same assistant turn across transports (device
+            # also needs this to match up channel_message with message_segments).
+            if ws_msg_id is not None and name in ("desktop", "mobile", "device"):
                 send_kwargs["msg_id"] = ws_msg_id
             await channel.send(text_to_send, uid, **send_kwargs)
         except Exception as exc:
@@ -272,18 +273,16 @@ async def record_assistant_turn(
         source=source,
     )
 
-    # Narrative segments: push a parallel message_segments envelope to the
-    # desktop WS client only — but only when desktop was actually included in
-    # the fanout.  Sending segments when fanout=[] (e.g. desktop_wake Path B)
-    # would push an orphaned message that the client can never correlate and
-    # consume, violating the single-display-path invariant.
-    if "desktop" in targets:
+    # Narrative segments: push a parallel message_segments envelope to UI clients
+    # (desktop + device) — but only to the ones actually included in this fanout.
+    # Sending segments to a client that never got the corresponding channel_message
+    # (e.g. fanout=[] on desktop_wake Path B, or an exclude_origin_channel gap)
+    # would push an orphaned message that client can never correlate and consume,
+    # violating the single-display-path invariant.
+    if "desktop" in targets or "device" in targets:
         try:
-            from channels import desktop_ws as _dws
-            if _dws.is_connected():
-                from core.narrative_parser import parse_narrative_segments
-                _parsed = parse_narrative_segments(assistant_text)
-                _say_segs = [s for s in _parsed["segments"] if s.get("type") == "say"]
+            from channels import ui_push
+            if ui_push.any_connected():
                 # Join with "\n" (NOT " ") so paragraph boundaries survive.  The desktop
                 # client splits channel_message content by \n+ into one bubble per
                 # paragraph and maps message_segments content onto those bubbles by
@@ -291,11 +290,16 @@ async def record_assistant_turn(
                 # part, so bubble #0's segmentedContent became the WHOLE message while
                 # later bubbles kept their raw paragraph — rendering duplicated text
                 # that looked like a double-send for multi-paragraph trigger messages.
-                _say_content = "\n".join(s.get("text", "") for s in _say_segs).strip() or _parsed["content"]
+                from core.narrative_parser import build_say_segments
+                _say_content, _say_segs = build_say_segments(assistant_text)
                 segment_kwargs = {"msg_id": _ws_msg_id}
                 if char_id is not None:
                     segment_kwargs["char_id"] = char_id
-                await _dws.push_segments(_say_content, _say_segs, **segment_kwargs)
+                from channels import desktop_ws as _dws, device_ws as _dvws
+                if "desktop" in targets and _dws.is_connected():
+                    await _dws.push_segments(_say_content, _say_segs, **segment_kwargs)
+                if "device" in targets and _dvws.is_connected():
+                    await _dvws.push_segments(_say_content, _say_segs, **segment_kwargs)
         except Exception:
             logger.debug("[turn_sink] message_segments fanout failed", exc_info=True)
 

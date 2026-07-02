@@ -94,6 +94,19 @@ async def ws_desktop_endpoint(websocket: _WebSocket):
     await _ws_desktop_handler(websocket)
 
 
+# ── 设备端（ESP32 等具身硬件）WebSocket 端点 ──────────────────────────────────
+from channels.device_ws import handle_connection as _ws_device_handler
+
+
+@app.websocket("/ws/device")
+async def ws_device_endpoint(websocket: _WebSocket):
+    # 与 /ws/desktop 相同鉴权：仅 Authorization: Bearer
+    if not authenticate_ws(websocket):
+        await websocket.close(code=1008)
+        return
+    await _ws_device_handler(websocket)
+
+
 # 挂载静态资源
 if _STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")

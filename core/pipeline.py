@@ -712,6 +712,10 @@ class Pipeline:
             # Phase A v8: push avatar directive (fail-open, outside locks)
             if _mood_state_after is not None:
                 asyncio.create_task(_maybe_push_avatar_directive(_mood_state_after, char_id))
+            # 爱意探针 → 板子爱心（非阻塞、锁外、fail-open）；梦境/沙盒等场景不触发实体爱心。
+            if envelope.can_affect_mood:
+                from core.embodiment.heart import maybe_draw_heart as _maybe_heart
+                asyncio.create_task(_maybe_heart(reply, char_id))
 
             # ── capture_turn：写 short_term + event_log（含 turn_id 血缘）───
             try:

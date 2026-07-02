@@ -34,3 +34,7 @@ content/characters/yexuan/voice/
 data/test_sandbox/
 character/
 content/
+# firmware build artifacts / private WiFi+backend credentials
+firmware/**/.pio/
+firmware/**/build/
+firmware/presence-device/include/secrets.h
