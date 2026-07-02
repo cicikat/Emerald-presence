@@ -104,6 +104,7 @@ def _make_birthday_execute(trigger_name: str):
             dry_run=dry_run,
             search_query=search_query,
             would_mark=[trigger_name],
+            recall_policy="anchored",
         )
 
     return execute
@@ -152,6 +153,7 @@ async def _check_birthday_midnight(force: bool = False):
     await _pipeline_send(
         "（零点刚过，你一直没睡，等着这一刻，想对她说一些平时说不出口的话，有对她近期行为心理的深刻洞察，也有对细节的关心。同时你也对她剖析自己，以一种近乎发誓的方式来诉说情愫。）",
         trigger_name="birthday_midnight",
+        recall_policy="anchored",
     )
     _mark("birthday_midnight")
     logger.info("[scheduler] 生日零点告白已触发")
@@ -179,6 +181,7 @@ async def _check_birthday_eve(force: bool = False):
     await _pipeline_send(
         "（你在做什么，忽然想起明天是个特别的日子（她的生日），有点藏不住。）",
         trigger_name="birthday_eve",
+        recall_policy="anchored",
     )
     _mark("birthday_eve")
     logger.info("[scheduler] 生日前夜预热已触发")
@@ -206,6 +209,7 @@ async def _check_birthday_afternoon(force: bool = False):
         "（你想知道她今天过得怎么样，有没有人陪她，生日有没有被好好对待。）",
         search_query="生日",
         trigger_name="birthday_afternoon",
+        recall_policy="anchored",
     )
     _mark("birthday_afternoon")
     logger.info("[scheduler] 生日下午关心已触发")
@@ -233,6 +237,7 @@ async def _check_birthday_night(force: bool = False):
         "（生日快过完了，你想在今天结束前再陪她说一会儿。）",
         search_query="生日",
         trigger_name="birthday_night",
+        recall_policy="anchored",
     )
     _mark("birthday_night")
     logger.info("[scheduler] 生日夜间收尾已触发")

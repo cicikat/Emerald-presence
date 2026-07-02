@@ -6,7 +6,7 @@ garden_water trigger — 每 300 分钟 roll 一次自动浇水。
 import logging
 import time
 
-from core.scheduler.loop import _is_ready, _mark, _pipeline_send, _char_name
+from core.scheduler.loop import _is_ready, _mark
 from core.garden import manager as garden_manager
 
 logger = logging.getLogger(__name__)
@@ -42,12 +42,9 @@ def _active_char_id() -> str | None:
 
 
 async def _check_garden_water() -> None:
-    from core.scheduler.execution import legacy_tick_should_send
-
     if not _is_ready("garden_water"):
         return
     _mark("garden_water")
-    legacy_send = legacy_tick_should_send()
 
     char_id = _active_char_id()
     if char_id is None:
@@ -61,19 +58,12 @@ async def _check_garden_water() -> None:
     if not result or not result.get("ok"):
         return
 
-    # 浇水本身不发言；只在开花（里程碑）时说话
+    # 浇水本身不发言；开花（里程碑）事件只记录，实际发言由 propose_garden_bloom()
+    # 走 gating 统一决策发送（D4：删除被 EXECUTE_MODE="live" 挡死的 legacy 直发分支，
+    # 该分支此前 legacy_tick_should_send() 恒 False，_pipeline_send 从未被调用过）。
     for event in result.get("events", []):
         if event["type"] == "bloom":
             _remember_bloom_event(event)
-            if not legacy_send:
-                continue
-            if not _is_ready("garden_bloom"):
-                continue
-            await _pipeline_send(
-                f"（你发现花园里那株{event['name']}开了，站在那里看了一会儿。）",
-                trigger_name="garden_bloom",
-            )
-            _mark("garden_bloom")
 
 
 def _remember_bloom_event(event: dict) -> None:
@@ -128,6 +118,7 @@ def _make_garden_bloom_execute(event: dict):
             dry_run=dry_run,
             would_mark=["garden_bloom"],
             reads_cache_ok=True,
+            recall_policy="none",
         )
 
     return execute

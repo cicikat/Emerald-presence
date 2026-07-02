@@ -202,11 +202,18 @@ async def _send_letter_if_worthy(
 
     letter = await generate_letter(uid, reason, char_id=char_id)
     if not letter:
+        if not dry_run:
+            from core.scheduler.loop import _record_attempt_failure
+            _record_attempt_failure("letter_writer", char_id=char_id)
         return _result(reason, dry_run=dry_run, sent=False)
 
     score = await evaluate_letter(letter)
     logger.info("[letter_writer] quality_score=%d threshold=%d", score, QUALITY_THRESHOLD)
     if score < QUALITY_THRESHOLD or _is_too_similar(letter, _last_letter_text):
+        # A4: 质量门/相似度拒发不再让下个 tick 立即重跑一遍完整生成+评分流程（RC4）。
+        if not dry_run:
+            from core.scheduler.loop import _record_attempt_failure
+            _record_attempt_failure("letter_writer", char_id=char_id)
         return _result(letter, dry_run=dry_run, sent=False)
 
     if dry_run:
@@ -215,17 +222,20 @@ async def _send_letter_if_worthy(
         return result
 
     from core.mail.mail_sender import send_letter
-    from core.scheduler.loop import _mark
+    from core.scheduler.loop import _mark, _record_attempt_failure, _clear_attempt_backoff
 
     sent = await send_letter(_extract_subject(letter, reason), letter)
     if sent:
         _last_letter_text = letter
         _mark("letter_writer")
+        _clear_attempt_backoff("letter_writer", char_id=char_id)
         try:
             from core.mail.letter_reference import append_sent_letter
             append_sent_letter(uid, char_id, letter)
         except Exception:
             pass
+    else:
+        _record_attempt_failure("letter_writer", char_id=char_id)
     result = _result(letter, dry_run=False, sent=sent)
     if not sent:
         write_execute_blocked(result)

@@ -40,11 +40,43 @@ async def get_scheduler_status(auth=Depends(verify_token)):
     }
 
 
+@router.get("/scheduler/proactive-ledger", summary="获取 ProactiveLedger 账本快照")
+async def get_proactive_ledger(auth=Depends(verify_token)):
+    """
+    统一发送预算/记账观测端点（CC 任务 19 · B）。
+
+    返回 effective_gap_seconds（当前内存生效的全局间隔，可与 config.yaml 的
+    global_proactive_min_gap_seconds 对比核实是否已热加载）、next_allowed_ts、
+    今日已发条数/预算、最近 3 条发送 gist。"止血生效没有"以后一眼可查。
+    """
+    from core.scheduler.proactive_ledger import snapshot
+    return snapshot()
+
+
 # ── 配置读写 ──────────────────────────────────────────────────────────────────
 
 @router.get("/scheduler/config", summary="读取调度器配置")
 async def get_sched_config(auth=Depends(verify_token)):
-    return _sched_cfg()
+    """
+    PUT 侧接受 global_proactive_min_gap_hours（小时，前端易用单位），
+    落盘/消费统一走 global_proactive_min_gap_seconds。GET 侧补一个派生的
+    _hours 字段做对称回显，避免调用方 PUT hours 后在 GET 里读不到同名字段。
+
+    D5：额外并列返回 effective_gap_seconds（ProactiveLedger 当前实际使用的内存值）
+    与文件值 global_proactive_min_gap_seconds。A1 的 config 热加载落地后两者应恒
+    一致——若不一致，说明热加载链路出了问题，需要手动 reload_config()。
+    """
+    cfg = dict(_sched_cfg())
+    seconds = cfg.get("global_proactive_min_gap_seconds")
+    if seconds is not None:
+        cfg["global_proactive_min_gap_hours"] = round(float(seconds) / 3600, 4)
+    from core.scheduler.proactive_ledger import snapshot as _ledger_snapshot
+    effective = _ledger_snapshot()["effective_gap_seconds"]
+    cfg["effective_gap_seconds"] = effective
+    cfg["effective_gap_reload_needed"] = (
+        seconds is not None and float(effective) != float(seconds)
+    )
+    return cfg
 
 
 @router.put("/scheduler/config", summary="更新调度器配置")

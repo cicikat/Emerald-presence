@@ -1,17 +1,13 @@
 """garden_daily — 每天扫一次 harvest 过期 / handle / vase 枯萎，关键事件让叶瑄说话。"""
 
 import logging
-import random
 import time
 
-from core.scheduler.loop import _is_ready, _mark, _pipeline_send
+from core.scheduler.loop import _is_ready, _mark
 from core.garden import manager as garden_manager
 
 logger = logging.getLogger(__name__)
 
-# 状态变更必执行；发言只有 30% 概率触发。
-# 例外：ask / gift 是社交动作，必发（不过 sample）。
-SAMPLE_TALK_PROB = 0.30
 GARDEN_EVENT_PROPOSAL_TTL_SECONDS = 24 * 3600
 _LAST_DAILY_EVENTS: list[dict] = []
 
@@ -43,12 +39,9 @@ def _active_char_id() -> str | None:
 
 
 async def _check_garden_daily() -> None:
-    from core.scheduler.execution import legacy_tick_should_send
-
     if not _is_ready("garden_daily"):
         return
     _mark("garden_daily")
-    legacy_send = legacy_tick_should_send()
 
     char_id = _active_char_id()
     if char_id is None:
@@ -59,74 +52,11 @@ async def _check_garden_daily() -> None:
         logger.exception("[garden] daily_check failed")
         return
 
+    # 状态变更已在 daily_check() 内落地；发言只记录事件供 propose_garden_* 走
+    # gating 统一决策发送（D4：删除被 EXECUTE_MODE="live" 挡死的 legacy _emit
+    # for-loop，legacy_tick_should_send() 此前恒 False，_emit 从未被调用过）。
     for event in events:
         _remember_daily_event(event)
-        if not legacy_send:
-            continue
-        await _emit(event)
-
-
-async def _emit(event: dict) -> None:
-    etype = event["type"]
-    name = event.get("name", "?")
-
-    if etype == "harvest_expired":
-        if random.random() < SAMPLE_TALK_PROB:
-            if not _is_ready("garden_harvest_expired"):
-                return
-            await _pipeline_send(
-                f"（你发现那株{name}放太久枯掉了，悄悄处理掉了。）",
-                trigger_name="garden_harvest_expired",
-            )
-            _mark("garden_harvest_expired")
-        return
-
-    if etype == "vase_wilted":
-        if random.random() < SAMPLE_TALK_PROB:
-            if not _is_ready("garden_vase_wilted"):
-                return
-            await _pipeline_send(
-                f"（花瓶里那株{name}枯掉了，你默默把它收了。）",
-                trigger_name="garden_vase_wilted",
-            )
-            _mark("garden_vase_wilted")
-        return
-
-    if etype == "harvest_handle":
-        action = event.get("handle_action")
-        # ask / gift 必发（社交动作，不过 sample）
-        if action == "ask":
-            if not _is_ready("garden_handle_ask"):
-                return
-            await _pipeline_send(
-                f"（你捧着那株{name}，不确定该怎么办，想问问她。）",
-                trigger_name="garden_handle_ask",
-            )
-            _mark("garden_handle_ask")
-            return
-        if action == "gift":
-            if not _is_ready("garden_handle_gift"):
-                return
-            language = event.get("language", "")
-            tail = f"——{language}" if language else ""
-            await _pipeline_send(
-                f"（你想把那株{name}送给她{tail}。）",
-                trigger_name="garden_handle_gift",
-            )
-            _mark("garden_handle_gift")
-            return
-        # dry / vase / silent 走 sample
-        if action in ("dry", "vase"):
-            if random.random() < SAMPLE_TALK_PROB:
-                if not _is_ready("garden_handle_self"):
-                    return
-                verb = "做成干花" if action == "dry" else "放进了花瓶"
-                await _pipeline_send(
-                    f"（你把那株{name}{verb}，没有特别说什么。）",
-                    trigger_name="garden_handle_self",
-                )
-                _mark("garden_handle_self")
-        # action == "silent"：什么都不做
 
 
 def _remember_daily_event(event: dict) -> None:
@@ -242,6 +172,7 @@ def _make_garden_daily_execute(trigger_name: str, event: dict):
             dry_run=dry_run,
             would_mark=[trigger_name],
             reads_cache_ok=True,
+            recall_policy="none",
         )
 
     return execute

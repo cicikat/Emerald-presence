@@ -154,7 +154,7 @@ async def _check_festival(force: bool = False):
         if result is None:
             return
         key, prompt = result
-        await _pipeline_send(prompt, search_query="今天", trigger_name="festival")
+        await _pipeline_send(prompt, trigger_name="festival", recall_policy="none")
         _mark("festival")
         logger.info(f"[scheduler] 节日感知触发: {key}")
     except Exception as e:
@@ -201,8 +201,8 @@ async def _check_holiday_boost(force: bool = False):
 
         await _pipeline_send(
             f"（{holiday_name}假期，你知道她没什么事，理直气壮地来找她。）{context_hint}",
-            search_query="今天",
             trigger_name="holiday_boost",
+            recall_policy="none",
         )
         _mark("holiday_boost")
         logger.info(f"[scheduler] 长假加速触发: {holiday_name}")
@@ -284,8 +284,8 @@ def _make_festival_execute(prompt: str):
             trigger_name="festival",
             prompt_factory=lambda: prompt,
             dry_run=dry_run,
-            search_query="今天",
             would_mark=["festival"],
+            recall_policy="none",
         )
 
     return execute
@@ -299,8 +299,8 @@ def _make_holiday_boost_execute(today: date):
             trigger_name="holiday_boost",
             prompt_factory=lambda: _holiday_boost_prompt(today),
             dry_run=dry_run,
-            search_query="今天",
             would_mark=["holiday_boost"],
+            recall_policy="none",
         )
 
     return execute

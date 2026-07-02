@@ -84,7 +84,7 @@ async def _check_timenode(force: bool = False):
         return
 
     try:
-        await _pipeline_send(prompt, search_query="今天", trigger_name="timenode")
+        await _pipeline_send(prompt, trigger_name="timenode", recall_policy="none")
         _mark("timenode")
         logger.info(f"[scheduler] 时间节点触发: {node}")
     except Exception as e:
@@ -150,8 +150,8 @@ def _make_timenode_execute(node: str, today: date):
             trigger_name="timenode",
             prompt_factory=lambda: _timenode_prompt(node, today) or "",
             dry_run=dry_run,
-            search_query="今天",
             would_mark=["timenode"],
+            recall_policy="none",
         )
 
     return execute

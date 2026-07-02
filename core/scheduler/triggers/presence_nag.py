@@ -96,6 +96,7 @@ def _make_execute(minutes: float, char_id: str):
                 "action_type": "presence_nag",
                 "params": {"text": reply, "avatar": char_id},
             },
+            recall_policy="none",
         )
 
     return execute

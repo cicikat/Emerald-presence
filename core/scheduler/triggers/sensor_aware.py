@@ -415,6 +415,56 @@ async def handle_tick() -> None:
             snapshot["final_stage"] = "silent"
             return
 
+        # ── A3/B: sensor_aware 纳管 —— ProactiveLedger 全局间隔+预算 + DND ──────
+        # 之前 handle_tick() 完全旁路 gating._decide()：无状态机、无 DND、无全局间隔，
+        # 只有自己的 8 分钟私有冷却，且发送后也不记账，导致其他触发器感知不到它刚说过
+        # 话（RC1）。这里在 judge/LLM 之前补上检查，被拦时直接省掉整条 pipeline 开销；
+        # 私有 8 分钟冷却继续保留，但只作下限。
+        from core.scheduler.proactive_ledger import can_send as _ledger_can_send
+        from core.scheduler.triggers.dnd import is_dnd
+
+        _ledger_ok, _ledger_reason = _ledger_can_send("sensor_aware", priority="normal")
+        if not _ledger_ok:
+            logger.info(
+                "[sensor_aware] candidates=%d picked=%s score=%d tier=%s "
+                "level=%s behavior_id=%s %s sent=false",
+                len(candidates), best_type, best_score, best_tier,
+                behavior["level"], behavior["behavior_id"], _ledger_reason,
+            )
+            _record_decision(
+                stage="global_gap_blocked" if _ledger_reason == "gap_not_elapsed" else "daily_budget_blocked",
+                sent=False,
+                reason="全局主动发言间隔未到" if _ledger_reason == "gap_not_elapsed" else "当日主动发言预算已用完",
+                candidates_count=len(candidates),
+                picked=_event_summary(best_event),
+                score=best_score,
+                tier=best_tier,
+                behavior=behavior,
+            )
+            snapshot["final_stage"] = "global_gap_blocked"
+            return
+
+        _dnd_oid = _owner_id()
+        if _dnd_oid and is_dnd(_dnd_oid):
+            logger.info(
+                "[sensor_aware] candidates=%d picked=%s score=%d tier=%s "
+                "level=%s behavior_id=%s dnd_blocked sent=false",
+                len(candidates), best_type, best_score, best_tier,
+                behavior["level"], behavior["behavior_id"],
+            )
+            _record_decision(
+                stage="dnd_blocked",
+                sent=False,
+                reason="请勿打扰中",
+                candidates_count=len(candidates),
+                picked=_event_summary(best_event),
+                score=best_score,
+                tier=best_tier,
+                behavior=behavior,
+            )
+            snapshot["final_stage"] = "dnd_blocked"
+            return
+
         # 全局兜底：8 分钟内已有主动发言 → 拦截
         last_proactive = sensor_events.get_last_proactive_at()
         if last_proactive is not None and (time.time() - last_proactive) < _PROACTIVE_COOLDOWN_SECS:
@@ -458,6 +508,7 @@ async def handle_tick() -> None:
                 trigger_name="sensor_aware",
                 output_mode="return",
                 record_turn=False,
+                recall_policy="none",
             )
         except Exception:
             logger.error("[sensor_aware] _pipeline_send 失败，不更新冷却")
@@ -526,6 +577,9 @@ async def handle_tick() -> None:
             return
 
         sensor_events.mark_proactive_sent()
+        # A3/B: 让其他触发器感知到 sensor_aware 刚说过话（RC1 的另一半修复）。
+        from core.scheduler.proactive_ledger import record_send as _ledger_record
+        _ledger_record("sensor_aware", channel="desktop,mobile", gist=reply)
         _record_decision(
             stage="sent",
             sent=True,

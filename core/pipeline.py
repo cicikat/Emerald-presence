@@ -194,6 +194,7 @@ class Pipeline:
         content: str,
         group_id: str | None = None,
         frozen_scope: "MemoryScope | None" = None,
+        recall_policy: str = "seed",
     ) -> dict:
         """
         并发拉取所有记忆数据并进行世界书关键词匹配。
@@ -212,6 +213,16 @@ class Pipeline:
 
         frozen_scope: 如果传入，直接使用该 scope，跳过 _current_reality_scope()。
           入口处已做一次性 scope freeze 时必须传入，保证全轮角色一致性（N1）。
+
+        recall_policy（CC 任务 19 · C，召回锚点治理）：
+          - "seed"（默认，兼容现状）：episodic/event_search/web_recall 正常检索，锚点为
+            content（调用方传入的 search_query 或 prompt 全文）。
+          - "anchored"：语义同 "seed"（检索层不跳过），仅表示调用方已用触发器自带的具体
+            锚点（话题 key、被选中记忆原文）作为 content，而非宽泛种子词或 prompt 全文。
+          - "none"：跳过 episodic/event_search/web_recall 三个检索层，只保留
+            identity/mood/short_term/花园等状态层。主动触发的"由头"已经在种子 prompt 里
+            写死（天气、想她了、看到她久坐），角色不需要再被 "今天" 这类宽泛词捞出的旧
+            情景记忆带偏（RC6：乱召回导致"胡乱召回然后说一大堆废话"）。
         """
         # Guard: if frozen_scope provided, use it directly (turn-level scope freeze);
         # otherwise validate active_character and construct scope.
@@ -240,13 +251,15 @@ class Pipeline:
 
         from core.recall_gate import is_low_information as _is_low_info
         _low_info = _is_low_info(content)
+        # C: recall_policy="none" 跳过 episodic/event_search/web_recall 检索层（RC6）。
+        _skip_recall = _low_info or recall_policy == "none"
 
         # X2: compute query embedding once (fail-open), then get all semantic hits sync.
         # query_vec is passed down to event_log.search and episodic.retrieve so each
         # can do a source-filtered vs.query internally without re-embedding.
         _query_vec: list | None = None
         _semantic_hits: list = []
-        if not _low_info:
+        if not _skip_recall:
             try:
                 from core.memory.embedding import embed
                 _q_vecs = await embed([content])
@@ -264,7 +277,7 @@ class Pipeline:
 
         # 需要 IO 的任务并发进行
         loop = asyncio.get_event_loop()
-        if _low_info:
+        if _skip_recall:
             event_search_task = None
         else:
             event_search_task = asyncio.create_task(
@@ -299,16 +312,22 @@ class Pipeline:
         from core.memory.episodic_memory import retrieve, format_for_prompt
         from core.memory.user_facts import get_user_pronoun as _get_pronoun
         _user_pronoun = _get_pronoun(uid)
-        episodic_memories, _episodic_trace = retrieve(
-            user_id=uid,
-            topic=content,
-            top_k=3,
-            char_id=char_id,
-            char_name=scoped_character.name,
-            allow_strengthen=False,
-            return_trace=True,
-            query_vec=_query_vec,
-        )
+        if recall_policy == "none":
+            # C: 主动触发的"由头"已在种子 prompt 里写死，不需要被宽泛锚点词捞出的旧情景
+            # 记忆带偏（RC6）。注意：只挂 recall_policy，不与 _low_info 合并——原有
+            # low_info 场景下这条 retrieve() 一直是无条件执行的，这里不改变那部分行为。
+            episodic_memories, _episodic_trace = [], []
+        else:
+            episodic_memories, _episodic_trace = retrieve(
+                user_id=uid,
+                topic=content,
+                top_k=3,
+                char_id=char_id,
+                char_name=scoped_character.name,
+                allow_strengthen=False,
+                return_trace=True,
+                query_vec=_query_vec,
+            )
         from core.memory.mood_state import get_current as _get_mood
         episodic_result = format_for_prompt(
             episodic_memories,
@@ -319,7 +338,7 @@ class Pipeline:
 
         # 兜底召回：tag 未命中时备用，存入 context 供 prompt_builder 判断
         from core.memory.episodic_memory import retrieve_fallback
-        if _low_info:
+        if _skip_recall:
             episodic_fallback, _episodic_fallback_trace = [], []
         else:
             _recent_texts = [h.get("content", "") for h in history[-5:]]
@@ -411,7 +430,7 @@ class Pipeline:
 
         # X3: web-sourced semantic recall — query vector_store for source="web" items
         _web_recall_text = ""
-        if not _low_info and _query_vec:
+        if not _skip_recall and _query_vec:
             try:
                 from core.memory import vector_store as _vs_web
                 _web_hits = _vs_web.query_with_preview(

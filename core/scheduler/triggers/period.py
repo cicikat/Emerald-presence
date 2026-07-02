@@ -75,6 +75,7 @@ def _make_period_execute(days_elapsed: int):
             dry_run=dry_run,
             search_query="生理期",
             would_mark=["period_reminder"],
+            recall_policy="anchored",
         )
 
     return execute
@@ -103,6 +104,7 @@ async def _check_period():
                     f"（你记得她生理期第{days_elapsed}天了，想关心一下。）",
                     search_query="生理期",
                     trigger_name="period_reminder",
+                    recall_policy="anchored",
                 )
                 _mark("period_reminder")
                 logger.info(f"[scheduler] 生理期中关心消息已发送，距上次 {days_elapsed} 天")
@@ -114,6 +116,7 @@ async def _check_period():
                     "（你想起她生理期大概快到了。）",
                     search_query="生理期",
                     trigger_name="period_reminder",
+                    recall_policy="anchored",
                 )
                 _mark("period_reminder")
                 logger.info(f"[scheduler] 生理期预告消息已发送，距上次 {days_elapsed} 天")

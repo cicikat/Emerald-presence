@@ -38,6 +38,28 @@ def reset_perceive_event_registry():
 
 
 @pytest.fixture(autouse=True)
+def reset_proactive_ledger():
+    """Reset ProactiveLedger module state before each test (CC 任务 19 · B).
+
+    core/scheduler/proactive_ledger.py holds module-level next_allowed_ts /
+    daily_count / recent state that persists across tests in the same process
+    (mirrors loop._last_trigger, which individual tests already reset ad hoc).
+    Without this, a test that calls execute_prompt()/record_send() successfully
+    can leave next_allowed_ts in the future, causing an unrelated later test's
+    gating._decide() to spuriously fail with global_gap_filtered.
+    """
+    from core.scheduler import proactive_ledger as _ledger
+    _ledger._state = {
+        "next_allowed_ts": 0.0,
+        "daily_count": 0,
+        "daily_logical_day": "",
+        "recent": [],
+    }
+    _ledger._loaded = True  # skip disk load; state above is authoritative for the test
+    yield
+
+
+@pytest.fixture(autouse=True)
 async def reset_slow_queue():
     """每个测试前重置 slow_queue 模块状态（队列/handler/worker），测试后清理 worker。"""
     import core.post_process.slow_queue as sq

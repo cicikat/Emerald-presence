@@ -229,15 +229,29 @@ def _decide(uid: str, proposals: list[TriggerProposal]) -> tuple[Optional[Trigge
     if not cooldown_allowed:
         return None, "cooldown_filtered", candidates
 
-    # ── Global proactive gap filter (B1) ─────────────────────────────────────
-    # Prevent bursts: if the global cross-trigger gap hasn't elapsed since the
-    # last proactive send, non-emergency triggers are suppressed.
-    from core.scheduler.loop import _global_proactive_gap_ready
-    if not _global_proactive_gap_ready():
-        non_emergency = [p for p in cooldown_allowed if not _policy_is_emergency(p.trigger_name)]
-        cooldown_allowed = [p for p in cooldown_allowed if p not in non_emergency]
-        if not cooldown_allowed:
-            return None, "global_gap_filtered", candidates
+    # ── ProactiveLedger filter (B) ────────────────────────────────────────────
+    # Single source of truth for "can this trigger speak right now": global
+    # cross-trigger gap (A2 next_allowed_ts, one-time jitter sample) + daily
+    # send budget (scheduler.max_daily_proactive). gating stays the decision
+    # authority; the ledger is only queried here, never picks a winner itself.
+    from core.scheduler.proactive_ledger import can_send as _ledger_can_send
+    ledger_allowed = []
+    ledger_reasons: set[str] = set()
+    for p in cooldown_allowed:
+        priority = "emergency" if _policy_is_emergency(p.trigger_name) else "normal"
+        allowed, reason = _ledger_can_send(p.trigger_name, priority=priority)
+        if allowed:
+            ledger_allowed.append(p)
+        else:
+            ledger_reasons.add(reason)
+    if not ledger_allowed:
+        # Preserve the pre-existing "global_gap_filtered" reason string for the
+        # gap case (observability/verification tooling greps for it); budget
+        # exhaustion gets its own distinguishable reason.
+        if ledger_reasons == {"daily_budget_exceeded"}:
+            return None, "daily_budget_filtered", candidates
+        return None, "global_gap_filtered", candidates
+    cooldown_allowed = ledger_allowed
 
     picked = max(cooldown_allowed, key=lambda p: p.urgency)
     # Release from defer queue: trigger was sent (or will be sent this tick).

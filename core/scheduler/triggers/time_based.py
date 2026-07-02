@@ -38,7 +38,7 @@ async def _check_morning(force: bool = False):
         if oid and _user_talked_today(oid):
             return
 
-    await _pipeline_send("（清晨，你看了看时间，想着她应该快起床了。想道句早安。）", trigger_name="morning_greeting")
+    await _pipeline_send("（清晨，你看了看时间，想着她应该快起床了。想道句早安。）", trigger_name="morning_greeting", recall_policy="none")
     _mark("morning_greeting")
     logger.info("[scheduler] 早安消息已发送")
 
@@ -60,7 +60,7 @@ async def _check_night(force: bool = False):
         if now.hour < 23:
             return
 
-    await _pipeline_send("（深夜，你看了眼时间，想起她该睡了。）", trigger_name="night_reminder")
+    await _pipeline_send("（深夜，你看了眼时间，想起她该睡了。）", trigger_name="night_reminder", recall_policy="none")
     _mark("night_reminder")
     logger.info("[scheduler] 晚安消息已发送")
 
@@ -94,6 +94,7 @@ def propose_morning_greeting(ctx: dict | None = None):
         execute=_make_prompt_execute(
             "morning_greeting",
             lambda: "（清晨，你看了看时间，想着她应该快起床了。想道句早安。）",
+            recall_policy="none",
         ),
     )
 
@@ -126,6 +127,7 @@ def propose_night_reminder(ctx: dict | None = None):
         execute=_make_prompt_execute(
             "night_reminder",
             lambda: "（深夜，你看了眼时间，想起她该睡了。）",
+            recall_policy="none",
         ),
     )
 
@@ -161,8 +163,10 @@ def propose_daily_journal(ctx: dict | None = None):
         execute=_make_prompt_execute(
             "daily_journal",
             lambda: "（深夜，他回想起今天和你说的话，提笔写下此刻的感受，并且一想到你，就忍不住写了很多）",
-            search_query="今天",
             after_send=_write_inner_daily_journal,
+            # C¹: 只注入当日 event_log 原文（种子 prompt 已带今日对话概要），不做语义
+            # 检索——"今天" 这种宽泛词会捞出无关旧情景记忆（RC6）。
+            recall_policy="none",
         ),
     )
 
@@ -214,7 +218,7 @@ async def _check_random_message(force: bool = False):
         context_hint = ""
 
     prompt = _build_random_message_prompt(context_hint)
-    await _pipeline_send(prompt, trigger_name="random_message")
+    await _pipeline_send(prompt, trigger_name="random_message", recall_policy="none")
     _mark("random_message")
     if _picked_key:
         from core.scheduler.last_mentioned import mark_recent_topic
@@ -291,7 +295,7 @@ async def _check_weather(force: bool = False):
         if not legacy_send:
             return
         if prompt:
-            await _pipeline_send(prompt, trigger_name="weather_alert")
+            await _pipeline_send(prompt, trigger_name="weather_alert", recall_policy="none")
             _mark("weather_alert")
             logger.info(f"[scheduler] 天气触发: {desc} {temp}°C")
         else:
@@ -400,6 +404,7 @@ def _propose_weather_alert(ctx: dict | None = None, required_severity: str = "he
             "weather_alert",
             lambda detail=detail, now=now, location=location: _weather_prompt(detail, now, location) or "",
             reads_cache_ok=bool(detail),
+            recall_policy="none",
         ),
     )
 
@@ -558,8 +563,8 @@ async def _check_daily_journal():
     try:
         await _pipeline_send(
             "（深夜，他回想起今天和你说的话，提笔写下此刻的感受，并且一想到你，就忍不住写了很多）",
-            search_query="今天",
             trigger_name="daily_journal",
+            recall_policy="none",
         )
 
         # 存储各角色日记到内心文档（白名单多角色逐个生成）
@@ -640,7 +645,7 @@ async def _check_spontaneous_recall():
             prompt = f"（你忽然想起一件事：{summary}。当时你{feeling}。想顺口说给她听，别像念旧档案，像顺着这两天自然想起。）"
         else:
             prompt = f"（你忽然想起一件事：{summary}。想顺口说给她听，别像念旧档案，像顺着这两天自然想起。）"
-        await _pipeline_send(prompt, trigger_name="spontaneous_recall")
+        await _pipeline_send(prompt, trigger_name="spontaneous_recall", recall_policy="anchored")
         _mark("spontaneous_recall")
         logger.info(f"[scheduler] 主动回忆触发: {summary}")
     except Exception as e:
@@ -806,6 +811,7 @@ def _make_prompt_execute(
     search_query: str = "",
     reads_cache_ok: bool = True,
     after_send=None,
+    recall_policy: str = "seed",
 ):
     async def execute(*, dry_run: bool):
         from core.scheduler.execution import execute_prompt
@@ -818,6 +824,7 @@ def _make_prompt_execute(
             would_mark=[trigger_name],
             reads_cache_ok=reads_cache_ok,
             after_send=after_send,
+            recall_policy=recall_policy,
         )
 
     return execute
@@ -834,6 +841,7 @@ def _make_random_message_execute(oid: str):
             ),
             dry_run=dry_run,
             would_mark=["random_message"],
+            recall_policy="none",
         )
 
     return execute
@@ -1065,6 +1073,8 @@ def _make_spontaneous_recall_execute(memory: dict):
             would_mark=["spontaneous_recall"],
             topic_key=memory_key,
             after_send=_after_send,
+            # C: 锚点已是具体被选中记忆的原文（不是宽泛种子词），检索层保持开启。
+            recall_policy="anchored",
         )
         if dry_run:
             mark_memory_recalled_shadow(memory_key)

@@ -32,8 +32,8 @@ async def _check_diary_reminder():
             yesterday = (date.today() - timedelta(days=1)).strftime("%m月%d日")
             await _pipeline_send(
                 f"（你翻到了{yesterday}的日期，她好像漏了一天没写。）",
-                search_query="日记",
                 trigger_name="diary_reminder",
+                recall_policy="none",
             )
             _mark("diary_reminder")
             logger.info("[scheduler] 日记缺失提醒已发送")
@@ -79,7 +79,7 @@ def propose_diary_reminder(ctx: dict | None = None):
         execute=_make_prompt_execute(
             "diary_reminder",
             lambda now=now: f"（你翻到了{_yesterday_label(now)}的日期，她好像漏了一天没写。）",
-            search_query="日记",
+            recall_policy="none",
         ),
     )
 
@@ -136,8 +136,8 @@ async def _check_diary_share_reminder():
     try:
         await _pipeline_send(
             "（你发现自己好几天没看到她写的东西了。）",
-            search_query="日记",
             trigger_name="diary_share_reminder",
+            recall_policy="none",
         )
         _mark("diary_share_reminder")
         logger.info("[scheduler] 日记分享提醒已发送")
@@ -186,8 +186,8 @@ def propose_diary_share_reminder(ctx: dict | None = None):
         execute=_make_prompt_execute(
             "diary_share_reminder",
             lambda: "（你发现自己好几天没看到她写的东西了。）",
-            search_query="日记",
             after_send=_mark_diary_shared_after_send,
+            recall_policy="none",
         ),
     )
 
@@ -229,7 +229,14 @@ def _mark_diary_shared_after_send() -> None:
     loop.mark_diary_shared()
 
 
-def _make_prompt_execute(trigger_name: str, prompt_factory, *, search_query: str = "", after_send=None):
+def _make_prompt_execute(
+    trigger_name: str,
+    prompt_factory,
+    *,
+    search_query: str = "",
+    after_send=None,
+    recall_policy: str = "seed",
+):
     async def execute(*, dry_run: bool):
         from core.scheduler.execution import execute_prompt
 
@@ -240,6 +247,7 @@ def _make_prompt_execute(trigger_name: str, prompt_factory, *, search_query: str
             search_query=search_query,
             would_mark=[trigger_name],
             after_send=after_send,
+            recall_policy=recall_policy,
         )
 
     return execute

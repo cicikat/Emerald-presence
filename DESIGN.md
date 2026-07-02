@@ -109,6 +109,26 @@
 - 低优先级触发：120 秒内有用户消息则让路
 - 所有主动消息都走完整 Pipeline，不发裸文本
 
+### 架构决策记录（CC 任务 19 · D，2026-07）
+
+以下是 `docs/proactive-trigger-audit.md` §五「留给 fable 讨论的问题」的最终决策，
+关闭该审计文档遗留的开放问题：
+
+1. **不建真正的「发送队列」**。单用户场景下"每 tick 单 winner（`gating._decide()`）
+   + `ProactiveLedger` 间隔/预算（`core/scheduler/proactive_ledger.py`）+
+   `defer_queue` 年龄追踪"已提供足够的串行化与限速。真队列会引入合并/排序/过期
+   三套新语义，收益相对当前架构的复杂度不成比例。审计 §五.1 担心的"相邻 tick
+   背靠背双发"，已由 A2 的 `next_allowed_ts`（一次性 jitter 采样、只增不减、
+   持久化）硬性解决——不再有"反复抽签直到抽到最松间隔"的漏洞。
+2. **平台级限流不做**。`desktop`/`QQ` 共享同一 uid 级 `ProactiveLedger` 账本是
+   刻意设计，防止同一个人在不同设备上各收一份主动消息；`presence_nag` 独立
+   `fanout=["desktop"]` 维持现状。审计 §五.2 关闭。
+3. **`dream_invite` / `toy_invite` 暂不实现**。后端未找到这两个 action 名的
+   发射点，Emerald-client 只有 WS listener 预埋，判定为前端规划中的功能，
+   非当前后端已知触发器。审计 §五.3 关闭，标注"规划中"。
+4. legacy 花园直发循环（`garden_daily.py`/`garden_water.py` 里被
+   `EXECUTE_MODE="live"` 挡死的 `_emit()` for-loop）已删除（审计 §五.4）。
+
 ---
 
 ## 八、新功能准入标准

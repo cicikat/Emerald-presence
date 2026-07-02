@@ -117,6 +117,8 @@ def _make_topic_followup_execute(topic: LastMentionedTopic):
             would_mark=["topic_followup"],
             topic_key=topic.topic_key,
             after_send=lambda: mark_topic_followed(topic.topic_key),
+            # C: 锚点已是具体未跟进话题的原文，不是宽泛种子词，检索层保持开启。
+            recall_policy="anchored",
         )
         if dry_run:
             mark_topic_followed_shadow(topic.topic_key)

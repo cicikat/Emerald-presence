@@ -432,3 +432,83 @@ def test_fetch_context_invalid_active_does_not_call_readers(
     assert reader_called == [], (
         "short_term.load_for_prompt must NOT be called when active_character is invalid"
     )
+
+
+# ── 10. CC 任务 19 · C: recall_policy="none" skips episodic/event_search/web_recall ──
+
+def test_recall_policy_none_skips_episodic_event_search_and_web_recall(
+    chars_tree, monkeypatch, sandbox, registry
+):
+    """主动触发 recall_policy="none" 时，episodic/event_search/web_recall 三个检索层
+    必须完全不被调用（RC6：主动触发不该被宽泛锚点词捞出无关旧记忆）。
+    identity/profile/mid_term 等状态层不受影响，正常调用。
+    """
+    import core.memory.episodic_memory as _ep
+    import core.memory.event_log as _el
+    import core.memory.user_identity as _ui
+
+    pipeline = _make_pipeline("character_b", registry)
+    _write_active(sandbox, "character_b")
+    _apply_base_stubs(monkeypatch)
+
+    retrieve_calls: list = []
+    fallback_calls: list = []
+    search_calls: list = []
+    identity_calls: list = []
+
+    def _spy_retrieve(*args, **kwargs):
+        retrieve_calls.append(1)
+        return ([], []) if kwargs.get("return_trace") else []
+
+    def _spy_fallback(*args, **kwargs):
+        fallback_calls.append(1)
+        return ([], []) if kwargs.get("return_trace") else []
+
+    async def _spy_search(*args, **kwargs):
+        search_calls.append(1)
+        return ("", []) if kwargs.get("return_trace") else ""
+
+    async def _spy_identity(*args, **kwargs):
+        identity_calls.append(1)
+        return ""
+
+    monkeypatch.setattr(_ep, "retrieve", _spy_retrieve)
+    monkeypatch.setattr(_ep, "retrieve_fallback", _spy_fallback)
+    monkeypatch.setattr(_el, "search", _spy_search)
+    monkeypatch.setattr(_ui, "format_for_prompt", _spy_identity)
+
+    context = asyncio.run(
+        pipeline.fetch_context(user_id="u1", content="今天", recall_policy="none")
+    )
+
+    assert retrieve_calls == [], "recall_policy=none 时 episodic_memory.retrieve 不应被调用"
+    assert fallback_calls == [], "recall_policy=none 时 episodic_memory.retrieve_fallback 不应被调用"
+    assert search_calls == [], "recall_policy=none 时 event_log.search 不应被调用"
+    assert context["episodic_result"] == ""
+    assert context["event_search_result"] == ""
+    assert context["web_recall_result"] == ""
+    # 状态层不受影响：user_identity 正常调用
+    assert identity_calls == [1], "recall_policy=none 不应影响 user_identity 状态层"
+
+
+def test_recall_policy_seed_default_still_calls_episodic_retrieve(
+    chars_tree, monkeypatch, sandbox, registry
+):
+    """默认 recall_policy="seed" 时行为不变：episodic 主检索照常调用（兼容现状）。"""
+    import core.memory.episodic_memory as _ep
+
+    pipeline = _make_pipeline("character_b", registry)
+    _write_active(sandbox, "character_b")
+    _apply_base_stubs(monkeypatch)
+
+    retrieve_calls: list = []
+
+    def _spy_retrieve(*args, **kwargs):
+        retrieve_calls.append(1)
+        return ([], []) if kwargs.get("return_trace") else []
+
+    monkeypatch.setattr(_ep, "retrieve", _spy_retrieve)
+
+    asyncio.run(pipeline.fetch_context(user_id="u1", content="今天心情不错"))
+
+    assert retrieve_calls == [1], "默认 recall_policy 不应跳过 episodic_memory.retrieve"

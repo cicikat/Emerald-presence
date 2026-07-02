@@ -210,9 +210,42 @@ def _cfg_retention() -> dict:
 
 
 def _is_ready(name: str, *, char_id: str | None = None) -> bool:
-    """检查触发器是否已度过冷却期"""
+    """检查触发器是否已度过冷却期（正式冷却 + 失败退避 attempt-cooldown 均需通过，A4）。"""
     elapsed = time.time() - _last_trigger.get(_cooldown_key(name, char_id), 0)
-    return elapsed >= _COOLDOWNS.get(name, 3600)
+    if elapsed < _COOLDOWNS.get(name, 3600):
+        return False
+    return _attempt_cooldown_ready(name, char_id=char_id)
+
+
+# ── A4: 失败退避（attempt-cooldown）──────────────────────────────────────────
+# 发送失败（sent=False：DUPLICATE / Dream Guard / LLM 空回复 / 质量门拒发等）不应让
+# proposer 下个 tick 立即重新报名重试一遍完整 pipeline（RC4）。内存态即可：退避窗口
+# 相对重启周期很短，重启清零可接受。
+_ATTEMPT_BACKOFF_INITIAL_SECS = 15 * 60
+_attempt_backoff_secs: dict[str, float] = {}
+_attempt_cooldown_until: dict[str, float] = {}
+
+
+def _record_attempt_failure(name: str, *, char_id: str | None = None) -> None:
+    """记一次失败尝试：首次退避 15min，此后每次失败翻倍，封顶该触发器自身 _COOLDOWNS。"""
+    key = _cooldown_key(name, char_id)
+    cap = float(_COOLDOWNS.get(name, 3600))
+    prev = _attempt_backoff_secs.get(key, 0.0)
+    nxt = _ATTEMPT_BACKOFF_INITIAL_SECS if prev <= 0 else min(prev * 2, cap)
+    _attempt_backoff_secs[key] = nxt
+    _attempt_cooldown_until[key] = time.time() + nxt
+
+
+def _clear_attempt_backoff(name: str, *, char_id: str | None = None) -> None:
+    """成功发送后清除退避状态，下次失败重新从 15min 起算。"""
+    key = _cooldown_key(name, char_id)
+    _attempt_backoff_secs.pop(key, None)
+    _attempt_cooldown_until.pop(key, None)
+
+
+def _attempt_cooldown_ready(name: str, *, char_id: str | None = None) -> bool:
+    key = _cooldown_key(name, char_id)
+    return time.time() >= _attempt_cooldown_until.get(key, 0.0)
 
 
 def _persist_cooldowns() -> None:
@@ -237,26 +270,26 @@ def _mark(name: str, *, char_id: str | None = None):
     _persist_cooldowns()
 
 
-_GLOBAL_PROACTIVE_KEY = "__any_proactive__"
+# A2/B 全局主动间隔（jitter 一次性采样、只增不减）与当日发送预算已收口到
+# core/scheduler/proactive_ledger.py 的 can_send() / record_send()；不在 loop.py
+# 重复维护一份 next_allowed_ts 状态。sensor_aware.handle_tick()、gating._decide()、
+# execution.execute_prompt() 均直接调用 proactive_ledger。
+
+# A1: 上次记录到日志的 effective gap 值，变化时才重新打印，避免刷屏。
+_last_logged_gap: float | None = None
 
 
-def _mark_global_proactive() -> None:
-    """Record that a proactive message was just sent. Used by B1 global gap logic."""
-    _last_trigger[_GLOBAL_PROACTIVE_KEY] = time.time()
-    _persist_cooldowns()
+def _log_effective_gap_if_changed() -> None:
+    """A1: config 热加载后，让 "生效没生效" 直接在日志里可见。
 
-
-def _global_proactive_gap_ready(now_ts: float | None = None) -> bool:
-    """Return True if global cross-trigger gap has elapsed since last proactive send.
-
-    Gap defaults to global_proactive_min_gap_seconds (config) with ±20% jitter.
-    Emergency triggers bypass this check in gating._decide().
+    每次调用都会经过 get_config() 的 mtime 检查（core/config_loader.py），磁盘变化
+    会在 ≤ 一次调用内被读到；这里只在数值变化时打印，cheap 到可以每 tick 调用。
     """
-    now_ts = now_ts or time.time()
-    last = _last_trigger.get(_GLOBAL_PROACTIVE_KEY, 0)
-    gap = float(_cfg().get("global_proactive_min_gap_seconds", 45 * 60))
-    jitter = gap * 0.2 * (random.random() * 2 - 1)
-    return (now_ts - last) >= (gap + jitter)
+    global _last_logged_gap
+    gap = float(_cfg().get("global_proactive_min_gap_seconds", 90 * 60))
+    if gap != _last_logged_gap:
+        logger.info("[scheduler] effective global_proactive_min_gap_seconds=%s", gap)
+        _last_logged_gap = gap
 
 
 def _owner_id() -> str:
@@ -311,6 +344,7 @@ async def _pipeline_send(
     record_turn: bool = True,
     kind: str = "scheduled",   # stimulus kind — must be in _TRIGGER_OUTLET_ALLOWED_KINDS
     char_id: str | None = None,
+    recall_policy: str = "seed",   # C: "seed" | "anchored" | "none" — see fetch_context()
 ) -> Optional[str]:
     """LOW-TRUST STIMULUS / TRIGGER-ONLY REALITY REPLY outlet.
 
@@ -427,7 +461,8 @@ async def _pipeline_send(
         from core.conversation_gate import conversation_lock as _conv_lock
         async with _conv_lock(oid):
             context = await _pipeline.fetch_context(
-                oid, search_query or prompt, frozen_scope=_frozen_scope
+                oid, search_query or prompt, frozen_scope=_frozen_scope,
+                recall_policy=recall_policy,
             )
             # Tag this build_prompt() call as proactive so prompt_capture records
             # the trigger origin, seed prompt, and search query alongside the layers.
@@ -438,6 +473,7 @@ async def _pipeline_send(
                     "trigger_name": trigger_name,
                     "seed_prompt": prompt,
                     "search_query": search_query or "",
+                    "recall_policy": recall_policy,
                 })
             except Exception:
                 pass
@@ -755,6 +791,7 @@ async def manual_trigger(name: str) -> str:
                 f"（深夜，{_char_name()}回想起今天和你说过的话，提笔写下今天的感受——"
                 f"今天的对话内容：{log_hint}）",
                 trigger_name="daily_journal",
+                recall_policy="none",
             )
             _mark("daily_journal")
         elif name == "period_reminder":
@@ -771,11 +808,15 @@ async def manual_trigger(name: str) -> str:
                 await _pipeline_send(
                     f"（{_char_name()}记得你的生理期已经来了{days_elapsed}天，悄悄关心一下）",
                     trigger_name="period_reminder",
+                    search_query="生理期",
+                    recall_policy="anchored",
                 )
             else:
                 await _pipeline_send(
                     f"（{_char_name()}想关心一下你的身体状况）",
                     trigger_name="period_reminder",
+                    search_query="生理期",
+                    recall_policy="anchored",
                 )
             _mark("period_reminder")
         elif name == "diary_reminder":
@@ -787,6 +828,7 @@ async def manual_trigger(name: str) -> str:
             await _pipeline_send(
                 f"（{_char_name()}想起来，{yesterday}好像没看到你写日记）",
                 trigger_name="diary_reminder",
+                recall_policy="none",
             )
             _mark("diary_reminder")
         elif name == "diary_share_reminder":
@@ -796,6 +838,7 @@ async def manual_trigger(name: str) -> str:
             await _pipeline_send(
                 f"（{_char_name()}想起来，好像很久没看到你的日记了，故作不经意地提一句）",
                 trigger_name="diary_share_reminder",
+                recall_policy="none",
             )
             _mark("diary_share_reminder")
         elif name == "topic_followup":
@@ -824,6 +867,10 @@ async def manual_trigger(name: str) -> str:
             await _check_holiday_boost(force=True)
         else:
             return f"未知触发器: {name}"
+        # B: manual_trigger 绕过冷却/条件检查属设计，但也该记账（RC5）——否则管理
+        # 面板测试触发不会让 gating 看到"刚说过话"，紧接着的自动触发可能背靠背双发。
+        from core.scheduler.proactive_ledger import record_send as _ledger_record
+        _ledger_record(name, channel="manual", gist=f"[手动触发] {name}")
         return f"{name} 已触发"
     except Exception as e:
         log_error(f"scheduler.manual_trigger.{name}", e)
@@ -837,6 +884,7 @@ async def manual_trigger(name: str) -> str:
 async def _loop():
     """调度器主循环，每 60 秒检查一次"""
     logger.info("[scheduler] 调度器已启动，每 60 秒检查一次")
+    _log_effective_gap_if_changed()
     _sa = _cfg().get("sensor_aware", {})
     if _sa.get("enabled", False):
         logger.info(
@@ -848,6 +896,7 @@ async def _loop():
     while True:
         try:
             cfg = _cfg()
+            _log_effective_gap_if_changed()
             if cfg.get("enabled", True):
                 from core.scheduler.triggers.time_based import (
                     _check_morning, _check_night, _check_random_message,

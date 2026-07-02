@@ -716,6 +716,13 @@ async def desktop_wake(body: dict = Body(default={}), _auth=Depends(verify_token
                     frozen_scope=_wake_scope,
                     web_echo=bool(context.get("web_recall_result")),
                 )
+                # B: record-only —— wake 问候语义上必须发，不受 ledger 限流，但要计入
+                # 账本，防止刚 wake 又紧跟一条 random_message 之类的背靠背主动消息（RC5）。
+                try:
+                    from core.scheduler.proactive_ledger import record_send as _ledger_record
+                    _ledger_record("desktop_wake", channel="desktop", gist=reply)
+                except Exception:
+                    logger.exception("[desktop_wake] proactive_ledger record_send 失败")
                 # Visible reply: strip render/NMP tags only; memory already scrubbed
                 # inside record_assistant_turn (memory_text path).
                 from core.response_processor import strip_render_tags as _strip_tags

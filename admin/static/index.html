@@ -932,6 +932,15 @@ textarea { resize: vertical; min-height: 72px; }
         <div id="sc-status-table"><div class="loading">加载中…</div></div>
       </div>
 
+      <!-- ProactiveLedger：统一发送预算与记账（CC 任务 19 · B） -->
+      <div class="card">
+        <div class="card-header">
+          <h3>主动发言账本</h3>
+          <button class="btn btn-ghost btn-sm" onclick="loadProactiveLedger()">刷新</button>
+        </div>
+        <div id="sc-ledger-body" style="font-size:13px">加载中…</div>
+      </div>
+
       <!-- 手动触发 -->
       <div class="card">
         <div class="card-header"><h3>手动触发</h3></div>
@@ -2862,8 +2871,52 @@ const SC_TRIGGER_LABELS = {
   diary_share_reminder: '日记分享提醒',
 };
 
+async function loadProactiveLedger() {
+  const el = document.getElementById('sc-ledger-body');
+  if (!el) return;
+  try {
+    const d = await api('GET', '/scheduler/proactive-ledger');
+    const gapH = (d.effective_gap_seconds / 3600).toFixed(2);
+    const nextIn = d.next_allowed_in_seconds > 0 ? _fmtSec(d.next_allowed_in_seconds) : '现在可发';
+    const budgetPct = d.daily_budget ? Math.round(100 * d.daily_count / d.daily_budget) : 0;
+    const recentRows = (d.recent || []).slice().reverse().map(r => {
+      const ts = r.ts ? new Date(r.ts * 1000).toLocaleTimeString() : '';
+      return `<tr>
+        <td style="color:var(--muted);font-size:12px">${ts}</td>
+        <td>${escapeHtml(r.trigger_name || '')}</td>
+        <td style="color:var(--muted)">${escapeHtml(r.gist || '')}</td>
+      </tr>`;
+    }).join('');
+    el.innerHTML = `
+      <table style="width:100%;font-size:13px;border-collapse:collapse;margin-bottom:8px">
+        <tr>
+          <td style="padding:6px 0;color:var(--muted);width:140px">生效全局间隔</td>
+          <td style="font-weight:600">${gapH} 小时</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0;color:var(--muted)">下次可发</td>
+          <td style="font-weight:600">${nextIn}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0;color:var(--muted)">今日已发 / 预算</td>
+          <td style="font-weight:600">${d.daily_count} / ${d.daily_budget}（${d.daily_logical_day || ''}）</td>
+        </tr>
+      </table>
+      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:12px">
+        <div style="height:100%;background:var(--accent);border-radius:2px;width:${Math.max(0,Math.min(100,budgetPct))}%"></div>
+      </div>
+      <div class="tbl-wrap"><table>
+        <tr><th>时间</th><th>触发器</th><th>内容摘要</th></tr>
+        ${recentRows || '<tr><td colspan="3" class="empty">暂无记录</td></tr>'}
+      </table></div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="empty">加载失败: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
 async function loadScheduler() {
   _startWatchStatusPoller();
+  loadProactiveLedger();
   try {
     const statusRes = await api('GET', '/scheduler/status');
 
