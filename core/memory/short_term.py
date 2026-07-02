@@ -488,7 +488,39 @@ def detect_reply_homogeneity(
 
     top_prefix, count = Counter(prefixes).most_common(1)[0]
     if count >= min_hits:
-        return f'（近几轮回复开头连续用了「{top_prefix}」，这轮换个切入方式，不要再以相同句首开头。）'
+        return f'（近几轮回复开头连续用了「{top_prefix}」，禁止以相同句首开头，自然地换个切入方式。）'
+    return None
+
+
+def detect_reply_length_collapse(
+    history: list[dict],
+    *,
+    recent_n: int = 5,
+    thresholds: tuple[int, ...] = (15, 40, 80, 150),
+) -> str | None:
+    """
+    检测近 recent_n 条 assistant 消息的字数（len()，按字符计）是否连续落在同一区间。
+    若全部命中同一区间，返回软提示供 prompt 注入，引导下一条打破长度惯性；否则返回 None。
+    仅做统计，不修改 history 内容，不硬裁不硬扩输出。
+    """
+    assistant_msgs = [
+        msg["content"].strip()
+        for msg in history
+        if msg.get("role") == "assistant" and isinstance(msg.get("content"), str) and msg["content"].strip()
+    ][-recent_n:]
+
+    if len(assistant_msgs) < recent_n:
+        return None
+
+    def _bucket(length: int) -> int:
+        for i, edge in enumerate(thresholds):
+            if length < edge:
+                return i
+        return len(thresholds)
+
+    buckets = [_bucket(len(m)) for m in assistant_msgs]
+    if len(set(buckets)) == 1:
+        return "（最近几条回复长度都差不多，这次故意打破这个长度惯性——长了就收一收，短了就多说点，别再照上面的长度来。）"
     return None
 
 

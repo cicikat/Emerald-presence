@@ -137,14 +137,15 @@ Author's Note 放在历史之后、用户消息之前，对模型影响最大，
 2. 记忆/人格约束单句（旧记忆≠当前事实，保持角色边界；原四块协议已压缩为此句）
 3. `author_note_extra`（consistency_check 临时纠偏；`（...）` 包裹；用完即清）
 4. S2 防句式坍缩软提示（短回复同质性检测，命中时注入）
-5. 【输出格式】（`chat` 或 `roleplay`，由 config.yaml `chat.style` 决定；三处格式规则已合并为单句）
-6. 【词级强调】每条回复在情绪/语义焦点处用一次 `<hl>`；需要时再用 `<big>/<sm>`，每条 1–3 处
-7. 条件工具规则（R5）：
+5. S3 防字数坍缩软提示（近 N 条 assistant 回复字数是否连续落在同一区间，命中时注入；`core/memory/short_term.py::detect_reply_length_collapse`，开关/阈值见 `config.yaml` `anti_collapse:` 块，默认开）
+6. 【输出格式】（`chat` 或 `roleplay`，由 config.yaml `chat.style` 决定；三处格式规则已合并为单句）
+7. 【词级强调】每条回复在情绪/语义焦点处用一次 `<hl>`；需要时再用 `<big>/<sm>`，每条 1–3 处
+8. 条件工具规则（R5）：
    - 有 `tool_result`：`【工具结果已提供】`，提示层10已注入，禁止再声称调用
    - 无 `tool_result`：`【无工具结果】`，禁止声称调用工具，禁止编造日记/实时数据
-8. 表达规则（禁止复用对话示例原句）
-9. `style_hint`（从 observations.jsonl 读取，深夜/压力状态提示词；直接追加，不加方括号）
-10. 破限预设 layer=11
+9. 表达规则（禁止复用对话示例原句）
+10. `style_hint`（从 observations.jsonl 读取，深夜/压力状态提示词；直接追加，不加方括号）
+11. 破限预设 layer=11
 
 注意：正式主 LLM 调用没有接入任何 tools schema；`get_time` 等 info/desktop 工具
 由 pre-pipeline 探针触发，结果以 `tool_result` 参数进入层10。memory 类工具

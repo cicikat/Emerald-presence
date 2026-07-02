@@ -245,6 +245,10 @@ memory:
   summary_every_n_rounds: 20
 episodic:
   two_hop_enabled: false   # 默认关；置 true 开二跳做对比测试
+anti_collapse:
+  enabled: true            # 字数坍缩纠偏总开关
+  recent_n: 5              # 检测最近 N 条 assistant 回复
+  thresholds: [15, 40, 80, 150]  # 区间边界（字符数），分 5 档：极短/短/中/长/极长
 context:
   max_turns: 30
 chat:

@@ -1093,7 +1093,7 @@ def build(
                 "content": (
                     "<避免复读>\n你最近几句的开头分别是："
                     + "、".join(f"「{o}…」" for o in _ar_ops)
-                    + "。这次换一个完全不同的起手，别再用「现在」「此刻」「我」之类的重复开头，"
+                    + "。这次换一个完全不同的起手，别再用重复开头，"
                     "也别用上面任何一句的句式。自然地说，像真人不会连用同一种开场。\n</避免复读>"
                 ),
                 "_layer": "9_anti_repeat",
@@ -1155,6 +1155,23 @@ def build(
         _homogeneity_hint = _detect_homogeneity(history)
         if _homogeneity_hint:
             author_note_lines.append(_homogeneity_hint)
+    except Exception:
+        pass
+
+    # S3 防字数坍缩：检测近几轮 assistant 回复字数是否连续落在同一区间，命中时注入软提示
+    # 不叠加情感浓度权重——情感浓度高时 LLM 本就会无视纠偏提示，与本提示自然中和，无需额外系数
+    try:
+        from core.config_loader import get_config as _get_config_ac
+        from core.memory.short_term import detect_reply_length_collapse as _detect_length_collapse
+        _ac_cfg = _get_config_ac().get("anti_collapse", {})
+        if _ac_cfg.get("enabled", True):
+            _length_hint = _detect_length_collapse(
+                history,
+                recent_n=_ac_cfg.get("recent_n", 5),
+                thresholds=tuple(_ac_cfg.get("thresholds", (15, 40, 80, 150))),
+            )
+            if _length_hint:
+                author_note_lines.append(_length_hint)
     except Exception:
         pass
 
