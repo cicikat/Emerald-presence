@@ -73,6 +73,12 @@ def _init_modules():
     cfg = get_config()
     logger.info("配置文件加载完成")
 
+    # DX（Brief 22）：secret_key 空/占位且 registry 无任何 token 时提示首次配置，不自动生成、不阻塞启动。
+    from admin.token_registry import PLACEHOLDER_ADMIN_SECRET, list_records as _list_auth_tokens
+    _secret_key = str(cfg.get("admin", {}).get("secret_key", "")).strip()
+    if _secret_key in ("", PLACEHOLDER_ADMIN_SECRET) and not _list_auth_tokens():
+        logger.info("[startup] 未检测到鉴权配置，首次使用请运行: python scripts/setup_auth.py")
+
     if cfg.get("mode") == "production" and "test_sandbox" in str(cfg.get("data_prefix", "")):
         logger.error("=" * 60)
         logger.error("  [启动警告] mode=production 但 data_prefix 指向 test_sandbox")

@@ -117,6 +117,15 @@ cp config.example.yaml config.yaml
 
 在 `characters/` 目录放入角色卡文件；当前 loader 支持 `.json`、`.txt` 和 `.md`，可参考 `examples/character_template.json`。
 
+**初始化鉴权**（首次运行前）
+
+```bash
+python scripts/setup_auth.py
+```
+
+自动生成管理面板密钥 + 各设备 token，写入本地密码本 `secrets.local.yaml`（已 gitignore）。
+详见 `docs/token-rotation.md`。
+
 **运行**
 
 ```bash
@@ -154,6 +163,8 @@ python run_test.py
 | [docs/data-taxonomy.md](docs/data-taxonomy.md) | 当前 datapath 布局、治理元数据与迁移期兼容读 |
 | [docs/assistant-turn-sink.md](docs/assistant-turn-sink.md) | assistant turn 统一写入、广播与叙事分段协议 |
 | [docs/security_model.md](docs/security_model.md) | 管理面板、桌宠 WebSocket 与客户端密钥边界 |
+| [docs/security.md](docs/security.md) | 鉴权模型（scoped tokens）：scope/profile 表、token 管理 API |
+| [docs/token-rotation.md](docs/token-rotation.md) | 首次配置、各设备 token 轮换命令、401/403/429 排障 |
 | [docs/known-issues.md](docs/known-issues.md) | 当前技术债与已核对修复项 |
 
 ---

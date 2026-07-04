@@ -18,6 +18,8 @@ content/characters/*/*_author_notes.json
 !content/characters/**/*.example.json
 # content/ (authored static) と defaults/ (seed) は track 対象 — ignore 除外不要
 config.yaml
+# 本地密码本（Brief 22）—— 明文凭据，永远不要提交；模板见 secrets.example.yaml
+secrets.local.yaml
 assets/stickers/*
 !assets/stickers/.gitkeep
 __pycache__/

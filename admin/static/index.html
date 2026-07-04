@@ -301,6 +301,7 @@ textarea { resize: vertical; min-height: 72px; }
       <a data-page="scheduler" onclick="goto('scheduler')"><span class="icon">⏰</span>调度器</a>
       <a data-page="users"     onclick="goto('users')">    <span class="icon">👤</span>用户管理</a>
       <a data-page="logs"      onclick="goto('logs')">     <span class="icon">📋</span>错误日志</a>
+      <a data-page="auth-tokens" onclick="goto('auth-tokens')"><span class="icon">🔑</span>Token</a>
     </div>
 
     <div class="nav-group-header" onclick="toggleNavGroup('state')"><span class="nav-caret" id="caret-state">▾</span>🔬 内部状态</div>
@@ -849,6 +850,26 @@ textarea { resize: vertical; min-height: 72px; }
       </div>
     </div>
 
+    <!-- ── Token 管理（Brief 22） ── -->
+    <div class="page" id="page-auth-tokens">
+      <h1 class="page-title">Token 管理
+        <span id="at-whoami" style="float:right;font-size:12px;color:var(--muted);font-weight:400"></span>
+      </h1>
+      <div class="card">
+        <div class="card-header">
+          <h3>Token 列表</h3>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="loadAuthTokens()">刷新</button>
+            <button class="btn btn-primary btn-sm" onclick="openCreateTokenModal()">Create</button>
+          </div>
+        </div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
+          出于安全设计，已有 token 的明文无法再次查看（服务端只存哈希）；丢失请 Rotate。
+        </p>
+        <div id="at-table-body"><div class="loading">加载中…</div></div>
+      </div>
+    </div>
+
     <!-- ── 宠物 ── -->
     <div class="page" id="page-pet">
       <h1 class="page-title">宠物</h1>
@@ -1355,6 +1376,58 @@ textarea { resize: vertical; min-height: 72px; }
   </div>
 </div>
 
+<!-- Token: Create -->
+<div class="modal-backdrop" id="at-create-modal">
+  <div class="modal" style="width:480px">
+    <h3>创建 Token</h3>
+    <div class="form-row col-1">
+      <label class="field">
+        <span>Label（^[a-z0-9-]{1,32}$）</span>
+        <input type="text" id="at-create-label" placeholder="my-device">
+      </label>
+    </div>
+    <div class="form-row col-1">
+      <label class="field">
+        <span>Profile</span>
+        <select id="at-create-profile" onchange="renderAtCreateScopesHint()"></select>
+      </label>
+    </div>
+    <div id="at-create-scopes-hint" style="font-size:12px;color:var(--muted);margin-bottom:8px"></div>
+    <div id="at-create-err" style="color:var(--danger);font-size:12px;min-height:16px"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeCreateTokenModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitCreateToken()">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- Token: 通用确认弹窗（Rotate / Disable，自我保护红字视目标动态附加） -->
+<div class="modal-backdrop" id="at-confirm-modal">
+  <div class="modal" style="width:480px">
+    <h3 id="at-confirm-title">确认操作</h3>
+    <div id="at-confirm-body" style="font-size:13px;line-height:1.7;white-space:pre-wrap;margin-bottom:8px"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeAtConfirmModal()">取消</button>
+      <button class="btn btn-danger" id="at-confirm-btn">确认</button>
+    </div>
+  </div>
+</div>
+
+<!-- Token: 创建/轮换成功（明文仅显示一次） -->
+<div class="modal-backdrop" id="at-success-modal">
+  <div class="modal" style="width:520px">
+    <h3>新的 Token（仅显示一次）</h3>
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:13px;word-break:break-all;margin-bottom:16px" id="at-success-token"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" onclick="copyAtToken()">复制 Token</button>
+      <button class="btn btn-ghost btn-sm" onclick="copyAtPasswordEntry()">复制密码本条目</button>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeAtSuccessModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -1451,6 +1524,7 @@ function goto(page) {
     status:          loadStatus,
     users:           () => { loadUsers(); loadBlacklist(); },
     logs:            loadLogs,
+    'auth-tokens':   loadAuthTokens,
     character:       loadCharacterPage,
     lorebook:        () => { loadLorebook(); loadJbEntries(); },
     'dream-settings': loadDreamSettings,
@@ -2442,9 +2516,207 @@ function escapeHtml(s) {
 // Close modal on backdrop click
 document.querySelectorAll('.modal-backdrop').forEach(bd => {
   bd.addEventListener('click', e => {
-    if (e.target === bd) bd.classList.remove('open');
+    if (e.target !== bd) return;
+    if (bd.id === 'at-success-modal') { closeAtSuccessModal(); return; }
+    bd.classList.remove('open');
   });
 });
+
+// ══════════════════════════════════════════════════════════
+//  Token 管理（Brief 22：whoami / profiles / create / rotate / disable-enable）
+// ══════════════════════════════════════════════════════════
+let _atProfiles = {};
+let _atWhoamiLabel = '';
+let _atSuccessLabel = '';
+let _atSuccessToken = '';
+
+const _AT_LOCATION_BY_LABEL = {
+  'desktop-main':   'Emerald-client/config/client.local.json → adminToken',
+  'mobile-main':    '手机 app 系统设置 → Token 弹窗',
+  'sensor-service': 'Emerald-client/sensor-service/config.yaml → backend.token',
+  'watch-main':     'Watch 端配置',
+  'esp32-device':   '固件配置（firmware/，烧录前写入）',
+  'admin-panel':    '浏览器面板登录框（localStorage qq_admin_key）',
+};
+
+function _atErrMsg(e) {
+  const m = /HTTP \d+: (.*)/s.exec(e.message || '');
+  if (!m) return e.message || String(e);
+  try { return JSON.parse(m[1]).detail || m[1]; } catch { return m[1]; }
+}
+
+async function loadAuthTokens() {
+  const body = document.getElementById('at-table-body');
+  body.innerHTML = '<div class="loading">加载中…</div>';
+  try {
+    const [whoami, tokensResp, profilesResp] = await Promise.all([
+      api('GET', '/auth/whoami'),
+      api('GET', '/auth/tokens'),
+      api('GET', '/auth/profiles'),
+    ]);
+    _atWhoamiLabel = whoami.label;
+    _atProfiles = profilesResp.profiles || {};
+    document.getElementById('at-whoami').textContent = `当前身份: ${whoami.label}`;
+    _renderAuthTokensTable(tokensResp.tokens || []);
+  } catch (e) {
+    body.innerHTML = `<div class="empty">加载失败: ${_atErrMsg(e)}</div>`;
+  }
+}
+
+function _renderAuthTokensTable(tokens) {
+  const body = document.getElementById('at-table-body');
+  const rows = [];
+
+  rows.push(`
+    <tr title="修改：config.yaml 的 admin.secret_key，或环境变量 YEXUAN_ADMIN_SECRET（env 优先）">
+      <td><strong>legacy-admin</strong></td>
+      <td>admin</td>
+      <td><span class="badge badge-accent">◆ break-glass</span></td>
+      <td>—</td>
+      <td>—</td>
+      <td></td>
+    </tr>
+  `);
+
+  for (const t of tokens) {
+    const isSelf = t.label === _atWhoamiLabel;
+    const statusBadge = t.disabled
+      ? '<span class="badge">○ disabled</span>'
+      : '<span class="badge badge-success">● active</span>';
+    const scopesText = (t.scopes || []).join(', ');
+    const scopesShort = scopesText.length > 30 ? scopesText.slice(0, 30) + '…' : scopesText;
+    rows.push(`
+      <tr>
+        <td>${t.label}${isSelf ? ' <span class="badge badge-warn" title="这是你当前登录使用的 token">当前</span>' : ''}</td>
+        <td title="${scopesText}">${scopesShort}</td>
+        <td>${statusBadge}</td>
+        <td>${t.created_at ? t.created_at.slice(0, 10) : '—'}</td>
+        <td><span class="badge">${t.hash_prefix}</span></td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" onclick="confirmRotateToken('${t.label}')">Rotate</button>
+          <button class="btn btn-ghost btn-sm" onclick="confirmToggleToken('${t.label}', ${!t.disabled})">${t.disabled ? 'Enable' : 'Disable'}</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyAtLabel('${t.label}')">Copy Label</button>
+        </td>
+      </tr>
+    `);
+  }
+
+  body.innerHTML = `<div class="tbl-wrap"><table>
+    <tr><th>Label</th><th>Scopes</th><th>Status</th><th>Created</th><th>Hash</th><th></th></tr>
+    ${rows.join('')}
+  </table></div>`;
+}
+
+function copyAtLabel(label) {
+  navigator.clipboard.writeText(label).then(() => toast('已复制 label')).catch(() => toast('复制失败', 'err'));
+}
+
+// ── Create ──
+function openCreateTokenModal() {
+  document.getElementById('at-create-label').value = '';
+  document.getElementById('at-create-err').textContent = '';
+  const sel = document.getElementById('at-create-profile');
+  sel.innerHTML = Object.keys(_atProfiles).map(p => `<option value="${p}">${p}</option>`).join('');
+  renderAtCreateScopesHint();
+  document.getElementById('at-create-modal').classList.add('open');
+}
+function closeCreateTokenModal() {
+  document.getElementById('at-create-modal').classList.remove('open');
+}
+function renderAtCreateScopesHint() {
+  const profile = document.getElementById('at-create-profile').value;
+  const scopes = _atProfiles[profile] || [];
+  document.getElementById('at-create-scopes-hint').textContent = scopes.length ? `包含 scope: ${scopes.join(', ')}` : '';
+}
+async function submitCreateToken() {
+  const label = document.getElementById('at-create-label').value.trim();
+  const profile = document.getElementById('at-create-profile').value;
+  const errEl = document.getElementById('at-create-err');
+  if (!/^[a-z0-9-]{1,32}$/.test(label)) {
+    errEl.textContent = 'label 须匹配 ^[a-z0-9-]{1,32}$';
+    return;
+  }
+  try {
+    const resp = await api('POST', '/auth/tokens', { label, profile });
+    closeCreateTokenModal();
+    showAtSuccessModal(resp.label, resp.token);
+    loadAuthTokens();
+  } catch (e) {
+    errEl.textContent = _atErrMsg(e);
+  }
+}
+
+// ── 通用确认弹窗（Rotate / Disable-Enable） ──
+function _openAtConfirm(title, bodyText, onConfirm) {
+  document.getElementById('at-confirm-title').textContent = title;
+  document.getElementById('at-confirm-body').textContent = bodyText;
+  const btn = document.getElementById('at-confirm-btn');
+  btn.onclick = async () => { await onConfirm(); closeAtConfirmModal(); };
+  document.getElementById('at-confirm-modal').classList.add('open');
+}
+function closeAtConfirmModal() {
+  document.getElementById('at-confirm-modal').classList.remove('open');
+}
+
+function confirmRotateToken(label) {
+  let body = '⚠️ 将立即使旧 Token 失效。\n\n' +
+    '持有旧 token 的设备会开始认证失败（401），\n' +
+    '连续失败会触发 429 限速（重启后端可立即解除）。\n' +
+    '请在 Rotate 后尽快更新对应设备的配置。';
+  if (label === _atWhoamiLabel) {
+    body += '\n\n⚠️ 这是你当前登录面板使用的 token，操作后你需要用新值/break-glass 重新登录';
+  }
+  _openAtConfirm(`Rotate ${label}`, body, async () => {
+    try {
+      const resp = await api('POST', `/auth/tokens/${encodeURIComponent(label)}/rotate`);
+      showAtSuccessModal(resp.label, resp.token);
+      loadAuthTokens();
+    } catch (e) {
+      toast(`Rotate 失败: ${_atErrMsg(e)}`, 'err');
+    }
+  });
+}
+
+function confirmToggleToken(label, disabled) {
+  const verb = disabled ? 'Disable' : 'Enable';
+  let body = disabled
+    ? `停用后该 token 立即认证失败（401），持有它的设备需要用新 token 或重新 Enable 才能恢复。`
+    : `重新启用后该 token 立即恢复可用。`;
+  if (label === _atWhoamiLabel) {
+    body += '\n\n⚠️ 这是你当前登录面板使用的 token，操作后你需要用新值/break-glass 重新登录';
+  }
+  _openAtConfirm(`${verb} ${label}`, body, async () => {
+    try {
+      await api('PATCH', `/auth/tokens/${encodeURIComponent(label)}`, { disabled });
+      toast(`${label} 已${disabled ? '停用' : '启用'}`);
+      loadAuthTokens();
+    } catch (e) {
+      toast(`${verb} 失败: ${_atErrMsg(e)}`, 'err');
+    }
+  });
+}
+
+// ── 成功弹窗（Create / Rotate 共用；明文仅显示一次） ──
+function showAtSuccessModal(label, token) {
+  _atSuccessLabel = label;
+  _atSuccessToken = token;
+  document.getElementById('at-success-token').textContent = token;
+  document.getElementById('at-success-modal').classList.add('open');
+}
+function copyAtToken() {
+  navigator.clipboard.writeText(_atSuccessToken).then(() => toast('已复制 Token')).catch(() => toast('复制失败', 'err'));
+}
+function copyAtPasswordEntry() {
+  const location = _AT_LOCATION_BY_LABEL[_atSuccessLabel] || '待填写';
+  const line = `  ${_atSuccessLabel}: { token: "${_atSuccessToken}", 配置位置: "${location}" }`;
+  navigator.clipboard.writeText(line).then(() => toast('已复制密码本条目')).catch(() => toast('复制失败', 'err'));
+}
+function closeAtSuccessModal() {
+  if (!confirm('已保存好了吗？关闭后无法再查看')) return;
+  document.getElementById('at-success-modal').classList.remove('open');
+  _atSuccessToken = '';
+  _atSuccessLabel = '';
+}
 
 // ══════════════════════════════════════════════════════════
 //  QQ 设置
