@@ -405,7 +405,33 @@ class Pipeline:
             f"history={len(history)} lore={len(lore_entries)}"
         )
 
-        # Recall trace — diagnostic only, never raises, not on hot path
+        # X3: web-sourced semantic recall — query vector_store for source="web" items
+        _web_recall_text = ""
+        _web_recall_hits: list = []
+        if not _skip_recall and _query_vec:
+            try:
+                from core.memory import vector_store as _vs_web
+                _web_hits = _vs_web.query_with_preview(
+                    uid, char_id, _query_vec, k=3, sources=["web"]
+                )
+                if _web_hits:
+                    _web_parts = []
+                    for _url, _preview, _dist in _web_hits:
+                        if _preview:
+                            _web_parts.append(
+                                f"• {_preview.strip()}\n  来源：{_url}"
+                            )
+                    _web_recall_hits = [(_u, round(_d, 4)) for _u, _p, _d in _web_hits]
+                    if _web_parts:
+                        _web_recall_text = "\n\n".join(_web_parts)
+                        logger.debug(
+                            "[pipeline.web_recall] uid=%s hits=%d", uid, len(_web_hits)
+                        )
+            except Exception as _we:
+                logger.debug("[pipeline.fetch_context] web_recall skip: %s", _we)
+
+        # Recall trace — diagnostic only, never raises, not on hot path.
+        # 放在 X3 之后写入，才能带上 web_recall_hits（A2：CC 任务 23）。
         try:
             from core.recall_trace import write_trace as _write_recall_trace
             from core.memory.mood_state import get_intensity as _get_intensity
@@ -420,6 +446,8 @@ class Pipeline:
                 "episodic_fallback_hits": _episodic_fallback_trace,
                 "event_log_hits": _event_log_trace,
                 "lore_hits": _lore_trace,
+                "semantic_hits": [(_sid, round(_dist, 4)) for _sid, _dist in _semantic_hits],
+                "web_recall_hits": _web_recall_hits,
                 "mood": {
                     "current": _get_mood(char_id=char_id),
                     "intensity": round(_get_intensity(char_id=char_id), 3),
@@ -427,29 +455,6 @@ class Pipeline:
             })
         except Exception as _te:
             logger.warning("[pipeline.fetch_context] recall trace write failed: %s", _te)
-
-        # X3: web-sourced semantic recall — query vector_store for source="web" items
-        _web_recall_text = ""
-        if not _skip_recall and _query_vec:
-            try:
-                from core.memory import vector_store as _vs_web
-                _web_hits = _vs_web.query_with_preview(
-                    uid, char_id, _query_vec, k=3, sources=["web"]
-                )
-                if _web_hits:
-                    _web_parts = []
-                    for _url, _preview, _dist in _web_hits:
-                        if _preview:
-                            _web_parts.append(
-                                f"• {_preview.strip()}\n  来源：{_url}"
-                            )
-                    if _web_parts:
-                        _web_recall_text = "\n\n".join(_web_parts)
-                        logger.debug(
-                            "[pipeline.web_recall] uid=%s hits=%d", uid, len(_web_hits)
-                        )
-            except Exception as _we:
-                logger.debug("[pipeline.fetch_context] web_recall skip: %s", _we)
 
         return {
             "history":             history,
@@ -473,6 +478,7 @@ class Pipeline:
             "query_vec":        _query_vec,
             # X3: web 资料召回（外部事实，已标注来源，不进 episodic/identity）
             "web_recall_result": _web_recall_text,
+            "web_recall_hits":   _web_recall_hits,
         }
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -559,6 +565,7 @@ class Pipeline:
             stage_transcript=context.get("stage_transcript", ""),
             suppress_emotional_recall=context.get("suppress_emotional_recall", False),
             web_recall_result=context.get("web_recall_result", ""),
+            web_recall_hits=context.get("web_recall_hits", []),
         )
         if _char_id == self._active_character_id:
             self.author_note_extra = ""

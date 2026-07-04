@@ -1101,6 +1101,20 @@ textarea { resize: vertical; min-height: 72px; }
     <!-- ── 观测：Prompt 层检视器 ── -->
     <div class="page" id="page-observe-prompt">
       <h1 class="page-title">Prompt 层检视 <span style="font-size:13px;font-weight:400;color:var(--muted)">只读 · 最近 5 轮</span></h1>
+
+      <!-- 层级开关（消融测试） -->
+      <div class="card" id="obs-ablation-card" style="margin-bottom:16px">
+        <div class="card-header">
+          <h3>层级开关（消融测试）</h3>
+          <span style="font-size:12px;color:var(--muted)">只过滤注入，不短路检索；保存后下一轮对话起作用</span>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px">
+          <button class="btn btn-ghost btn-sm" onclick="loadPromptAblation()">刷新</button>
+          <button class="btn btn-primary btn-sm" onclick="savePromptAblation()">保存</button>
+        </div>
+        <div id="obs-ablation-list" style="font-size:12px">加载中…</div>
+      </div>
+
       <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
         <input type="text" id="obs-prompt-uid" placeholder="uid (QQ号)" style="width:150px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text)">
         <select id="obs-prompt-n" style="padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text)">
@@ -1134,6 +1148,17 @@ textarea { resize: vertical; min-height: 72px; }
       </div>
       <!-- 层级列表 -->
       <div id="obs-prompt-layers-list"></div>
+
+      <!-- 召回溯源 -->
+      <div class="card" id="obs-recall-card" style="margin-top:24px">
+        <div class="card-header"><h3>召回溯源</h3><span style="font-size:12px;color:var(--muted)">recall_trace · episodic/event_log/lore/semantic(X2)/web_recall(X3)</span></div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+          <input type="date" id="obs-recall-date" style="padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text)">
+          <input type="number" id="obs-recall-n" value="5" min="1" style="width:70px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text)">
+          <button class="btn btn-ghost btn-sm" onclick="loadObserveRecallTrace()">查看（复用上方 uid）</button>
+        </div>
+        <div id="obs-recall-list" style="font-size:12px;color:var(--muted)">在上方输入 uid 后点击查看</div>
+      </div>
     </div>
 
     <!-- ── 探针观测 ── -->
@@ -1438,7 +1463,7 @@ function goto(page) {
     'observe-hidden':  loadObserveHidden,
     'observe-chatlog': loadObserveChatlogDates,
     'observe-runtime': loadObserveRuntime,
-    'observe-prompt':  () => loadObservePromptUidList(),
+    'observe-prompt':  () => { loadObservePromptUidList(); loadPromptAblation(); },
     'observe-probe':   () => loadObserveProbeUidList(),
     'observe-dream-prompt': () => loadObserveDreamPromptUidList(),
     'observe-trigger-catalog': () => loadTriggerCatalog(),
@@ -3273,7 +3298,10 @@ async function loadObservePrompt() {
       `<div style="margin-top:4px">激活 tags：${(snap.active_tags||[]).map(t=>`<code style="font-size:11px;background:var(--bg-secondary);padding:1px 4px;border-radius:3px">${escapeHtml(t)}</code>`).join(' ') || '(无)'}</div>` +
       (snap.removed_layers && snap.removed_layers.length
         ? `<div style="margin-top:4px;color:#ef4444">被裁层：${snap.removed_layers.map(l=>`<code style="font-size:11px">${escapeHtml(l)}</code>`).join(' ')}</div>`
-        : '<div style="margin-top:4px;color:var(--muted)">无裁剪</div>');
+        : '<div style="margin-top:4px;color:var(--muted)">无裁剪</div>') +
+      (snap.ablated_layers && snap.ablated_layers.length
+        ? `<div style="margin-top:4px;color:#a78bfa">已消融层：${snap.ablated_layers.map(l=>`<code style="font-size:11px">${escapeHtml(l)}</code>`).join(' ')}</div>`
+        : '');
     if (isProactive) {
       const sq = (origin.search_query||'').trim();
       const sp = (origin.seed_prompt||'').trim();
@@ -3317,8 +3345,21 @@ async function loadObservePrompt() {
       }
       if (prov.mode === 'scored') {
         const q = prov.rag_query || '';
+        let extra = '';
+        if (prov.source) {
+          extra += `<br><span style="color:var(--muted)">来源：</span>${escapeHtml(prov.source)}`;
+        }
+        const hits = prov.hits || [];
+        if (hits.length) {
+          const hitLines = hits.map(h => {
+            const url = Array.isArray(h) ? h[0] : (h.url || '');
+            const dist = Array.isArray(h) ? h[1] : (h.dist ?? h.distance);
+            return `&nbsp;&nbsp;• ${escapeHtml(String(url))} (dist=${dist})`;
+          }).join('<br>');
+          extra += `<br><span style="color:var(--muted)">命中：</span><br>${hitLines}`;
+        }
         return `<div style="margin-top:6px;font-size:11px;color:#c4b5fd">
-          <span style="color:var(--muted)">RAG 查询：</span>${escapeHtml(q.slice(0,120))}${q.length>120?'…':''}
+          <span style="color:var(--muted)">RAG 查询：</span>${escapeHtml(q.slice(0,120))}${q.length>120?'…':''}${extra}
         </div>`;
       }
       return '';
@@ -3376,6 +3417,104 @@ function togglePromptLayer(contentId) {
   const el = document.getElementById(contentId);
   if (!el) return;
   el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+// ══════════════════════════════════════════════════════════
+//  观测页：层级消融开关（CC 任务 23 · B7）
+// ══════════════════════════════════════════════════════════
+let _promptAblationKnownLayers = [];
+
+async function loadPromptAblation() {
+  const el = document.getElementById('obs-ablation-list');
+  el.textContent = '加载中…';
+  try {
+    const d = await api('GET', '/prompt-ablation');
+    _promptAblationKnownLayers = d.known_layers || [];
+    const alwaysOn = new Set(d.always_on || []);
+    const disabled = new Set(d.disabled_layers || []);
+    const rows = _promptAblationKnownLayers.map(({layer, desc}) => {
+      const isAlwaysOn = alwaysOn.has(layer);
+      const isOff = disabled.has(layer);
+      const warnHtml = layer === '9_history'
+        ? '<span style="color:#ef4444;font-size:11px;margin-left:6px">关闭短期历史将严重改变行为</span>'
+        : '';
+      return `<label style="display:flex;align-items:center;gap:8px;padding:4px 0;${isAlwaysOn?'opacity:0.5':''}">
+        <input type="checkbox" class="obs-ablation-toggle" data-layer="${escapeHtml(layer)}"
+          ${isOff && !isAlwaysOn ? 'checked' : ''} ${isAlwaysOn ? 'disabled' : ''}>
+        <code style="font-size:11px;background:var(--bg-secondary);padding:1px 5px;border-radius:3px">${escapeHtml(layer)}</code>
+        <span style="font-size:12px;color:var(--muted)">${escapeHtml(desc||'')}</span>
+        ${isAlwaysOn ? '<span style="font-size:11px;color:var(--muted)">（不可消融）</span>' : ''}
+        ${warnHtml}
+      </label>`;
+    }).join('');
+    const perceptionOff = !!d.perception_block_disabled;
+    const perceptionRow = `<label style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--border);margin-top:6px">
+      <input type="checkbox" id="obs-ablation-perception" ${perceptionOff ? 'checked' : ''}>
+      <code style="font-size:11px;background:var(--bg-secondary);padding:1px 5px;border-radius:3px">perception_block</code>
+      <span style="font-size:12px;color:var(--muted)">感知槽位（嵌在 1_system_prompt 内，独立子开关）</span>
+    </label>`;
+    el.innerHTML = rows + perceptionRow;
+  } catch(e) {
+    el.textContent = '加载失败：' + e.message;
+  }
+}
+
+async function savePromptAblation() {
+  const checks = document.querySelectorAll('.obs-ablation-toggle:checked');
+  const disabled_layers = Array.from(checks).map(c => c.dataset.layer);
+  const perception_block_disabled = document.getElementById('obs-ablation-perception').checked;
+  try {
+    await api('PUT', '/prompt-ablation', { disabled_layers, perception_block_disabled });
+    toast('已生效，下一轮对话起作用', 'ok');
+    loadPromptAblation();
+  } catch(e) {
+    toast('保存失败：' + e.message, 'err');
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  观测页：召回溯源（recall_trace，CC 任务 23 · A3）
+// ══════════════════════════════════════════════════════════
+async function loadObserveRecallTrace() {
+  const uid = (document.getElementById('obs-prompt-uid').value || '').trim();
+  const date = document.getElementById('obs-recall-date').value || '';
+  const n = parseInt(document.getElementById('obs-recall-n').value || '5', 10);
+  const el = document.getElementById('obs-recall-list');
+  if (!uid) { el.innerHTML = '<div style="color:var(--muted)">请先在上方输入 uid</div>'; return; }
+  el.innerHTML = '<div style="color:var(--muted)">加载中…</div>';
+  try {
+    const qs = new URLSearchParams({ n: String(n) });
+    if (date) qs.set('date', date);
+    const d = await api('GET', `/observe/recall/${encodeURIComponent(uid)}?${qs.toString()}`);
+    const records = d.records || [];
+    if (!records.length) {
+      el.innerHTML = `<div style="color:var(--muted)">${escapeHtml(d.date||'')} 暂无召回溯源记录</div>`;
+      return;
+    }
+    el.innerHTML = records.slice().reverse().map((r, idx) => {
+      const contentId = `obs-recall-content-${idx}`;
+      const fmtHits = (hits) => (hits || []).map(h => Array.isArray(h) ? `${h[0]} (${h[1]})` : JSON.stringify(h)).join(', ') || '(无)';
+      const mood = r.mood || {};
+      return `<div class="card" style="margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer" onclick="togglePromptLayer('${contentId}')">
+          <span style="font-size:12px;color:var(--muted)">${escapeHtml((r.ts||'').replace('T',' '))}</span>
+          <span style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.query||'')}</span>
+          <span style="font-size:11px">▶</span>
+        </div>
+        <div id="${contentId}" style="display:none;padding:0 12px 12px;font-size:12px;line-height:1.8">
+          <div><span style="color:var(--muted)">episodic_hits：</span>${fmtHits(r.episodic_hits)}</div>
+          <div><span style="color:var(--muted)">episodic_fallback（${r.episodic_fallback_used?'已用':'未用'}）：</span>${fmtHits(r.episodic_fallback_hits)}</div>
+          <div><span style="color:var(--muted)">event_log_hits：</span>${fmtHits(r.event_log_hits)}</div>
+          <div><span style="color:var(--muted)">lore_hits：</span>${escapeHtml(JSON.stringify(r.lore_hits||[]))}</div>
+          <div><span style="color:var(--muted)">semantic_hits（X2 向量通道）：</span>${fmtHits(r.semantic_hits)}</div>
+          <div><span style="color:var(--muted)">web_recall_hits（X3）：</span>${fmtHits(r.web_recall_hits)}</div>
+          <div><span style="color:var(--muted)">mood：</span>${escapeHtml(mood.current||'')} (${mood.intensity ?? ''})</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = `<div style="color:#ef4444">加载失败：${escapeHtml(e.message)}</div>`;
+  }
 }
 
 function exportSnapshotMd(kind) {

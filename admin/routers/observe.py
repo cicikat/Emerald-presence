@@ -9,6 +9,7 @@ GET /observe/probe                — 有探针快照的 uid 列表
 GET /observe/dream-prompt/{uid}   — 最近 N 轮梦境 Prompt 层级快照（D0-D10 + LLM 输出）
 GET /observe/dream-prompt         — 有梦境快照的 uid 列表
 GET /observe/trigger-catalog      — 触发器目录：全部 proposer + 最近真实捕获快照（seed prompt / search_query）
+GET /observe/recall/{uid}         — 召回溯源（recall_trace JSONL：episodic/event_log/lore/semantic(X2)/web_recall(X3)）
 GET /observe/vector               — 列出有向量库的 uid
 GET /observe/vector/{uid}         — 向量库统计 + 条目浏览（支持 source 过滤 + 分页）
 GET /observe/vector/{uid}/search  — 向量库语义检索（q= 参数，k 结果数）
@@ -347,6 +348,54 @@ async def get_vector_overview(uid: str, source: str = "", limit: int = 100,
         "stats": vs.stats(uid, cid),
         "entries": vs.list_entries(uid, cid, source=source or None, limit=lim),
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /observe/recall  —  召回溯源（recall_trace JSONL，CC 任务 23 · A3）
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/observe/recall/{uid}",
+    summary="查看指定 uid 的召回溯源记录（recall_trace）",
+    description=(
+        "读取 `core/recall_trace.py` 落盘的每轮召回诊断 JSONL："
+        "episodic_hits / event_log_hits / lore_hits / semantic_hits（X2 向量通道）/ "
+        "web_recall_hits（X3 web 召回）/ mood。\n\n"
+        "`date` 缺省为今天；`n` 为尾部条数（默认 5）。文件不存在时返回空列表，不 404。"
+    ),
+    tags=["观测"],
+)
+async def get_recall_trace(uid: str, date: str = "", n: int = 5, char_id: str = "",
+                            auth=Depends(require_scopes("memory.read"))):
+    import json
+    from datetime import datetime
+    from core.memory.scope import MemoryScope
+    from core.memory.path_resolver import resolve_path
+    from admin.routers.provenance import _resolve_char_id
+
+    resolved_char_id = _resolve_char_id(char_id)
+    date_str = date or datetime.now().strftime("%Y-%m-%d")
+
+    try:
+        scope = MemoryScope.reality_scope(uid, resolved_char_id)
+        trace_dir = resolve_path(scope, "recall_trace")
+        trace_file = trace_dir / f"{date_str}.jsonl"
+        if not trace_file.exists():
+            return {"uid": uid, "char_id": resolved_char_id, "date": date_str, "records": []}
+        lines = trace_file.read_text(encoding="utf-8").strip().splitlines()
+        records = []
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                records.append(json.loads(line))
+            except Exception:
+                continue
+        tail = records[-max(n, 1):] if n > 0 else records
+        return {"uid": uid, "char_id": resolved_char_id, "date": date_str, "records": tail}
+    except Exception as exc:
+        logger.warning("[observe/recall] read failed uid=%s: %s", uid, exc)
+        return {"uid": uid, "char_id": resolved_char_id, "date": date_str, "records": []}
 
 
 @router.get("/observe/vector/{uid}/search", summary="向量库语义检索", tags=["观测"])

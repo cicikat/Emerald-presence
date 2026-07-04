@@ -5,7 +5,7 @@ Appends one JSONL record per pipeline turn to:
   data/runtime/memory/{char_id}/{uid}/recall_trace/{date}.jsonl
 
 Diagnostic only — never raises, never read by the generation path.
-Written by fetch_context(); read by future GET /debug/recall endpoint.
+Written by fetch_context(); read by GET /observe/recall/{uid} (admin/routers/observe.py).
 """
 import json
 import logging

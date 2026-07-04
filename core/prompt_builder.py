@@ -11,6 +11,7 @@ from typing import Literal
 
 from core.character_loader import Character
 from core.error_handler import log_error
+from core.prompt_ablation import ALWAYS_ON
 
 
 @dataclass
@@ -304,6 +305,7 @@ def build(
     stage_transcript: str = "",
     suppress_emotional_recall: bool = False,
     web_recall_result: str = "",
+    web_recall_hits: list | None = None,
 ) -> tuple[list[dict], dict]:
     """
     组装完整的 prompt 消息列表
@@ -330,6 +332,10 @@ def build(
     _layers: list[str] = []
     messages: list[dict] = []
 
+    # 层级消融开关（CC 任务 23 · B）：一次性读取，B3 统一过滤点复用同一结果。
+    from core.prompt_ablation import get_state as _ablation_state
+    _ab = _ablation_state()
+
     # 预计算本轮消息间隔（基于 short_term history timestamp，问题3用）
     from core.presence import (
         get_gap_from_history as _get_gap,
@@ -355,6 +361,8 @@ def build(
     if character.system_prompt:
         _layers.append("1_system_prompt")
         perception = perception_block.strip() if perception_block else ""
+        if _ab["perception_block_disabled"]:
+            perception = ""
 
         from core.mood_text import get_mood_text
         import json
@@ -981,6 +989,12 @@ def build(
             ),
             "_layer": "web_recall",
             "_drop_priority": 35,
+            "_provenance": {
+                "mode": "scored",
+                "rag_query": user_message[:200],
+                "source": "vector_store:web",
+                "hits": web_recall_hits or [],
+            },
         })
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -1328,6 +1342,21 @@ def build(
     })
 
     # ─────────────────────────────────────────────────────────────────────────
+    # 层级消融开关（CC 任务 23 · B3）：组装完成后、token 估算与裁剪之前统一过滤。
+    # 只过滤注入，检索层（fetch_context）不受影响——已在任务决策中确认。
+    # ─────────────────────────────────────────────────────────────────────────
+    _ablated_layers: list[str] = []
+    if _ab["disabled_layers"]:
+        _keep = []
+        for _m in messages:
+            _lyr = _m.get("_layer", "")
+            if _lyr in _ab["disabled_layers"] and _lyr not in ALWAYS_ON:
+                _ablated_layers.append(_lyr)
+            else:
+                _keep.append(_m)
+        messages = _keep
+
+    # ─────────────────────────────────────────────────────────────────────────
     # 注入前集中规范化（seam）——只清洗 system 层，绝不触碰真实对话
     # ─────────────────────────────────────────────────────────────────────────
     for _m in messages:
@@ -1404,6 +1433,7 @@ def build(
         "token_estimate": sum(len(m["content"]) for m in messages),
         "tags": list(_tags),
         "removed_layers": _removed_layers,
+        "ablated_layers": _ablated_layers,
     }
 
 
@@ -1455,3 +1485,58 @@ def _parse_mes_example(mes_example: str, char_name: str) -> list[dict]:
                     current_buf.append(line)
         _flush()
     return messages
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 层级消融开关（CC 任务 23 · B6）：覆盖全部 build() 中出现的 _layer 字面量。
+# perception_block 不是独立 _layer（嵌在 1_system_prompt 槽位），由 API 独立字段
+# perception_block_disabled 表达，不在此表内。
+#
+# 放在文件末尾（而非顶部）：避免与 tests/test_r4b_prompt_drop_priority.py 等按
+# `src.find('"layer_name"')` 定位 messages.append() 代码块的测试发生字符串误命中。
+# ─────────────────────────────────────────────────────────────────────────────
+KNOWN_LAYERS: list[tuple[str, str]] = [
+    ("0_jailbreak", "破限预设 layer=0"),
+    ("1_system_prompt", "角色存在性定义 + 情绪软提示 + 感知槽位（不可消融）"),
+    ("1.5_fact_boundary", "现实信息事实边界句"),
+    ("2_char_desc", "角色描述 + 性格 + 情境"),
+    ("2.2_stage_presence", "群聊在场成员提醒"),
+    ("2_jailbreak", "破限预设 layer=2"),
+    ("2.5_time", "当前时间"),
+    ("2.55_last_seen", "上次说话时间差"),
+    ("2.6_activity", "角色此刻在做什么"),
+    ("3_relation", "与该用户的关系"),
+    ("3.5_period", "生理期感知（tagged）"),
+    ("3.6_watch", "watch 睡眠数据摘要（tagged）"),
+    ("3.7_sensor", "手机传感器摘要"),
+    ("3.8_activity", "桌宠屏幕活动快照（tagged）"),
+    ("3.9_screen_awareness", "桌面实时感知摘要"),
+    ("4_group_context", "群聊上下文"),
+    ("4.2_stage_transcript", "Stage 共享对话 transcript"),
+    ("5_profile", "用户画像"),
+    ("5_profile_pref", "用户偏好/习惯类事实"),
+    ("5.1_user_facts", "跨角色全局用户事实"),
+    ("5.2_reminders", "待办备忘录"),
+    ("5.5_lore", "世界书条目"),
+    ("6a_user_identity", "用户稳定行为模式"),
+    ("6b_event_search", "相关往事（event_log 语义搜索）"),
+    ("6c_episodic", "情景记忆片段（含 fallback，两者共用此层名）"),
+    ("mid_term", "过去 12 小时事件压缩视图"),
+    ("6d_diary_context", "用户近期日记（tagged）"),
+    ("6e_inner_diary", "角色昨天的日记（事件层 + 感受层）"),
+    ("web_recall", "向量库 X3 web 资料召回"),
+    ("6f_dream_afterglow", "梦境余韵详细层"),
+    ("dream_afterglow_soft_hint", "梦境余韵软提示"),
+    ("6g_dream_impression", "梦境印象回流"),
+    ("7_mes_example_item", "对话示例（few-shot）"),
+    ("9_history", "短期对话历史（关闭将严重改变行为）"),
+    ("9_anti_repeat", "跨轮开头去同质软约束"),
+    ("9.5_episodic_top", "最相关情景记忆置顶一条"),
+    ("10_tool_result", "本轮工具执行结果"),
+    ("11_author_note", "Author's Note 人设核心提醒"),
+    ("11_jailbreak", "破限预设 layer=11"),
+    ("11.5_post_history", "酒馆卡历史之后约束层"),
+    ("11.7_pinned_facts", "用户特意提过要记住的事"),
+    ("12_time_hint", "时间提示（gap≥10分钟）"),
+    ("12_user_message", "用户当前消息（不可消融）"),
+]

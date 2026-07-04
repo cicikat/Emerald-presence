@@ -523,6 +523,10 @@ class DataPaths:
         """data/runtime/web_autosearch_state.json — rate-limit state for autonomous web search (X3)."""
         return self._p("runtime", "web_autosearch_state.json")
 
+    def prompt_layer_ablation(self) -> Path:
+        """Runtime config: data/runtime/prompt_layer_ablation.json — layer ablation switches (CC 任务 23)."""
+        return self._p("runtime", "prompt_layer_ablation.json")
+
     def very_formal_project_dir(self) -> Path:
         """data/very_formal_project/ — whitelisted toy files only."""
         return self._p("very_formal_project")

@@ -72,6 +72,8 @@ def capture(uid: str, messages: list[dict], meta: dict) -> None:
                 "triggers_checked": prov.get("triggers_checked", []),
                 "matched_tags": prov.get("matched_tags", []),
                 "rag_query": prov.get("rag_query", ""),
+                "source": prov.get("source", ""),
+                "hits": prov.get("hits", []),
             }
         layers.append({
             "layer": layer,
@@ -110,6 +112,7 @@ def capture(uid: str, messages: list[dict], meta: dict) -> None:
         "active_tags": meta.get("tags", []),
         "layers_activated": meta.get("layers_activated", []),
         "removed_layers": removed,
+        "ablated_layers": meta.get("ablated_layers", []),
         "pruning_triggered": token_estimate > HARD_TRIGGER or bool(removed),
         "layers": layers,
         "llm_output": None,  # filled by update_llm_output after run_llm

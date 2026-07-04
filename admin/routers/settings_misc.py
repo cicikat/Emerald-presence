@@ -240,3 +240,50 @@ async def update_multi_message(body: dict, auth=Depends(require_scopes("persona"
     from core import config_loader
     config_loader.reload_config()
     return {"message": f"分条发送已{'启用' if enabled else '禁用'}", "multi_message": enabled}
+
+
+# ─── Prompt 层级消融开关（CC 任务 23 · B6） ─────────────────────────────────────
+
+class PromptAblationUpdate(BaseModel):
+    disabled_layers: list[str]
+    perception_block_disabled: bool
+
+
+@router.get("/prompt-ablation", summary="获取 Prompt 层级消融开关状态")
+async def get_prompt_ablation(auth=Depends(require_scopes("admin"))):
+    from core.prompt_ablation import get_state, ALWAYS_ON
+    from core.prompt_builder import KNOWN_LAYERS
+
+    state = get_state()
+    return {
+        "known_layers": [{"layer": name, "desc": desc} for name, desc in KNOWN_LAYERS],
+        "always_on": sorted(ALWAYS_ON),
+        "disabled_layers": sorted(state["disabled_layers"]),
+        "perception_block_disabled": state["perception_block_disabled"],
+    }
+
+
+@router.put("/prompt-ablation", summary="修改 Prompt 层级消融开关（进程内热生效）")
+async def update_prompt_ablation(body: PromptAblationUpdate, auth=Depends(require_scopes("admin"))):
+    from core.prompt_ablation import set_state, ALWAYS_ON
+    from core.prompt_builder import KNOWN_LAYERS
+
+    known_names = {name for name, _ in KNOWN_LAYERS}
+    unknown = [l for l in body.disabled_layers if l not in known_names]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"未知层名: {unknown}")
+
+    always_on_hit = set(body.disabled_layers) & ALWAYS_ON
+    if always_on_hit:
+        raise HTTPException(status_code=422, detail=f"不可消融层: {sorted(always_on_hit)}")
+
+    try:
+        state = set_state(body.disabled_layers, body.perception_block_disabled)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    return {
+        "message": "层级消融开关已更新，下一轮对话起作用",
+        "disabled_layers": sorted(state["disabled_layers"]),
+        "perception_block_disabled": state["perception_block_disabled"],
+    }
