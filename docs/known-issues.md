@@ -288,6 +288,112 @@ HTTP 管理面已统一依赖 `admin.auth.verify_token`。本轮最终 P1 补齐
 
 ---
 
+### SEC-AUTH-2：鉴权分层 — Scoped Tokens
+
+**状态**：`in-progress`（P1+P2+P3 已合入，2026-07-04）
+
+**位置**：`admin/auth.py`、`admin/scopes.py`、`admin/token_registry.py`、`admin/audit.py`、
+`admin/routers/auth_tokens.py`、`core/data_paths.py`、`admin/routers/*.py`（全部 ~34 个 router）
+
+现状（SEC-AUTH-1/SEC-WS-1 之后）：单一 secret 过关后所有接口平权，边缘设备（手机
+sensor-service、Watch、ESP32、手机轮询端）与桌面主客户端持有同一 god token。详见
+`cc-tasks/21-鉴权分层-scoped-tokens.md`。
+
+**P1 已完成**：
+- `admin/scopes.py`：10 个 scope + 6 个 profile 预置组合，`expand_scopes()` 展开 `profile:*`。
+- `admin/token_registry.py`：`data/runtime/auth/tokens.yaml` 加载/mtime 热重载，只存
+  sha256(token) 不存明文，`hmac.compare_digest` 比对。
+- `admin/auth.py`：`TokenInfo` + `resolve_token()`；`require_scopes(*scopes)` 依赖工厂
+  （无效/缺失 token → 401；scope 不足 → 403）；`verify_token = require_scopes("admin")`
+  别名（迁移期 fail-closed：忘记声明 scope 的端点自动收敛为 admin-only）；
+  `authenticate_ws(websocket, required_scope)` 已参数化。
+- legacy secret（env `YEXUAN_ADMIN_SECRET` / `config.admin.secret_key`）永远等价虚拟
+  `admin` token（label `legacy-admin`），现存客户端零改动继续可用。
+
+**P2 已完成**：
+- 按 brief §5 映射表，全部 ~34 个 router 的 `Depends(verify_token)` 已替换为
+  `Depends(require_scopes(...))`，按端点/HTTP method 精确到 scope（`memory.py`、
+  `relations.py`、`relationship_facts.py`、`sensor.py`、`watch.py`、`system.py`、
+  `scheduler.py`、`settings_misc.py` 内部按 method 拆分，其余整文件统一 scope）。
+  `mobile` profile 按 Android 端配对文档增补为
+  `chat, state.read, memory.read, activity, persona, sensor.write`。
+- 守卫测试：`tests/test_sec_auth2_scopes.py`（全量 APIRoute default-deny 扫描 + scope 语义
+  403/401 区分 + legacy 兼容 + WS scope 交叉拒绝，对真实 `admin_server.app` 路由验证）。
+- 旧有假设"所有端点共享同一个 `verify_token` 可调用对象"的测试
+  （`test_final_p1_blockers.py`、`test_buttplug_integration.py`、`test_activity_contract.py`、
+  `test_character_avatar_binding.py`、`test_meta_mode.py`、`test_dream_session_char_scope.py`）
+  已同步更新为检测 `_required_scopes` 标记 / 按标记覆盖依赖，不再要求身份相同。
+- 全量 `pytest` 验证：除既有与本改动无关的 pre-existing 失败外无新增回归。
+
+**P3 已完成**：
+- `admin/token_registry.py` 新增 `create_token()` / `rotate_token()` / `delete_token()`：
+  label 校验 `^[a-z0-9-]{1,32}$`，`legacy-admin` 保留字不可创建/轮换/吊销；`rotate` 换新
+  明文旧值立即失效；`delete` 物理删除条目（未选择 disabled 标记方案）。
+- `admin/routers/auth_tokens.py`（新 router，全部 `admin` scope）：
+  `GET /auth/tokens`（label/scopes/expires_at/disabled/hash 前 8 位，无明文）、
+  `POST /auth/tokens`（body `{label, profile 或 scopes, expires_at?}`，明文仅此一次返回）、
+  `POST /auth/tokens/{label}/rotate`、`DELETE /auth/tokens/{label}`。
+- `admin/audit.py`：`log_event()` 追加写 `data/runtime/auth/audit.jsonl`（走
+  `core.safe_write.safe_append_jsonl`，天然 fail-open，不阻塞请求，不记 token 值）。
+  `require_scopes` 在 401（`auth_failed`）/403（`scope_denied`）时调用；
+  token 创建/轮换/吊销各记一条；`PATCH /system/meta-mode` 切到 `danger` 时记
+  `meta_mode_danger`（含操作者 label）。
+- `admin/auth.py` 新增进程内存限速：按来源 IP 统计 401 失败，60s 窗口内 ≥10 次 →
+  该 IP 后续认证请求直接 429，持续 300s（`reset_rate_limit_state_for_test()` 供测试清零）。
+  **注意**：这个模块级状态是全 pytest 会话共享的——`tests/conftest.py` 新增
+  autouse fixture `reset_auth_rate_limit` 在每个测试前后清零，否则跨文件累计的
+  401（如 `tests/test_sec_auth1.py` 的大量 no-token/wrong-token 用例）会意外触发
+  429 拖垮无关测试。
+- 守卫测试：`tests/test_sec_auth2_scopes.py` 新增 §8 items 6-7（token 管理 API 全生命周期
+  create→use→rotate→旧值失效→delete→401；同 IP 11 次坏 token → 429；403 不计入限速窗口）。
+
+**P4（前半：签发）已完成，2026-07-04**：
+- 生产 `data/runtime/auth/tokens.yaml` 已用 `create_token()` 建好六条记录，对应六类持有者：
+  `desktop-main`（profile:desktop）、`mobile-main`（profile:mobile）、
+  `sensor-service`（profile:sensor）、`watch-main`（profile:watch）、
+  `esp32-device`（profile:device）、`admin-panel`（profile:panel）。
+  明文仅在创建时的终端输出里出现过一次，未落盘、未写入本仓库任何文件——需要各自去接
+  收发放的一方从当时的终端输出里取值妥善保存；若已丢失只能 `POST /auth/tokens/{label}/rotate`
+  换新值（也是仅此一次展示）。
+- **legacy secret（`YEXUAN_ADMIN_SECRET` / `config.admin.secret_key`）未改动**，仍是全权
+  bootstrap token，现存客户端零影响。
+- 附带发现：`tests/test_sec_auth1.py`、`test_final_p1_blockers.py` 里若干直接构造 FastAPI
+  测试 app 打真实请求的用例没有用 `sandbox` fixture 隔离，P3 新增的审计写入曾往生产
+  `data/runtime/auth/audit.jsonl` 里追加了约 200 条 `ip=testclient` 的测试噪音（无害，
+  append-only 且不含敏感信息，但不是真实流量）；未在本轮自动清理，留给你决定是否手动清空。
+
+**P4（客户端接入）核实，2026-07-04**：
+- **`Emerald-client` 桌面端 + `sensor-service`**：cc-tasks/13 已按规格完整实现——
+  `client_config.rs`/`config/client.example.json` 字段名不变，注释更新；`lib.rs` 全部
+  21 处调用点迁移到区分 401/403/429 的 `safe_http_error`；`ws_bridge.rs` 拒绝文案改中性；
+  `sensor-service/config.yaml`、`bot_client/post.py` 同步。`cargo test --lib`：**41/41 通过**
+  （含新增 `auth_tests` 模块）。
+- **`yexuan_memery` 安卓端**：round-鉴权分层-scoped-tokens-移动端.md 已实现——
+  `_extractError` 按 401/403/429 分支；`MobileNotificationService.kt` 对 403（scope 不足）
+  停止重试并标记 `"token scope insufficient"`，不再无意义刷后端审计/限速。新增
+  `test/backend_client_error_test.dart`：**6/6 通过**。**附带发现**：该仓 `flutter test`
+  整体跑会在 `test/foreground_mobile_delivery_contract_test.dart` 编译失败——一个测试用
+  `_ForegroundBackendClient.pollMobile` mock 覆写没跟上 `BackendClient.pollMobile` 新增的
+  `waitSeconds` 参数。与鉴权改动无关（是另一个长轮询 wait 参数功能引入的），未在本轮修复。
+- **`firmware/presence-device`（ESP32，真正的具身硬件固件；`hardware/Emerald-hello`
+  是已废弃的早期 OLED 测试项目，与此无关）**：发现 `include/secrets.h` 仍把
+  legacy secret 明文硬编码为 `AUTH_TOKEN`（未走后端配对 cc-tasks，此前没人做过这块）。
+  已修复：`secrets.h`（gitignored，本地设备凭据文件）与 `secrets.example.h` 均已改为
+  `esp32-device` profile token；因为拿不到该 token 已发放的明文，改动前先 rotate 了一次
+  （已获用户确认可接受，旧值同时失效）。**待办：板子需要重新烧录**才能生效——当前物理
+  设备仍在用旧固件里的 legacy secret 运行，直到你重新烧录前不受影响，但也没有切换。
+- **Watch**：本仓找不到代码（推测是 iOS Shortcuts 直连 `POST /watch/event`），无从代码层
+  核实；轮换前需要你手动确认并替换 Shortcut 里的 Bearer 值。
+- **管理面板网页**（`admin/static/index.html`）：`localStorage` 通用 Bearer 透传，无需
+  改代码；轮换前需要你登录时换填 `admin-panel` token。
+
+**待办（P4 后半，见 brief §9）**：
+- 六个持有方的**实际部署**（不是代码能力）都确认切换到各自新 token 后，才轮换 legacy
+  secret 的值（保留机制，只换值）。当前状态：桌面/sensor-service/mobile 代码已就绪但
+  实际运行实例是否已切换未知；ESP32 待重新烧录；Watch/管理面板待手动换值。
+
+---
+
 ### DESIGN-1：感知数据使用原则仍需补边界
 
 **状态**：`boundary-doc-needed`

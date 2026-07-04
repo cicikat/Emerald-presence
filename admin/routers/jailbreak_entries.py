@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.sandbox import get_paths
 
 router = APIRouter()
@@ -63,12 +63,12 @@ class JbEntry(BaseModel):
 
 
 @router.get("/jailbreak-entries", summary="获取所有破限条目")
-async def get_entries(auth=Depends(verify_token)):
+async def get_entries(auth=Depends(require_scopes("persona"))):
     return _read()
 
 
 @router.get("/jailbreak-entries/export/json", summary="导出破限条目JSON")
-async def export_entries(auth=Depends(verify_token)):
+async def export_entries(auth=Depends(require_scopes("persona"))):
     p = get_paths().jailbreak_entries()
     content = p.read_text(encoding="utf-8") if p.exists() else '{"entries":[]}'
     return Response(content=content, media_type="application/json",
@@ -76,7 +76,7 @@ async def export_entries(auth=Depends(verify_token)):
 
 
 @router.post("/jailbreak-entries/import/json", summary="导入破限条目JSON")
-async def import_entries_json(file: UploadFile = File(...), auth=Depends(verify_token)):
+async def import_entries_json(file: UploadFile = File(...), auth=Depends(require_scopes("persona"))):
     raw = await file.read()
     try:
         incoming = json.loads(raw.decode("utf-8"))
@@ -95,7 +95,7 @@ async def import_entries_json(file: UploadFile = File(...), auth=Depends(verify_
 
 
 @router.post("/jailbreak-entries/import/txt", summary="导入破限预设txt")
-async def import_entries_txt(file: UploadFile = File(...), auth=Depends(verify_token)):
+async def import_entries_txt(file: UploadFile = File(...), auth=Depends(require_scopes("persona"))):
     if not (file.filename or "").endswith(".txt"):
         raise HTTPException(status_code=422, detail="只接受.txt文件")
     raw = await file.read()
@@ -116,7 +116,7 @@ async def import_entries_txt(file: UploadFile = File(...), auth=Depends(verify_t
 
 
 @router.post("/jailbreak-entries", summary="新增破限条目")
-async def add_entry(entry: JbEntry, auth=Depends(verify_token)):
+async def add_entry(entry: JbEntry, auth=Depends(require_scopes("persona"))):
     data = _read()
     data["entries"].append({
         "id":      _new_id(),
@@ -130,7 +130,7 @@ async def add_entry(entry: JbEntry, auth=Depends(verify_token)):
 
 
 @router.put("/jailbreak-entries/{eid}", summary="修改破限条目")
-async def update_entry(eid: str, entry: JbEntry, auth=Depends(verify_token)):
+async def update_entry(eid: str, entry: JbEntry, auth=Depends(require_scopes("persona"))):
     data = _read()
     for e in data["entries"]:
         if e["id"] == eid:
@@ -142,7 +142,7 @@ async def update_entry(eid: str, entry: JbEntry, auth=Depends(verify_token)):
 
 
 @router.delete("/jailbreak-entries/{eid}", summary="删除破限条目")
-async def delete_entry(eid: str, auth=Depends(verify_token)):
+async def delete_entry(eid: str, auth=Depends(require_scopes("persona"))):
     data = _read()
     data["entries"] = [e for e in data["entries"] if e["id"] != eid]
     _write(data)

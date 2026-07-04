@@ -176,6 +176,19 @@ REGISTRY: dict[str, PathMeta] = {
 
     # ── Canonical: sent letter archive (per-char-user) ────────────────────────
     "sent_letters":           PathMeta("canonical", "reality",         "per_char_user", "ignore"),
+
+    # ── SEC-AUTH-2: scoped token registry + audit (global, single-owner system) ─
+    "auth_dir":               PathMeta("runtime",   "shared",          "global",        "ignore"),
+    # tokens.yaml 只存 label+hash+scopes，丢失 = 边缘设备集体失联（需重签发），非记忆丢失，但非可随意重建
+    "auth_tokens_file":       PathMeta("canonical", "shared",          "global",        "ignore"),
+    "auth_audit_log":         PathMeta("forensic",  "shared",          "global",        "ignore"),
+
+    # ── authored: dream worlds/presets (characters/dream_worlds/、characters/dream_presets/，不走 data/ 沙盒偏移) ─
+    "dream_worlds_dir":       PathMeta("authored",  "dream",           "global",        "ignore-but-authored"),
+    "dream_presets_dir":      PathMeta("authored",  "dream",           "global",        "ignore-but-authored"),
+
+    # ── runtime: X3 自主联网搜索限流状态 ────────────────────────────────────────
+    "web_autosearch_state":   PathMeta("runtime",   "shared",          "global",        "ignore"),
 }
 
 # ── retention 策略（由 scheduler.log_maintenance 每 24 小时执行，参数见 config.yaml retention.*）

@@ -38,6 +38,23 @@ def reset_perceive_event_registry():
 
 
 @pytest.fixture(autouse=True)
+def reset_auth_rate_limit():
+    """Reset admin.auth's in-process 401 rate-limit state before/after each test.
+
+    admin/auth.py:require_scopes() tracks 401 failures per source IP in a module-level
+    dict (SEC-AUTH-2 §7, 60s window / 10 failures -> 429 for 300s). TestClient requests
+    all share IP "testclient", so without a reset, unrelated test files that each send a
+    few no-token/wrong-token requests (e.g. tests/test_sec_auth1.py) accumulate across the
+    whole pytest session and eventually trip the 429 block, breaking later "correct token"
+    assertions that have nothing to do with rate limiting.
+    """
+    from admin import auth as _auth
+    _auth.reset_rate_limit_state_for_test()
+    yield
+    _auth.reset_rate_limit_state_for_test()
+
+
+@pytest.fixture(autouse=True)
 def reset_proactive_ledger():
     """Reset ProactiveLedger module state before each test (CC 任务 19 · B).
 

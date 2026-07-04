@@ -10,7 +10,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.config_loader import get_config
 from core.memory.path_resolver import resolve_path
 from core.memory.scope import MemoryScope
@@ -160,7 +160,7 @@ def _parse_day(text: str) -> list[dict]:
 
 
 @router.get("/dates", summary="获取聊天日志日期列表")
-async def list_dates(char_id: str | None = None, auth=Depends(verify_token)):
+async def list_dates(char_id: str | None = None, auth=Depends(require_scopes("memory.read"))):
     resolved = _resolve_char_id(char_id)
     log_dir = _log_dir(resolved)
     dates = []
@@ -173,7 +173,7 @@ async def list_dates(char_id: str | None = None, auth=Depends(verify_token)):
 
 
 @router.get("/{date}", summary="获取单日聊天日志")
-async def get_day(date: str, char_id: str | None = None, auth=Depends(verify_token)):
+async def get_day(date: str, char_id: str | None = None, auth=Depends(require_scopes("memory.read"))):
     if not _DATE_RE.match(date):
         raise HTTPException(status_code=422, detail="date format must be YYYY-MM-DD")
     resolved = _resolve_char_id(char_id)

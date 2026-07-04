@@ -16,7 +16,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ def _transcribe_sync(audio_path: str) -> str:
 async def transcribe_audio(
     file: UploadFile = File(...),
     channel: str = Form("desktop"),
-    _auth=Depends(verify_token),
+    _auth=Depends(require_scopes("chat")),
 ):
     data = await file.read()
 

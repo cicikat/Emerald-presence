@@ -8,14 +8,14 @@ Watch 事件接收路由
   {"type": "sleep_end"}
   {"type": "heart_rate", "value": 85}
 
-只接受管理面 Authorization Bearer token（verify_token）。
+只接受管理面 Authorization Bearer token（require_scopes("sensor.write")）。
 """
 
 from datetime import datetime, datetime as _dt
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.config_loader import get_config
 from core.memory.user_profile import load as _load_profile, save as _save_profile
 
@@ -176,7 +176,7 @@ async def _flush_sleep_buffer():
 @router.post("/watch/event", summary="接收 Watch 健康事件")
 async def receive_watch_event(
     body: dict,
-    _auth: bool = Depends(verify_token),
+    _auth: bool = Depends(require_scopes("sensor.write")),
 ):
     """
     外部设备推送健康事件的入口。
@@ -261,6 +261,6 @@ async def receive_watch_event(
 
 
 @router.get("/watch/status", summary="获取最近一次 Watch 事件状态")
-async def get_watch_status(auth=Depends(verify_token)):
+async def get_watch_status(auth=Depends(require_scopes("state.read"))):
     """返回最近一次推送的 Watch 事件快照，未收到任何事件时返回空 dict"""
     return _last_watch_data

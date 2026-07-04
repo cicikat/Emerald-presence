@@ -10,7 +10,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.sandbox import get_paths
 
 router = APIRouter()
@@ -62,7 +62,7 @@ def _strip_body(content: str) -> str:
 @router.get("/list", summary="获取日记列表")
 async def list_diary(
     char_id: Optional[str] = Query(default=None, description="角色 id；缺省 = active char"),
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("memory.read")),
 ):
     cid = (char_id or "").strip() or _active_char_id()
     entries = []
@@ -85,7 +85,7 @@ async def list_diary(
 async def get_diary(
     date: str,
     char_id: Optional[str] = Query(default=None, description="角色 id；缺省 = active char"),
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("memory.read")),
 ):
     if not _DATE_RE.match(date):
         raise HTTPException(status_code=422, detail="date format must be YYYY-MM-DD")

@@ -9,7 +9,7 @@ import yaml
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.config_loader import get_config
 
 router = APIRouter()
@@ -18,7 +18,7 @@ CONFIG_FILE = Path("config.yaml")
 # ─── 工具注册表（只读诊断） ─────────────────────────────────────────────────────
 
 @router.get("/tools/registry", summary="获取已注册工具列表（来自 _TOOL_REGISTRY，非 config 列表）")
-async def get_tool_registry(auth=Depends(verify_token)):
+async def get_tool_registry(auth=Depends(require_scopes("admin"))):
     from core.tool_dispatcher import _TOOL_REGISTRY
     tools = [
         {"name": name, "description": (info.get("description") or info.get("desc") or "").strip()}
@@ -34,7 +34,7 @@ class ContextConfigUpdate(BaseModel):
 
 
 @router.get("/context-config", summary="获取上下文轮数配置")
-async def get_context_config(auth=Depends(verify_token)):
+async def get_context_config(auth=Depends(require_scopes("admin"))):
     cfg = get_config()
     # owner: memory.short_term_rounds；context.max_turns 是 deprecated alias
     max_turns = (
@@ -46,7 +46,7 @@ async def get_context_config(auth=Depends(verify_token)):
 
 
 @router.put("/context-config", summary="修改上下文轮数并热重载")
-async def update_context_config(body: ContextConfigUpdate, auth=Depends(verify_token)):
+async def update_context_config(body: ContextConfigUpdate, auth=Depends(require_scopes("admin"))):
     if not (1 <= body.max_turns <= 200):
         raise HTTPException(status_code=422, detail="max_turns 必须在 1~200 之间")
 
@@ -83,7 +83,7 @@ class TtsConfigUpdate(BaseModel):
 
 
 @router.get("/tts-config", summary="获取 TTS 配置")
-async def get_tts_config(auth=Depends(verify_token)):
+async def get_tts_config(auth=Depends(require_scopes("admin"))):
     cfg = get_config().get("tts", {})
     return {
         "enabled":         cfg.get("enabled",         False),
@@ -97,7 +97,7 @@ async def get_tts_config(auth=Depends(verify_token)):
 
 
 @router.put("/tts-config", summary="修改 TTS 配置并热重载")
-async def update_tts_config(body: TtsConfigUpdate, auth=Depends(verify_token)):
+async def update_tts_config(body: TtsConfigUpdate, auth=Depends(require_scopes("admin"))):
     if body.speed is not None and not (0.5 <= body.speed <= 2.0):
         raise HTTPException(status_code=422, detail="speed 必须在 0.5~2.0 之间")
 
@@ -144,13 +144,13 @@ class ChatModeUpdate(BaseModel):
 
 
 @router.get("/chat-mode", summary="获取当前聊天模式")
-async def get_chat_mode(auth=Depends(verify_token)):
+async def get_chat_mode(auth=Depends(require_scopes("persona"))):
     mode = get_config().get("chat", {}).get("mode", "chat")
     return {"mode": mode}
 
 
 @router.put("/chat-mode", summary="切换聊天模式（chat / roleplay）")
-async def update_chat_mode(body: ChatModeUpdate, auth=Depends(verify_token)):
+async def update_chat_mode(body: ChatModeUpdate, auth=Depends(require_scopes("persona"))):
     if body.mode not in _VALID_MODES:
         raise HTTPException(status_code=422, detail="mode 只接受 'chat' 或 'roleplay'")
 
@@ -183,13 +183,13 @@ class ChatStyleUpdate(BaseModel):
 
 
 @router.get("/chat-style", summary="获取当前对话风格")
-async def get_chat_style(auth=Depends(verify_token)):
+async def get_chat_style(auth=Depends(require_scopes("persona"))):
     style = get_config().get("chat", {}).get("style", "roleplay")
     return {"style": style}
 
 
 @router.put("/chat-style", summary="切换对话风格（chat=沉浸式对话 / roleplay=沉浸式角色扮演）")
-async def update_chat_style(body: ChatStyleUpdate, auth=Depends(verify_token)):
+async def update_chat_style(body: ChatStyleUpdate, auth=Depends(require_scopes("persona"))):
     if body.style not in _VALID_STYLES:
         raise HTTPException(status_code=422, detail="style 只接受 'chat' 或 'roleplay'")
 
@@ -215,13 +215,13 @@ async def update_chat_style(body: ChatStyleUpdate, auth=Depends(verify_token)):
 # ─── 分条发送开关 ──────────────────────────────────────────────────────────────
 
 @router.get("/chat-multi-message", summary="获取分条发送开关状态")
-async def get_multi_message(auth=Depends(verify_token)):
+async def get_multi_message(auth=Depends(require_scopes("persona"))):
     enabled = get_config().get("chat", {}).get("multi_message", False)
     return {"multi_message": enabled}
 
 
 @router.put("/chat-multi-message", summary="切换分条发送开关")
-async def update_multi_message(body: dict, auth=Depends(verify_token)):
+async def update_multi_message(body: dict, auth=Depends(require_scopes("persona"))):
     enabled = bool(body.get("enabled", False))
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:

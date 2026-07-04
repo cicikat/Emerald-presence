@@ -15,7 +15,7 @@ GET /provenance/{uid}
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -58,7 +58,7 @@ async def get_provenance(
     scope: str = "",
     limit: int = 100,
     char_id: str = "",
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("memory.read")),
 ):
     if limit < 1 or limit > 500:
         raise HTTPException(status_code=422, detail="limit 须在 1-500 之间")

@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.asset_registry import get_registry, reload_registry, _AVATARS_DIR, _AVATAR_EXTS
 from core.dream.world_loader import discover_worlds, _WORLDS_BASE
 from core.sandbox import get_paths
@@ -85,7 +85,7 @@ def _reload_lore_engine():
 
 
 @router.get("/settings/prompt-assets", summary="获取 Prompt 资产列表与激活配置")
-async def get_prompt_assets(auth=Depends(verify_token)):
+async def get_prompt_assets(auth=Depends(require_scopes("persona"))):
     """Returns all UI-visible (non-hidden) assets and the current active config.
 
     Response shape:
@@ -137,7 +137,7 @@ def _resolve_char_or_404(char_id: str):
 
 
 @router.get("/settings/character-avatar/{char_id}", summary="获取角色头像")
-async def get_character_avatar(char_id: str, v: Optional[str] = None, auth=Depends(verify_token)):
+async def get_character_avatar(char_id: str, v: Optional[str] = None, auth=Depends(require_scopes("persona"))):
     """Serve avatar for a character. Priority: runtime override > authored default > 404.
 
     Fail-loud on unknown char_id. Never guesses from label or filename.
@@ -164,7 +164,7 @@ async def get_character_avatar(char_id: str, v: Optional[str] = None, auth=Depen
 async def upload_character_avatar(
     char_id: str,
     file: UploadFile,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("persona")),
 ):
     """Upload a runtime override avatar for char_id.
 
@@ -212,7 +212,7 @@ async def upload_character_avatar(
 
 
 @router.delete("/settings/characters/{char_id}/avatar", summary="删除角色 runtime 头像覆盖")
-async def delete_character_avatar(char_id: str, auth=Depends(verify_token)):
+async def delete_character_avatar(char_id: str, auth=Depends(require_scopes("persona"))):
     """Delete the runtime override avatar for char_id. Falls back to authored default.
 
     char_id must exist in the asset registry (fail-loud, no fallback to yexuan).
@@ -240,7 +240,7 @@ class PromptAssetsUpdate(BaseModel):
 
 
 @router.patch("/settings/prompt-assets", summary="部分更新 Prompt 资产激活配置")
-async def patch_prompt_assets(body: PromptAssetsUpdate, auth=Depends(verify_token)):
+async def patch_prompt_assets(body: PromptAssetsUpdate, auth=Depends(require_scopes("persona"))):
     """Partial update for active prompt-asset config. All values must be asset ids.
 
     Rejects labels ("叶瑄"), filenames ("yexuan.json"), and unknown ids.

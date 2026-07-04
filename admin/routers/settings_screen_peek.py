@@ -11,7 +11,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.config_loader import get_config
 
 router = APIRouter()
@@ -27,7 +27,7 @@ class ScreenPeekUpdate(BaseModel):
 
 
 @router.get("/settings/screen-peek", summary="获取屏幕内容查看配置")
-async def get_screen_peek(auth=Depends(verify_token)):
+async def get_screen_peek(auth=Depends(require_scopes("admin"))):
     cfg = get_config().get("screen_peek", {})
     return {
         "enabled": bool(cfg.get("enabled", False)),
@@ -36,7 +36,7 @@ async def get_screen_peek(auth=Depends(verify_token)):
 
 
 @router.post("/settings/screen-peek", summary="更新屏幕内容查看配置并热重载")
-async def update_screen_peek(body: ScreenPeekUpdate, auth=Depends(verify_token)):
+async def update_screen_peek(body: ScreenPeekUpdate, auth=Depends(require_scopes("admin"))):
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             full_cfg = yaml.safe_load(f) or {}

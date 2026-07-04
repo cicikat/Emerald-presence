@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 
 router = APIRouter()
 
@@ -50,7 +50,7 @@ def _resolve_char_id(char_id: str | None) -> str:
 async def get_short_term(
     user_id: str,
     char_id: str | None = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("memory.read")),
 ):
     """返回用户最近的对话历史（滚动窗口内的全部消息）。
 
@@ -66,7 +66,7 @@ async def get_short_term(
 async def clear_short_term(
     user_id: str,
     char_id: str | None = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     """清空用户短期对话历史（写入空列表）。
 
@@ -98,7 +98,7 @@ async def delete_episodic_entry(
     user_id: str,
     ep_id: str,
     char_id: Optional[str] = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     from core.memory import episodic_memory
     resolved = _resolve_char_id(char_id)
@@ -115,7 +115,7 @@ async def delete_profile_fact(
     user_id: str,
     index: int,
     char_id: Optional[str] = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     from core.memory import user_profile
     resolved = _resolve_char_id(char_id)
@@ -131,7 +131,7 @@ async def overwrite_profile_fact(
     index: int,
     body: _FactBody,
     char_id: Optional[str] = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     from core.memory import user_profile
     resolved = _resolve_char_id(char_id)
@@ -148,7 +148,7 @@ async def delete_identity_dim(
     user_id: str,
     key: str,
     char_id: Optional[str] = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     from core.memory import user_identity
     resolved = _resolve_char_id(char_id)
@@ -166,7 +166,7 @@ async def overwrite_identity_dim(
     key: str,
     body: _DimBody,
     char_id: Optional[str] = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     from core.memory import user_identity
     resolved = _resolve_char_id(char_id)
@@ -190,7 +190,7 @@ async def delete_midterm_event(
     user_id: str,
     mid_id: str,
     char_id: Optional[str] = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     from core.memory import mid_term
     resolved = _resolve_char_id(char_id)
@@ -206,7 +206,7 @@ async def delete_midterm_event(
 async def delete_user_fact_entry(
     user_id: str,
     key: str,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     from core.memory import user_facts
     ok = user_facts.delete_user_fact(user_id, key)
@@ -222,7 +222,7 @@ async def delete_event_log_day(
     user_id: str,
     date_str: str,
     char_id: Optional[str] = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     """date_str 格式 YYYY-MM-DD。仅删除新布局文件，不影响旧路径或 full_log.md。"""
     import re

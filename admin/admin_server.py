@@ -42,6 +42,7 @@ from admin.routers import (
     hidden_state_debug, hardware, observe,
     group, relationship_facts,
     transcribe, provenance,
+    auth_tokens,
 )
 
 app.include_router(users.router,          prefix="/users",     tags=["用户"])
@@ -79,6 +80,7 @@ app.include_router(group.router,    prefix="/group",    tags=["群聊"])
 app.include_router(relationship_facts.router, prefix="", tags=["关系事实"])
 app.include_router(transcribe.router,          prefix="", tags=["语音转写"])
 app.include_router(provenance.router,          prefix="", tags=["观测"])
+app.include_router(auth_tokens.router,         prefix="", tags=["鉴权"])
 
 # ── 桌宠端 WebSocket 端点 ─────────────────────────────────────────────────────
 from fastapi import WebSocket as _WebSocket
@@ -88,7 +90,7 @@ from channels.desktop_ws import handle_connection as _ws_desktop_handler
 @app.websocket("/ws/desktop")
 async def ws_desktop_endpoint(websocket: _WebSocket):
     # WebSocket auth only accepts Authorization: Bearer. Query tokens are rejected.
-    if not authenticate_ws(websocket):
+    if authenticate_ws(websocket, "ws.desktop") is None:
         await websocket.close(code=1008)
         return
     await _ws_desktop_handler(websocket)
@@ -101,7 +103,7 @@ from channels.device_ws import handle_connection as _ws_device_handler
 @app.websocket("/ws/device")
 async def ws_device_endpoint(websocket: _WebSocket):
     # 与 /ws/desktop 相同鉴权：仅 Authorization: Bearer
-    if not authenticate_ws(websocket):
+    if authenticate_ws(websocket, "ws.device") is None:
         await websocket.close(code=1008)
         return
     await _ws_device_handler(websocket)

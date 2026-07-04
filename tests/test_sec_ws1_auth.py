@@ -42,7 +42,7 @@ _test_app = FastAPI()
 
 @_test_app.websocket("/ws/desktop")
 async def _ws_desktop(ws: WebSocket):
-    if not authenticate_ws(ws):
+    if authenticate_ws(ws, "ws.desktop") is None:
         await ws.close(code=1008)
         return
     await ws.accept()
@@ -162,20 +162,20 @@ def test_A6_query_wrong_token_rejected(client):
 def test_C1_empty_secret_always_rejects(monkeypatch):
     monkeypatch.setattr("admin.auth.get_admin_secret", lambda: "")
     ws = _mock_ws({"authorization": f"Bearer {VALID}"})
-    assert authenticate_ws(ws) is False
+    assert authenticate_ws(ws, "ws.desktop") is None
 
 
 def test_C1b_empty_secret_rejects_query_token(monkeypatch):
     monkeypatch.setattr("admin.auth.get_admin_secret", lambda: "")
     ws = _mock_ws(query_string=f"token={VALID}")
-    assert authenticate_ws(ws) is False
+    assert authenticate_ws(ws, "ws.desktop") is None
 
 
 def test_C2_header_token_not_logged(caplog):
     """Token value must never appear in any log record on the header path."""
     ws = _mock_ws({"authorization": f"Bearer {VALID}"})
     with caplog.at_level(logging.DEBUG):
-        authenticate_ws(ws)
+        authenticate_ws(ws, "ws.desktop")
     for record in caplog.records:
         assert VALID not in record.getMessage()
 
@@ -196,8 +196,8 @@ def test_C4_rejection_log_no_token(caplog):
     bad_token = "leaked-secret-123"
     ws = _mock_ws({"authorization": f"Bearer {bad_token}"})
     with caplog.at_level(logging.DEBUG):
-        result = authenticate_ws(ws)
-    assert result is False
+        result = authenticate_ws(ws, "ws.desktop")
+    assert result is None
     for record in caplog.records:
         assert bad_token not in record.getMessage()
 
@@ -209,7 +209,7 @@ def test_C4_rejection_log_no_token(caplog):
 def test_D1_query_rejection_emits_no_deprecated_warning(caplog):
     ws = _mock_ws(query_string=f"token={VALID}")
     with caplog.at_level(logging.WARNING, logger="admin.auth"):
-        assert authenticate_ws(ws) is False
+        assert authenticate_ws(ws, "ws.desktop") is None
     msgs = " ".join(r.getMessage() for r in caplog.records)
     assert "query token fallback used" not in msgs
 

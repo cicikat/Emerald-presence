@@ -8,9 +8,9 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.config_loader import get_config
 from core.migration import get_fallback_stats
 from core.sandbox import get_paths
@@ -19,7 +19,7 @@ router = APIRouter()
 
 
 @router.get("/status", summary="获取机器人运行状态")
-async def get_status(auth=Depends(verify_token)):
+async def get_status(auth=Depends(require_scopes("state.read"))):
     from core import message_queue
 
     cfg = get_config()
@@ -48,7 +48,7 @@ async def get_status(auth=Depends(verify_token)):
 
 
 @router.get("/logs", summary="获取最近错误日志")
-async def get_logs(lines: int = 200, auth=Depends(verify_token)):
+async def get_logs(lines: int = 200, auth=Depends(require_scopes("admin"))):
     log_file = get_paths().error_log()
     if not log_file.exists():
         return {"logs": "", "message": "日志文件不存在"}
@@ -61,7 +61,7 @@ async def get_logs(lines: int = 200, auth=Depends(verify_token)):
 
 
 @router.delete("/logs", summary="清空错误日志")
-async def clear_logs(auth=Depends(verify_token)):
+async def clear_logs(auth=Depends(require_scopes("admin"))):
     try:
         log_file = get_paths().error_log()
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -72,7 +72,7 @@ async def clear_logs(auth=Depends(verify_token)):
 
 
 @router.post("/reload", summary="热重载所有配置")
-async def reload_config(auth=Depends(verify_token)):
+async def reload_config(auth=Depends(require_scopes("admin"))):
     from core import config_loader, user_relation, qq_adapter
     config_loader.reload_config()
     user_relation.reload()
@@ -81,7 +81,7 @@ async def reload_config(auth=Depends(verify_token)):
 
 
 @router.get("/pet", summary="获取宠物状态")
-async def get_pet_status(auth=Depends(verify_token)):
+async def get_pet_status(auth=Depends(require_scopes("admin"))):
     from core.pet import get_pet, pet_greeting
     pet = get_pet()
     if pet is None:
@@ -90,7 +90,7 @@ async def get_pet_status(auth=Depends(verify_token)):
 
 
 @router.post("/pet", summary="创建或更新宠物")
-async def upsert_pet(body: dict, auth=Depends(verify_token)):
+async def upsert_pet(body: dict, auth=Depends(require_scopes("admin"))):
     name    = (body.get("name") or "").strip()
     species = (body.get("species") or "猫").strip()
     if not name:
@@ -102,7 +102,7 @@ async def upsert_pet(body: dict, auth=Depends(verify_token)):
 
 
 @router.put("/pet/interact", summary="与宠物互动（摸摸头/喂食）")
-async def pet_interact(body: dict, auth=Depends(verify_token)):
+async def pet_interact(body: dict, auth=Depends(require_scopes("admin"))):
     action = body.get("action", "")
     from core.pet import get_pet, update_pet, pet_greeting
     pet = get_pet()
@@ -122,7 +122,7 @@ async def pet_interact(body: dict, auth=Depends(verify_token)):
 
 
 @router.post("/group-distill", summary="对指定群的聊天记录进行 LLM 蒸馏")
-async def group_distill(body: dict, auth=Depends(verify_token)):
+async def group_distill(body: dict, auth=Depends(require_scopes("admin"))):
     """读取群消息记录，调用 LLM 生成摘要"""
     group_id = (body.get("group_id") or "").strip()
     if not group_id:
@@ -134,14 +134,14 @@ async def group_distill(body: dict, auth=Depends(verify_token)):
 
 
 @router.get("/system/data-path", summary="获取数据根目录路径")
-async def get_data_path(auth=Depends(verify_token)):
+async def get_data_path(auth=Depends(require_scopes("admin"))):
     cfg = get_config()
     prefix = cfg.get("data_prefix", "data")
     return {"data_prefix": prefix}
 
 
 @router.get("/system/meta-mode", summary="获取当前安全/危险模式")
-async def get_meta_mode(auth=Depends(verify_token)):
+async def get_meta_mode(auth=Depends(require_scopes("state.read"))):
     import json
     import time
     p = get_paths().meta_mode()
@@ -160,7 +160,7 @@ async def get_meta_mode(auth=Depends(verify_token)):
 
 
 @router.patch("/system/meta-mode", summary="切换安全/危险模式")
-async def patch_meta_mode(body: dict, auth=Depends(verify_token)):
+async def patch_meta_mode(body: dict, request: Request, auth=Depends(require_scopes("hardware"))):
     import json
     import time
     from core.safe_write import safe_write_json
@@ -189,4 +189,14 @@ async def patch_meta_mode(body: dict, auth=Depends(verify_token)):
     p = get_paths().meta_mode()
     p.parent.mkdir(parents=True, exist_ok=True)
     safe_write_json(p, {"mode": mode, "expires_at": expires_at})
+
+    if mode == "danger":
+        from admin.audit import log_event
+        log_event(
+            "meta_mode_danger",
+            label=auth.label,
+            path="/system/meta-mode",
+            ip=request.client.host if request.client else None,
+        )
+
     return {"mode": mode, "expires_at": expires_at}

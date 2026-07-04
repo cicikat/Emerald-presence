@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 
 router = APIRouter()
 
@@ -71,7 +71,7 @@ def _resolve_char_id(char_id: str | None) -> str:
 # ── 接口 ─────────────────────────────────────────────────────────────────────
 
 @router.get("/", summary="获取所有用户列表")
-async def get_users(auth=Depends(verify_token)):
+async def get_users(auth=Depends(require_scopes("admin"))):
     """返回所有有对话记录或画像的用户 ID 列表"""
     user_ids = _get_known_users()
     return {"users": user_ids, "total": len(user_ids)}
@@ -81,7 +81,7 @@ async def get_users(auth=Depends(verify_token)):
 async def get_user_profile(
     user_id: str,
     char_id: str | None = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     """返回指定用户的画像 JSON。
 
@@ -98,7 +98,7 @@ async def update_user_profile(
     user_id: str,
     body: dict[str, Any],
     char_id: str | None = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     """直接覆盖更新用户画像字段（admin 直接编辑，不走 LLM 提取）。
 
@@ -115,7 +115,7 @@ async def update_user_profile(
 
 
 @router.get("/{user_id}/pronoun", summary="获取用户称谓")
-async def get_user_pronoun(user_id: str, auth=Depends(verify_token)):
+async def get_user_pronoun(user_id: str, auth=Depends(require_scopes("admin"))):
     """返回该用户的第三人称称谓（她/他/TA/它）。"""
     from core.memory.user_facts import get_user_pronoun as _get_pronoun
     return {"user_id": user_id, "pronoun": _get_pronoun(user_id)}
@@ -129,7 +129,7 @@ class _PronounBody(BaseModel):
 async def set_user_pronoun(
     user_id: str,
     body: _PronounBody,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     """更新该用户的第三人称称谓（允许值：她/他/TA/它）。"""
     from core.memory.user_facts import update_user_facts, _VALID_PRONOUNS
@@ -145,7 +145,7 @@ async def set_user_pronoun(
 async def delete_user_memory(
     user_id: str,
     char_id: str | None = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     """清除用户的短期历史、画像和长期 RAG 记忆（冻结）。
 

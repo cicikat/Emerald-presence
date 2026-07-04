@@ -26,7 +26,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.config_loader import get_config
 
 router = APIRouter()
@@ -62,7 +62,7 @@ def _owner_uid() -> str:
 
 
 @router.post("/dream/enter", summary="进入梦境")
-async def dream_enter(body: dict = {}, _auth=Depends(verify_token)):
+async def dream_enter(body: dict = {}, _auth=Depends(require_scopes("activity"))):
     uid = _owner_uid()
     entry_reason = (body.get("entry_reason") or "").strip()
     dream_mode = (body.get("dream_mode") or "sandbox").strip()
@@ -94,7 +94,7 @@ async def dream_enter(body: dict = {}, _auth=Depends(verify_token)):
 
 
 @router.post("/dream/chat", summary="梦境对话（独立 pipeline）")
-async def dream_chat(body: dict, _auth=Depends(verify_token)):
+async def dream_chat(body: dict, _auth=Depends(require_scopes("activity"))):
     """
     Dream turn endpoint — routes to dream_pipeline, never to reality pipeline.
 
@@ -120,7 +120,7 @@ async def dream_chat(body: dict, _auth=Depends(verify_token)):
 
 
 @router.post("/dream/exit", summary="强退梦境（硬出口，不可被拒）")
-async def dream_exit(_auth=Depends(verify_token)):
+async def dream_exit(_auth=Depends(require_scopes("activity"))):
     """
     Hard exit — unconditional, immediate, penetrates all state.
     Cannot be disabled by config or role behavior (invariant D).
@@ -134,7 +134,7 @@ async def dream_exit(_auth=Depends(verify_token)):
 
 
 @router.post("/dream/wake", summary="软挽留闸门（满足门控时叶瑄挽留一次；否则直接硬退）")
-async def dream_wake(_auth=Depends(verify_token)):
+async def dream_wake(_auth=Depends(require_scopes("activity"))):
     """
     Soft retention gate called when user taps the WAKE button.
 
@@ -189,7 +189,7 @@ async def dream_wake(_auth=Depends(verify_token)):
 
 
 @router.post("/dream/resume", summary="挽留后留下（status → DREAM_ACTIVE）")
-async def dream_resume(_auth=Depends(verify_token)):
+async def dream_resume(_auth=Depends(require_scopes("activity"))):
     """
     Resume after a soft retention: set status back to DREAM_ACTIVE so
     dream_turn() can continue processing messages.
@@ -284,7 +284,7 @@ def _compute_hud_v0(state: dict, settings: dict, body) -> dict:
 
 
 @router.get("/dream/state", summary="读取梦境状态（只读 UI 面板字段）")
-async def dream_state_get(_auth=Depends(verify_token)):
+async def dream_state_get(_auth=Depends(require_scopes("activity"))):
     """
     Read-only UI panel. Returns safe defaults when no dream is active.
 
@@ -352,7 +352,7 @@ async def dream_state_get(_auth=Depends(verify_token)):
 
 
 @router.get("/dream/stats", summary="梦境次数统计（只读，有效梦 > N 轮）")
-async def dream_stats_get(_auth=Depends(verify_token)):
+async def dream_stats_get(_auth=Depends(require_scopes("activity"))):
     from core.pipeline_registry import get as _get_pipeline
     from core.dream.dream_log import count_valid_dreams
     pl = _get_pipeline()
@@ -361,7 +361,7 @@ async def dream_stats_get(_auth=Depends(verify_token)):
 
 
 @router.get("/dream/settings", summary="读取梦境设置（全字段）")
-async def dream_settings_get(_auth=Depends(verify_token)):
+async def dream_settings_get(_auth=Depends(require_scopes("activity"))):
     """Read-only: returns all dream settings fields with defaults applied."""
     uid = _owner_uid()
     from core.dream.dream_settings import load as _load
@@ -369,7 +369,7 @@ async def dream_settings_get(_auth=Depends(verify_token)):
 
 
 @router.patch("/dream/settings", summary="部分更新梦境设置（校验枚举值；仅影响下一场梦）")
-async def dream_settings_patch(body: dict, _auth=Depends(verify_token)):
+async def dream_settings_patch(body: dict, _auth=Depends(require_scopes("activity"))):
     """
     Partial update for dream settings. Validates enum values before writing.
 
@@ -452,7 +452,7 @@ def _preset_path(world: str):
 
 
 @router.get("/dream/worlds", summary="列出梦境世界目录")
-async def list_dream_worlds(_auth=Depends(verify_token)):
+async def list_dream_worlds(_auth=Depends(require_scopes("activity"))):
     from core.sandbox import get_paths
     worlds_dir = get_paths().dream_worlds_dir()
     if not worlds_dir.exists():
@@ -465,7 +465,7 @@ async def list_dream_worlds(_auth=Depends(verify_token)):
 
 
 @router.get("/dream/worlds/{world}/lorebook", summary="读取梦境世界书条目列表")
-async def get_dream_lorebook(world: str, _auth=Depends(verify_token)):
+async def get_dream_lorebook(world: str, _auth=Depends(require_scopes("activity"))):
     import yaml as _yaml
     p = _world_dir(world) / "lorebook.yaml"
     if not p.exists():
@@ -492,7 +492,7 @@ def _write_dream_lorebook(world: str, entries: list):
 
 
 @router.post("/dream/worlds/{world}/lorebook", summary="新增梦境世界书条目")
-async def add_dream_lore_entry(world: str, body: dict, _auth=Depends(verify_token)):
+async def add_dream_lore_entry(world: str, body: dict, _auth=Depends(require_scopes("activity"))):
     import yaml as _yaml
     p = _world_dir(world) / "lorebook.yaml"
     entries = []
@@ -519,7 +519,7 @@ async def add_dream_lore_entry(world: str, body: dict, _auth=Depends(verify_toke
 
 
 @router.put("/dream/worlds/{world}/lorebook/{index}", summary="修改梦境世界书条目")
-async def update_dream_lore_entry(world: str, index: int, body: dict, _auth=Depends(verify_token)):
+async def update_dream_lore_entry(world: str, index: int, body: dict, _auth=Depends(require_scopes("activity"))):
     import yaml as _yaml
     p = _world_dir(world) / "lorebook.yaml"
     if not p.exists():
@@ -547,7 +547,7 @@ async def update_dream_lore_entry(world: str, index: int, body: dict, _auth=Depe
 
 
 @router.delete("/dream/worlds/{world}/lorebook/{index}", summary="删除梦境世界书条目")
-async def delete_dream_lore_entry(world: str, index: int, _auth=Depends(verify_token)):
+async def delete_dream_lore_entry(world: str, index: int, _auth=Depends(require_scopes("activity"))):
     import yaml as _yaml
     p = _world_dir(world) / "lorebook.yaml"
     if not p.exists():
@@ -562,7 +562,7 @@ async def delete_dream_lore_entry(world: str, index: int, _auth=Depends(verify_t
 
 
 @router.get("/dream/worlds/{world}/preset", summary="读取梦境世界预设文本")
-async def get_dream_preset(world: str, _auth=Depends(verify_token)):
+async def get_dream_preset(world: str, _auth=Depends(require_scopes("activity"))):
     p = _preset_path(world)
     if not p.exists():
         return {"world": world, "content": ""}
@@ -570,7 +570,7 @@ async def get_dream_preset(world: str, _auth=Depends(verify_token)):
 
 
 @router.put("/dream/worlds/{world}/preset", summary="保存梦境世界预设文本")
-async def put_dream_preset(world: str, body: dict, _auth=Depends(verify_token)):
+async def put_dream_preset(world: str, body: dict, _auth=Depends(require_scopes("activity"))):
     content = body.get("content", "")
     p = _preset_path(world)
     p.parent.mkdir(parents=True, exist_ok=True)

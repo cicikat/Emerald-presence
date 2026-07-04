@@ -24,7 +24,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.activity import activity_summary as _activity_summary
 from core.activity import gomoku as gomoku_engine
 from core.activity import gomoku_companion
@@ -80,7 +80,7 @@ class StartRequest(BaseModel):
 
 
 @router.post("/gomoku/start", summary="开始一局五子棋")
-async def start_gomoku(body: StartRequest, auth=Depends(verify_token)):
+async def start_gomoku(body: StartRequest, auth=Depends(require_scopes("activity"))):
     char_id = _active_char_id()
     uid = body.uid.strip() or _default_uid()
     logger.info(
@@ -122,7 +122,7 @@ async def start_gomoku(body: StartRequest, auth=Depends(verify_token)):
 
 
 @router.get("/gomoku/state", summary="获取当前棋局状态")
-async def get_gomoku_state(uid: str = Query(default=""), auth=Depends(verify_token)):
+async def get_gomoku_state(uid: str = Query(default=""), auth=Depends(require_scopes("activity"))):
     char_id = _active_char_id()
     resolved_uid = uid.strip() or _default_uid()
     session = gomoku_engine.get_active_session(resolved_uid, char_id)
@@ -140,7 +140,7 @@ class MoveRequest(BaseModel):
 
 
 @router.post("/gomoku/move", summary="落子")
-async def gomoku_move(body: MoveRequest, auth=Depends(verify_token)):
+async def gomoku_move(body: MoveRequest, auth=Depends(require_scopes("activity"))):
     char_id = _active_char_id()
     uid = body.uid.strip() or _default_uid()
     _validate_session_id(body.session_id)
@@ -157,7 +157,7 @@ class CloseRequest(BaseModel):
 
 
 @router.post("/gomoku/close", summary="关闭棋局")
-async def close_gomoku(body: CloseRequest, auth=Depends(verify_token)):
+async def close_gomoku(body: CloseRequest, auth=Depends(require_scopes("activity"))):
     char_id = _active_char_id()
     uid = body.uid.strip() or _default_uid()
     _validate_session_id(body.session_id)
@@ -182,7 +182,7 @@ class AiMoveRequest(BaseModel):
 
 
 @router.post("/gomoku/ai_move", summary="执行待处理的 AI 落子（pending mode）")
-async def gomoku_ai_move(body: AiMoveRequest, auth=Depends(verify_token)):
+async def gomoku_ai_move(body: AiMoveRequest, auth=Depends(require_scopes("activity"))):
     """
     执行 pending mode 下待处理的 AI 落子。
 
@@ -228,7 +228,7 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/gomoku/chat", summary="活动内对话（P0）")
-async def gomoku_chat(body: ChatRequest, auth=Depends(verify_token)):
+async def gomoku_chat(body: ChatRequest, auth=Depends(require_scopes("activity"))):
     """
     活动内对话接口（P0）。
 

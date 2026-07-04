@@ -5,7 +5,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.config_loader import get_config, reload_config
 
 router = APIRouter()
@@ -31,7 +31,7 @@ def _save_sched_cfg(new_sched: dict):
 # ── 状态 ──────────────────────────────────────────────────────────────────────
 
 @router.get("/scheduler/status", summary="获取调度器触发状态")
-async def get_scheduler_status(auth=Depends(verify_token)):
+async def get_scheduler_status(auth=Depends(require_scopes("state.read"))):
     """返回各触发器的冷却状态和上次触发时间"""
     from core.scheduler import get_status
     return {
@@ -41,7 +41,7 @@ async def get_scheduler_status(auth=Depends(verify_token)):
 
 
 @router.get("/scheduler/proactive-ledger", summary="获取 ProactiveLedger 账本快照")
-async def get_proactive_ledger(auth=Depends(verify_token)):
+async def get_proactive_ledger(auth=Depends(require_scopes("state.read"))):
     """
     统一发送预算/记账观测端点（CC 任务 19 · B）。
 
@@ -56,7 +56,7 @@ async def get_proactive_ledger(auth=Depends(verify_token)):
 # ── 配置读写 ──────────────────────────────────────────────────────────────────
 
 @router.get("/scheduler/config", summary="读取调度器配置")
-async def get_sched_config(auth=Depends(verify_token)):
+async def get_sched_config(auth=Depends(require_scopes("state.read"))):
     """
     PUT 侧接受 global_proactive_min_gap_hours（小时，前端易用单位），
     落盘/消费统一走 global_proactive_min_gap_seconds。GET 侧补一个派生的
@@ -80,7 +80,7 @@ async def get_sched_config(auth=Depends(verify_token)):
 
 
 @router.put("/scheduler/config", summary="更新调度器配置")
-async def put_sched_config(body: dict, auth=Depends(verify_token)):
+async def put_sched_config(body: dict, auth=Depends(require_scopes("admin"))):
     """
     支持局部更新，只传需要改的字段。
     signatures 字段若传入则整体替换。
@@ -128,7 +128,7 @@ async def put_sched_config(body: dict, auth=Depends(verify_token)):
 
 
 @router.delete("/scheduler/signatures", summary="删除一条签名")
-async def delete_signature(body: dict, auth=Depends(verify_token)):
+async def delete_signature(body: dict, auth=Depends(require_scopes("admin"))):
     text = str(body.get("text", "")).strip()
     cfg = dict(_sched_cfg())
     sigs = [s for s in cfg.get("signatures", []) if s != text]
@@ -140,7 +140,7 @@ async def delete_signature(body: dict, auth=Depends(verify_token)):
 # ── 手动触发 ─────────────────────────────────────────────────────────────────
 
 @router.post("/scheduler/trigger/{name}", summary="手动触发指定动作")
-async def manual_trigger(name: str, auth=Depends(verify_token)):
+async def manual_trigger(name: str, auth=Depends(require_scopes("admin"))):
     """
     可触发的名称：
       morning_greeting / night_reminder / random_message
@@ -153,7 +153,7 @@ async def manual_trigger(name: str, auth=Depends(verify_token)):
 # ── sensor_aware 审计 ─────────────────────────────────────────────────────────
 
 @router.get("/scheduler/sensor_aware/audit", summary="获取 sensor_aware 最近决策审计日志")
-async def get_sensor_aware_audit(n: int = 50, auth=Depends(verify_token)):
+async def get_sensor_aware_audit(n: int = 50, auth=Depends(require_scopes("state.read"))):
     """
     返回最近 N 条 sensor_aware 完整决策快照（新→旧）。
     N 最大 50，默认 50。

@@ -23,7 +23,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.activity import activity_summary as _activity_summary
 from core.activity import chess as chess_activity
 from core.activity import chess_companion
@@ -104,7 +104,7 @@ _CHAT_MAX_MESSAGE_LEN = 1000
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/chess/start", summary="开局 — 创建 chess session")
-async def start_chess(body: StartRequest, auth=Depends(verify_token)):
+async def start_chess(body: StartRequest, auth=Depends(require_scopes("activity"))):
     char_id = _active_char_id()
     resolved_uid = body.uid.strip() or _default_uid()
 
@@ -142,7 +142,7 @@ async def start_chess(body: StartRequest, auth=Depends(verify_token)):
 @router.get("/chess/state", summary="获取当前 active chess 棋局状态")
 async def get_chess_state(
     uid: str = Query(default=""),
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("activity")),
 ):
     char_id = _active_char_id()
     resolved_uid = uid.strip() or _default_uid()
@@ -153,7 +153,7 @@ async def get_chess_state(
 
 
 @router.post("/chess/move", summary="落子（UCI 或 SAN）")
-async def make_move(body: MoveRequest, auth=Depends(verify_token)):
+async def make_move(body: MoveRequest, auth=Depends(require_scopes("activity"))):
     char_id = _active_char_id()
     resolved_uid = body.uid.strip() or _default_uid()
     _validate_session_id(body.session_id)
@@ -206,7 +206,7 @@ async def make_move(body: MoveRequest, auth=Depends(verify_token)):
 async def get_legal_moves(
     session_id: str = Query(...),
     uid: str = Query(default=""),
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("activity")),
 ):
     char_id = _active_char_id()
     resolved_uid = uid.strip() or _default_uid()
@@ -223,7 +223,7 @@ async def get_legal_moves(
 
 
 @router.post("/chess/close", summary="关闭棋局 session")
-async def close_chess(body: CloseRequest, auth=Depends(verify_token)):
+async def close_chess(body: CloseRequest, auth=Depends(require_scopes("activity"))):
     char_id = _active_char_id()
     resolved_uid = body.uid.strip() or _default_uid()
     _validate_session_id(body.session_id)
@@ -265,7 +265,7 @@ class AiMoveRequest(BaseModel):
 
 
 @router.post("/chess/ai_move", summary="执行待处理的 AI 落子")
-async def chess_ai_move(body: AiMoveRequest, auth=Depends(verify_token)):
+async def chess_ai_move(body: AiMoveRequest, auth=Depends(require_scopes("activity"))):
     """
     执行 AI 落子（当 pending_ai_turn=True 时有效）。
     规则引擎负责胜负判定，不调用 LLM。
@@ -316,7 +316,7 @@ async def chess_ai_move(body: AiMoveRequest, auth=Depends(verify_token)):
 
 
 @router.post("/chess/chat", summary="活动内对话（陪伴聊天）")
-async def chess_chat(body: ChatRequest, auth=Depends(verify_token)):
+async def chess_chat(body: ChatRequest, auth=Depends(require_scopes("activity"))):
     """
     活动内对话接口。
 

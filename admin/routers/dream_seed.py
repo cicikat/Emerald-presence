@@ -7,7 +7,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.activity import dream_seed
 from core.config_loader import get_config
 from core.sandbox import get_paths
@@ -62,14 +62,14 @@ class CloseRequest(BaseModel):
 
 
 @router.post("/dream_seed/start", summary="开始梦境预构")
-async def start(body: StartRequest, _auth=Depends(verify_token)):
+async def start(body: StartRequest, _auth=Depends(require_scopes("activity"))):
     uid = body.uid.strip() or _default_uid()
     session = dream_seed.start_session(uid, char_id=_active_char_id())
     return {"session_id": session.session_id, "status": session.status}
 
 
 @router.get("/dream_seed/state", summary="读取梦境预构状态")
-async def state(uid: str = Query(default=""), _auth=Depends(verify_token)):
+async def state(uid: str = Query(default=""), _auth=Depends(require_scopes("activity"))):
     resolved_uid = uid.strip() or _default_uid()
     char_id = _active_char_id()
     from core.activity import store
@@ -84,7 +84,7 @@ async def state(uid: str = Query(default=""), _auth=Depends(verify_token)):
 
 
 @router.post("/dream_seed/chat", summary="梦境预构活动内对话")
-async def chat(body: ChatRequest, _auth=Depends(verify_token)):
+async def chat(body: ChatRequest, _auth=Depends(require_scopes("activity"))):
     uid = body.uid.strip() or _default_uid()
     char_id = _active_char_id()
     session_id = _session_id(body.session_id)
@@ -107,7 +107,7 @@ async def chat(body: ChatRequest, _auth=Depends(verify_token)):
 
 
 @router.post("/dream_seed/close", summary="关闭梦境预构并提炼种子")
-async def close(body: CloseRequest, _auth=Depends(verify_token)):
+async def close(body: CloseRequest, _auth=Depends(require_scopes("activity"))):
     uid = body.uid.strip() or _default_uid()
     seed = await dream_seed.close_session(
         uid,

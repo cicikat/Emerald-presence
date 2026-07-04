@@ -20,7 +20,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.sandbox import get_paths
 from core.stage.models import Stage, StageSettings, now_iso
 from core.stage.store import (
@@ -121,7 +121,7 @@ def _require_stage(group_id: str) -> Stage:
 # ── list ─────────────────────────────────────────────────────────────────────
 
 @router.get("/list", summary="列出所有群")
-async def list_groups(_auth=Depends(verify_token)):
+async def list_groups(_auth=Depends(require_scopes("chat"))):
     groups_dir = get_paths().stage_group_dir(group_id="_dummy").parent
     if not groups_dir.exists():
         return []
@@ -136,7 +136,7 @@ async def list_groups(_auth=Depends(verify_token)):
 # ── create ───────────────────────────────────────────────────────────────────
 
 @router.post("/create", summary="建群")
-async def create_group(body: dict, _auth=Depends(verify_token)):
+async def create_group(body: dict, _auth=Depends(require_scopes("chat"))):
     roster: list[str] = body.get("roster") or []
     if not roster:
         raise HTTPException(status_code=422, detail="roster 不能为空")
@@ -177,7 +177,7 @@ async def create_group(body: dict, _auth=Depends(verify_token)):
 # ── get detail ───────────────────────────────────────────────────────────────
 
 @router.get("/{group_id}", summary="取群详情")
-async def get_group(group_id: str, _auth=Depends(verify_token)):
+async def get_group(group_id: str, _auth=Depends(require_scopes("chat"))):
     stage = _require_stage(group_id)
     transcript = load_transcript(stage.group_id)
     return {
@@ -190,7 +190,7 @@ async def get_group(group_id: str, _auth=Depends(verify_token)):
 # ── send ─────────────────────────────────────────────────────────────────────
 
 @router.post("/{group_id}/send", summary="触发 arbiter 一轮（异步）")
-async def group_send(group_id: str, body: dict, _auth=Depends(verify_token)):
+async def group_send(group_id: str, body: dict, _auth=Depends(require_scopes("chat"))):
     stage = _require_stage(group_id)
     if stage.status != "active":
         raise HTTPException(status_code=409, detail=f"群 {group_id!r} 已关闭")
@@ -232,7 +232,7 @@ async def group_send(group_id: str, body: dict, _auth=Depends(verify_token)):
 async def group_history(
     group_id: str,
     before: float | None = None,
-    _auth=Depends(verify_token),
+    _auth=Depends(require_scopes("chat")),
 ):
     _require_stage(group_id)
     transcript = load_transcript(group_id)
@@ -245,7 +245,7 @@ async def group_history(
 # ── settings get ─────────────────────────────────────────────────────────────
 
 @router.get("/{group_id}/settings", summary="读群设置")
-async def get_group_settings(group_id: str, _auth=Depends(verify_token)):
+async def get_group_settings(group_id: str, _auth=Depends(require_scopes("chat"))):
     stage = _require_stage(group_id)
     return _settings_dict(stage.settings)
 
@@ -253,7 +253,7 @@ async def get_group_settings(group_id: str, _auth=Depends(verify_token)):
 # ── settings patch ───────────────────────────────────────────────────────────
 
 @router.delete("/{group_id}", summary="删除群（连同 transcript）")
-async def delete_group(group_id: str, _auth=Depends(verify_token)):
+async def delete_group(group_id: str, _auth=Depends(require_scopes("chat"))):
     ok = delete_stage(group_id)
     if not ok:
         raise HTTPException(status_code=404, detail="群不存在")
@@ -261,7 +261,7 @@ async def delete_group(group_id: str, _auth=Depends(verify_token)):
 
 
 @router.patch("/{group_id}/roster", summary="改群成员（加/减角色）")
-async def patch_group_roster(group_id: str, body: dict, _auth=Depends(verify_token)):
+async def patch_group_roster(group_id: str, body: dict, _auth=Depends(require_scopes("chat"))):
     stage = _require_stage(group_id)
     new_roster = [str(r).strip() for r in (body.get("roster") or []) if str(r).strip()]
     if not new_roster:
@@ -285,7 +285,7 @@ async def patch_group_roster(group_id: str, body: dict, _auth=Depends(verify_tok
 
 
 @router.patch("/{group_id}/settings", summary="改群设置（部分更新）")
-async def patch_group_settings(group_id: str, body: dict, _auth=Depends(verify_token)):
+async def patch_group_settings(group_id: str, body: dict, _auth=Depends(require_scopes("chat"))):
     stage = _require_stage(group_id)
     current = stage.settings.to_dict()
     # Flatten memory_strength.group into group_memory_strength for from_dict.

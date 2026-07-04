@@ -15,7 +15,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.relationship_facts import load, save, run_address_suggester
 from core.sandbox import safe_user_id
 
@@ -62,7 +62,7 @@ async def list_facts(
     uid: str,
     status: Optional[str] = None,
     char_id: Optional[str] = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("memory.read")),
 ):
     """
     列出指定用户的关系事实。
@@ -83,7 +83,7 @@ async def add_fact(
     uid: str,
     entry: FactIn,
     char_id: Optional[str] = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     """手动创建一条关系事实（默认 status=confirmed，创建即生效）。"""
     uid = safe_user_id(uid)
@@ -114,7 +114,7 @@ async def update_fact(
     index: int,
     entry: FactIn,
     char_id: Optional[str] = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     uid = safe_user_id(uid)
     cid = _resolve_char_id(char_id)
@@ -142,7 +142,7 @@ async def confirm_fact(
     uid: str,
     index: int,
     char_id: Optional[str] = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     """
     将指定下标的 pending 条目设为 confirmed（enabled:true），即时生效。
@@ -165,7 +165,7 @@ async def reject_fact(
     uid: str,
     index: int,
     char_id: Optional[str] = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     """将指定下标的条目设为 archived（enabled:false，不再注入，不删除，可追溯）。"""
     uid = safe_user_id(uid)
@@ -184,7 +184,7 @@ async def delete_fact(
     uid: str,
     index: int,
     char_id: Optional[str] = None,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     uid = safe_user_id(uid)
     cid = _resolve_char_id(char_id)
@@ -203,7 +203,7 @@ async def run_suggester(
     days: int = 30,
     freq_threshold: int = 15,
     min_start_count: int = 3,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("admin")),
 ):
     """
     手动触发称呼频次建议器：扫描近 days 天 event_log，

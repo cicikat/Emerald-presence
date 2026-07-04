@@ -11,7 +11,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.sandbox import get_paths
 
 router = APIRouter()
@@ -90,14 +90,14 @@ class BlacklistRequest(BaseModel):
 # ── 黑名单接口（必须在 /{user_id} 之前注册）────────────────────────────────
 
 @router.get("/blacklist", summary="获取黑名单列表")
-async def get_blacklist(auth=Depends(verify_token)):
+async def get_blacklist(auth=Depends(require_scopes("memory.read"))):
     """返回当前所有被屏蔽的用户 ID"""
     blacklist = _read_blacklist()
     return {"blacklist": blacklist, "total": len(blacklist)}
 
 
 @router.post("/blacklist", summary="添加用户到黑名单")
-async def add_to_blacklist(body: BlacklistRequest, auth=Depends(verify_token)):
+async def add_to_blacklist(body: BlacklistRequest, auth=Depends(require_scopes("admin"))):
     """将指定用户加入 blacklist.yaml 并立即热重载"""
     blacklist = _read_blacklist()
     uid = str(body.user_id)
@@ -110,7 +110,7 @@ async def add_to_blacklist(body: BlacklistRequest, auth=Depends(verify_token)):
 
 
 @router.delete("/blacklist/{user_id}", summary="从黑名单移除")
-async def remove_from_blacklist(user_id: str, auth=Depends(verify_token)):
+async def remove_from_blacklist(user_id: str, auth=Depends(require_scopes("admin"))):
     """从 blacklist.yaml 删除指定用户并立即热重载"""
     blacklist = _read_blacklist()
     uid = str(user_id)
@@ -125,14 +125,14 @@ async def remove_from_blacklist(user_id: str, auth=Depends(verify_token)):
 # ── 关系配置接口 ──────────────────────────────────────────────────────────────
 
 @router.get("/", summary="获取所有关系配置")
-async def get_relations(auth=Depends(verify_token)):
+async def get_relations(auth=Depends(require_scopes("memory.read"))):
     """读取 relations.yaml 并原样返回所有配置"""
     relations = _read_relations()
     return {"relations": relations}
 
 
 @router.get("/{user_id}", summary="获取单用户关系配置")
-async def get_relation(user_id: str, auth=Depends(verify_token)):
+async def get_relation(user_id: str, auth=Depends(require_scopes("memory.read"))):
     """
     获取指定用户的关系配置。
     raw: relations.yaml 中的原始条目；
@@ -145,7 +145,7 @@ async def get_relation(user_id: str, auth=Depends(verify_token)):
 
 
 @router.put("/{user_id}", summary="新增或更新用户关系配置")
-async def update_relation(user_id: str, body: RelationUpdate, auth=Depends(verify_token)):
+async def update_relation(user_id: str, body: RelationUpdate, auth=Depends(require_scopes("admin"))):
     """
     合并更新 relations.yaml 中的指定用户条目，然后热重载。
     只传入需要修改的字段即可，未传入字段保持原值。
@@ -172,7 +172,7 @@ async def update_relation(user_id: str, body: RelationUpdate, auth=Depends(verif
 
 
 @router.delete("/{user_id}", summary="删除用户关系配置")
-async def delete_relation(user_id: str, auth=Depends(verify_token)):
+async def delete_relation(user_id: str, auth=Depends(require_scopes("admin"))):
     """从 relations.yaml 删除指定用户条目并热重载（不影响 default）"""
     relations = _read_relations()
     uid = str(user_id)

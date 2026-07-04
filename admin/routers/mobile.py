@@ -4,7 +4,7 @@
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 
 router = APIRouter()
 
@@ -20,7 +20,7 @@ def _get_mobile_channel():
 
 
 @router.post("/mobile/activate", summary="手机端上线并激活 mobile 通道")
-async def mobile_activate(auth=Depends(verify_token)):
+async def mobile_activate(auth=Depends(require_scopes("chat"))):
     mobile = _get_mobile_channel()
     if mobile is None:
         return {"ok": False, "error": "mobile channel 未注册"}
@@ -29,7 +29,7 @@ async def mobile_activate(auth=Depends(verify_token)):
 
 
 @router.post("/mobile/deactivate", summary="手机端下线并停用 mobile 通道")
-async def mobile_deactivate(auth=Depends(verify_token)):
+async def mobile_deactivate(auth=Depends(require_scopes("chat"))):
     mobile = _get_mobile_channel()
     if mobile is None:
         return {"ok": False, "error": "mobile channel 未注册"}
@@ -38,7 +38,7 @@ async def mobile_deactivate(auth=Depends(verify_token)):
 
 
 @router.post("/mobile/chat", summary="手机端对话（走 mobile channel 语义）")
-async def mobile_chat(body: dict = Body(...), auth=Depends(verify_token)):
+async def mobile_chat(body: dict = Body(...), auth=Depends(require_scopes("chat"))):
     message = (body.get("message") or "").strip()
     if not message:
         raise HTTPException(status_code=422, detail="message 不能为空")
@@ -65,7 +65,7 @@ async def mobile_poll(
     after: int | None = Query(default=None, ge=0),
     limit: int = Query(default=20, ge=1, le=50),
     wait: float = Query(default=0, ge=0, le=60),
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("chat")),
 ):
     mobile = _get_mobile_channel()
     if mobile is None:
@@ -76,7 +76,7 @@ async def mobile_poll(
 
 
 @router.post("/mobile/ack", summary="确认手机端已持久化的主动消息")
-async def mobile_ack(body: dict = Body(...), auth=Depends(verify_token)):
+async def mobile_ack(body: dict = Body(...), auth=Depends(require_scopes("chat"))):
     ack_seq = body.get("ack_seq")
     if not isinstance(ack_seq, int) or isinstance(ack_seq, bool) or ack_seq < 0:
         raise HTTPException(status_code=422, detail="ack_seq 必须是非负整数")
@@ -89,7 +89,7 @@ async def mobile_ack(body: dict = Body(...), auth=Depends(verify_token)):
 
 
 @router.post("/mobile/push", summary="向手机端主动消息队列写入一条消息")
-async def mobile_push(body: dict, auth=Depends(verify_token)):
+async def mobile_push(body: dict, auth=Depends(require_scopes("chat"))):
     mobile = _get_mobile_channel()
     if mobile is None:
         return {"ok": False, "error": "mobile channel 未注册"}

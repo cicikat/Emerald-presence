@@ -6,7 +6,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.garden import manager as garden_manager
 from core.sandbox import get_paths as _get_paths
 
@@ -33,5 +33,5 @@ def _active_char_id() -> str:
 
 
 @router.get("/state", summary="获取花园状态")
-async def get_garden_state(auth=Depends(verify_token)):
+async def get_garden_state(auth=Depends(require_scopes("state.read"))):
     return garden_manager.get_state(char_id=_active_char_id())

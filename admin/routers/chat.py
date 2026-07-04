@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -210,6 +210,8 @@ async def run_owner_chat_turn(
                 if _ui_push.any_connected():
                     from core.narrative_parser import build_say_segments
                     _say_content, _say_segs = build_say_segments(reply)
+                    from core.perform_mapper import enrich_say_segments
+                    _say_segs = await enrich_say_segments(reply, _say_segs, char_id=_frozen_scope.character_id)
                     await _dws.push_segments(
                         _say_content,
                         _say_segs,
@@ -251,7 +253,7 @@ async def run_owner_chat_turn(
         }
 
 
-async def _probe_and_execute_tools(message: str, user_id: str, *, char_id: str = "yexuan") -> str | None:
+async def _probe_and_execute_tools(message: str, user_id: str, *, char_id: str) -> str | None:
     from core import tool_dispatcher, llm_client as _llm
     from core.memory import user_profile as _up, short_term as _st_probe
     from core.session_state import get as _get_state
@@ -346,7 +348,7 @@ async def _probe_and_execute_tools(message: str, user_id: str, *, char_id: str =
 
 
 @router.post("/chat", summary="与角色对话（管理面板专用）[v0.1 已禁用]")
-async def frontend_chat(body: dict, auth=Depends(verify_token)):
+async def frontend_chat(body: dict, auth=Depends(require_scopes("chat"))):
     """
     v0.1 禁用：该通道使用 frontend_owner 作为幽灵 uid，会产生假历史与调试分叉。
     v0.1 只保留 /desktop/chat 单通道。v0.2 再决定此通道去留。
@@ -430,7 +432,7 @@ def _check_reality_not_in_dream(uid: str) -> None:
 
 
 @router.post("/desktop/chat", summary="桌宠对话（Bearer 鉴权）")
-async def desktop_chat(body: dict, _auth=Depends(verify_token)):
+async def desktop_chat(body: dict, _auth=Depends(require_scopes("chat"))):
     """
     桌宠端对话入口，需 Bearer token 鉴权（Authorization: Bearer <YEXUAN_ADMIN_SECRET>）。
     user_id 从配置的 scheduler.owner_id 读取，正常走 pipeline，不注入第四面墙提示。
@@ -457,7 +459,7 @@ async def upload_ingest(
     files: list[UploadFile] | None = File(None),
     message: str = Form(""),
     channel: str = Form("desktop"),
-    _auth=Depends(verify_token),
+    _auth=Depends(require_scopes("chat")),
 ):
     """
     multipart 上传 + 可选用户附言 + channel 标记。
@@ -530,7 +532,7 @@ async def upload_ingest(
 
 
 @router.post("/desktop/activate", summary="桌宠上线激活desktop通道")
-async def desktop_activate(_auth=Depends(verify_token)):
+async def desktop_activate(_auth=Depends(require_scopes("chat"))):
     from channels.registry import get as _get_channel
     channel = _get_channel("desktop")
     if channel and hasattr(channel, "set_active"):
@@ -539,7 +541,7 @@ async def desktop_activate(_auth=Depends(verify_token)):
 
 
 @router.post("/desktop/deactivate", summary="桌宠下线停用desktop通道")
-async def desktop_deactivate(_auth=Depends(verify_token)):
+async def desktop_deactivate(_auth=Depends(require_scopes("chat"))):
     from channels.registry import get as _get_channel
     channel = _get_channel("desktop")
     if channel and hasattr(channel, "set_active"):
@@ -548,7 +550,7 @@ async def desktop_deactivate(_auth=Depends(verify_token)):
 
 
 @router.post("/desktop/wake", summary="桌宠重开问候（仅触发 assistant turn，不写 user 历史）")
-async def desktop_wake(body: dict = Body(default={}), _auth=Depends(verify_token)):
+async def desktop_wake(body: dict = Body(default={}), _auth=Depends(require_scopes("chat"))):
     """
     桌宠重开时调用，绝不向 user 历史写入机器合成文本。
 

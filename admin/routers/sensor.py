@@ -20,7 +20,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.config_loader import get_config
 from core.memory.user_profile import load as _load_profile, save as _save_profile
 from core.memory import realtime_state
@@ -94,7 +94,7 @@ def _save_sensor_to_profile(data: dict):
 
 
 @router.post("/sensor/push", summary="接收手机传感器数据")
-async def receive_sensor_data(body: dict, auth=Depends(verify_token)):
+async def receive_sensor_data(body: dict, auth=Depends(require_scopes("sensor.write"))):
     """
     手机APP每30分钟推送一次传感器数据。
 
@@ -147,13 +147,13 @@ async def receive_sensor_data(body: dict, auth=Depends(verify_token)):
 
 
 @router.get("/sensor/status", summary="获取最近一次手机传感器快照")
-async def get_sensor_status(auth=Depends(verify_token)):
+async def get_sensor_status(auth=Depends(require_scopes("state.read"))):
     """返回最近一次推送的传感器数据快照"""
     return _last_sensor_data
 
 
 @router.get("/sensor/today", summary="获取今日传感器聚合摘要")
-async def get_sensor_today(auth=Depends(verify_token)):
+async def get_sensor_today(auth=Depends(require_scopes("state.read"))):
     """返回今日聚合摘要，角色的context读这个"""
     oid = str(get_config().get("scheduler", {}).get("owner_id", ""))
     if not oid:
@@ -198,7 +198,7 @@ class _RealtimeIngest(BaseModel):
 @router.post("/sensor/realtime", summary="接收桌面端实时传感器快照")
 async def receive_realtime_snapshot(
     payload: _RealtimeIngest,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("sensor.write")),
 ):
     # Sidecar 应整帧跳过敏感窗口；这里再次 fail-closed，防止旧客户端或误配置泄漏。
     if (
@@ -237,7 +237,7 @@ async def receive_realtime_snapshot(
 
 
 @router.get("/sensor/realtime", summary="读取最新实时状态快照")
-async def get_realtime_snapshot(auth=Depends(verify_token)):
+async def get_realtime_snapshot(auth=Depends(require_scopes("state.read"))):
     snap = realtime_state.get()
     if snap is None:
         return {
@@ -265,14 +265,14 @@ async def get_realtime_snapshot(auth=Depends(verify_token)):
 
 
 @router.get("/sensor/behavior/status", summary="读取最近一次 sensor_aware 行为裁决")
-async def get_behavior_status(auth=Depends(verify_token)):
+async def get_behavior_status(auth=Depends(require_scopes("state.read"))):
     from core.scheduler.triggers import sensor_aware
 
     return sensor_aware.get_last_decision()
 
 
 @router.post("/sensor/activity", summary="接收桌宠端活动快照")
-async def receive_activity_snapshot(payload: dict, auth=Depends(verify_token)):
+async def receive_activity_snapshot(payload: dict, auth=Depends(require_scopes("sensor.write"))):
     """桌宠端每5分钟推送一次屏幕活动快照，写入文件供 prompt_builder 读取。"""
     # Resolve active char_id — fail-loud, no yexuan fallback.
     try:

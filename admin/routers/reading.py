@@ -32,7 +32,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.activity import activity_store
 from core.activity import activity_summary as _activity_summary
 from core.activity import reading_companion
@@ -168,7 +168,7 @@ async def start_reading(
     file: UploadFile = File(...),
     start_page: int = Form(default=1),
     uid: str = Form(default=""),
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("activity")),
 ):
     char_id = _active_char_id()
     resolved_uid = uid.strip() or _default_uid()
@@ -217,7 +217,7 @@ async def start_reading(
 @router.get("/reading/state", summary="获取当前 active 阅读 session")
 async def get_reading_state(
     uid: str = Query(default=""),
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("activity")),
 ):
     char_id = _active_char_id()
     resolved_uid = uid.strip() or _default_uid()
@@ -231,7 +231,7 @@ async def get_reading_state(
 async def get_page(
     session_id: str = Query(...),
     page: int = Query(...),
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("activity")),
 ):
     char_id = _active_char_id()
     _validate_session_id(session_id)
@@ -263,7 +263,7 @@ class TurnPageRequest(BaseModel):
 @router.post("/reading/turn_page", summary="翻页")
 async def turn_page(
     body: TurnPageRequest,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("activity")),
 ):
     char_id = _active_char_id()
     _validate_session_id(body.session_id)
@@ -318,7 +318,7 @@ _CHAT_MAX_MESSAGE_LEN = 1000
 @router.post("/reading/close", summary="关闭阅读 session")
 async def close_reading(
     body: CloseRequest,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("activity")),
 ):
     char_id = _active_char_id()
     _validate_session_id(body.session_id)
@@ -367,7 +367,7 @@ async def close_reading(
 
 
 @router.get("/reading/library", summary="列出书库中的书")
-async def list_library(auth=Depends(verify_token)):
+async def list_library(auth=Depends(require_scopes("activity"))):
     """从 manifest.json 返回书库列表（含 title / category / total_pages）。"""
     manifest = _migrate_manifest_if_needed()
     books_dir = _get_paths().reading_library_books_dir()
@@ -381,7 +381,7 @@ async def list_library(auth=Depends(verify_token)):
 @router.post("/reading/library/add", summary="上传 PDF 到书库")
 async def add_to_library(
     file: UploadFile = File(...),
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("activity")),
 ):
     """把上传的 PDF 保存到 data/library/books/，并更新 manifest.json。同名文件直接覆盖。"""
     safe_name = _sanitize_filename(file.filename or "upload.pdf")
@@ -433,7 +433,7 @@ class StartFromLibraryRequest(BaseModel):
 @router.post("/reading/start_from_library", summary="从书库开始阅读")
 async def start_reading_from_library(
     body: StartFromLibraryRequest,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("activity")),
 ):
     """从 data/library/books/ 读取文件内容，不需要上传，其余逻辑同 /reading/start。"""
     char_id = _active_char_id()
@@ -504,7 +504,7 @@ class CategorizeBookRequest(BaseModel):
 @router.post("/reading/library/delete", summary="从书库删除一本书")
 async def delete_from_library(
     body: DeleteBookRequest,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("activity")),
 ):
     manifest = _migrate_manifest_if_needed()
     book = _find_book(manifest, body.book_id)
@@ -531,7 +531,7 @@ async def delete_from_library(
 @router.post("/reading/library/rename", summary="修改书的显示名称")
 async def rename_book(
     body: RenameBookRequest,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("activity")),
 ):
     title = body.title.strip()
     if not title:
@@ -548,7 +548,7 @@ async def rename_book(
 @router.post("/reading/library/categorize", summary="设置书的分类")
 async def categorize_book(
     body: CategorizeBookRequest,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("activity")),
 ):
     category = body.category.strip() or "未分类"
     manifest = _migrate_manifest_if_needed()
@@ -563,7 +563,7 @@ async def categorize_book(
 @router.post("/reading/chat", summary="活动内对话（陪伴聊天）")
 async def reading_chat(
     body: ChatRequest,
-    auth=Depends(verify_token),
+    auth=Depends(require_scopes("activity")),
 ):
     """
     活动内对话接口。

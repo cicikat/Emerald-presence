@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def _active_char_id() -> str:
     ),
     tags=["Debug"],
 )
-async def get_user_hidden_state_debug(auth=Depends(verify_token)):
+async def get_user_hidden_state_debug(auth=Depends(require_scopes("memory.read"))):
     try:
         from core.memory.user_hidden_state import to_dict, to_dream_snapshot
         from core.memory.user_hidden_state_store import load_hidden_state

@@ -15,7 +15,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.config_loader import get_config
 
 router = APIRouter()
@@ -52,7 +52,7 @@ def _get_chat_preset_params(cfg: dict) -> dict:
 
 
 @router.get("/llm-params", summary="获取 LLM 生成参数")
-async def get_llm_params(auth=Depends(verify_token)):
+async def get_llm_params(auth=Depends(require_scopes("admin"))):
     """读取当前 chat preset 的生成参数（或 legacy llm: 块）。"""
     params = _get_chat_preset_params(get_config())
     return {
@@ -64,7 +64,7 @@ async def get_llm_params(auth=Depends(verify_token)):
 
 
 @router.put("/llm-params", summary="修改 LLM 生成参数并热重载")
-async def update_llm_params(body: LlmParamsUpdate, auth=Depends(verify_token)):
+async def update_llm_params(body: LlmParamsUpdate, auth=Depends(require_scopes("admin"))):
     """修改当前 chat preset 的生成参数并热重载。
     legacy 模式（无 model_presets 块）写回 llm: 块，保持旧行为。
     """
@@ -126,7 +126,7 @@ class VisionParamsUpdate(BaseModel):
 
 
 @router.get("/vision-params", summary="获取 Vision 配置")
-async def get_vision_params(auth=Depends(verify_token)):
+async def get_vision_params(auth=Depends(require_scopes("admin"))):
     cfg = get_config().get("vision", {})
     return {
         "enabled":  cfg.get("enabled",  False),
@@ -138,7 +138,7 @@ async def get_vision_params(auth=Depends(verify_token)):
 
 
 @router.put("/vision-params", summary="修改 Vision 配置并热重载")
-async def update_vision_params(body: VisionParamsUpdate, auth=Depends(verify_token)):
+async def update_vision_params(body: VisionParamsUpdate, auth=Depends(require_scopes("admin"))):
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             full_cfg = yaml.safe_load(f) or {}
@@ -185,7 +185,7 @@ def _mask_presets(presets: dict) -> dict:
 
 
 @router.get("/model-presets", summary="获取多模型 preset 配置")
-async def get_model_presets(auth=Depends(verify_token)):
+async def get_model_presets(auth=Depends(require_scopes("admin"))):
     """返回 presets 列表（api_key 打码）、routing_profiles、active_routing。
     若配置中无 model_presets 块，返回合成的 legacy 视图。
     """
@@ -205,7 +205,7 @@ class ActiveRoutingUpdate(BaseModel):
 
 
 @router.put("/model-presets/active-routing", summary="切换当前生效的路由方案")
-async def set_active_routing(body: ActiveRoutingUpdate, auth=Depends(verify_token)):
+async def set_active_routing(body: ActiveRoutingUpdate, auth=Depends(require_scopes("admin"))):
     """切换 active_routing（如 'default' → 'claude-main'）并热重载。
     只支持已有 model_presets 块的配置；legacy 模式下无意义，会返回 400。
     """

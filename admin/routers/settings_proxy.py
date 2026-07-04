@@ -11,7 +11,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.config_loader import get_config
 
 router = APIRouter()
@@ -25,7 +25,7 @@ class ProxyUpdate(BaseModel):
 
 
 @router.get("/proxy", summary="获取当前代理配置")
-async def get_proxy(auth=Depends(verify_token)):
+async def get_proxy(auth=Depends(require_scopes("admin"))):
     proxy_cfg = get_config().get("proxy", {})
     return {
         "enabled": proxy_cfg.get("enabled", False),
@@ -35,7 +35,7 @@ async def get_proxy(auth=Depends(verify_token)):
 
 
 @router.put("/proxy", summary="修改代理配置并热重载")
-async def update_proxy(body: ProxyUpdate, auth=Depends(verify_token)):
+async def update_proxy(body: ProxyUpdate, auth=Depends(require_scopes("admin"))):
     """修改 proxy 字段，热重载 config + 重置 LLM 客户端"""
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:

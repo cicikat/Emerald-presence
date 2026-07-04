@@ -17,7 +17,7 @@ from typing import Any, Dict
 import yaml
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.asset_registry import get_registry, reload_registry
 from core.config_loader import get_config
 
@@ -89,7 +89,7 @@ def _reload_character(char_id: str) -> None:
 # ─── 路由（注意：精确路由必须在参数路由之前声明）────────────────────────────────
 
 @router.get("/characters", summary="列出所有角色卡文件")
-async def list_characters(auth=Depends(verify_token)):
+async def list_characters(auth=Depends(require_scopes("persona"))):
     """返回 characters/ 顶层目录下的角色卡资产列表（不含 hidden/template/author_notes 资产）。
 
     Response shape:
@@ -112,7 +112,7 @@ async def list_characters(auth=Depends(verify_token)):
 
 
 @router.put("/characters/active", summary="切换当前活跃角色卡")
-async def set_active_character(body: Dict[str, Any], auth=Depends(verify_token)):
+async def set_active_character(body: Dict[str, Any], auth=Depends(require_scopes("persona"))):
     """将 config.yaml 中的 character.default 更新为指定角色 id，并热重载。
 
     Request body: {"id": "yexuan"}
@@ -183,7 +183,7 @@ async def set_active_character(body: Dict[str, Any], auth=Depends(verify_token))
 
 
 @router.post("/characters/upload", summary="上传新角色卡（.json / .txt / .md）")
-async def upload_character(file: UploadFile = File(...), auth=Depends(verify_token)):
+async def upload_character(file: UploadFile = File(...), auth=Depends(require_scopes("persona"))):
     """接收 .json / .txt / .md 文件并保存到 characters/ 目录"""
     filename = file.filename or ""
     suffix = Path(filename).suffix.lower()
@@ -208,7 +208,7 @@ async def upload_character(file: UploadFile = File(...), auth=Depends(verify_tok
 
 
 @router.get("/characters/active-info", summary="当前活跃角色基本信息（前端初始化用）")
-async def get_active_char_info(auth=Depends(verify_token)):
+async def get_active_char_info(auth=Depends(require_scopes("persona"))):
     """返回当前活跃角色的显示名与性别，供前端替换叶瑄占位文本。
 
     Response: {"char_id": "yexuan", "name": "叶瑄", "gender": "male"}
@@ -225,7 +225,7 @@ async def get_active_char_info(auth=Depends(verify_token)):
 
 
 @router.get("/characters/{name}/export", summary="导出角色卡文件")
-async def export_character(name: str, auth=Depends(verify_token)):
+async def export_character(name: str, auth=Depends(require_scopes("persona"))):
     from fastapi.responses import Response as _Resp
     from urllib.parse import quote
     path = _safe_path(name)
@@ -239,7 +239,7 @@ async def export_character(name: str, auth=Depends(verify_token)):
 
 
 @router.get("/characters/{name}", summary="读取角色卡内容")
-async def get_character(name: str, auth=Depends(verify_token)):
+async def get_character(name: str, auth=Depends(require_scopes("persona"))):
     """返回指定角色卡内容：
     - .txt/.md → {"filename": name, "type": "text", "content": "..."}
     - .json    → 原始 JSON 对象 + "type": "json"
@@ -264,7 +264,7 @@ async def get_character(name: str, auth=Depends(verify_token)):
 
 
 @router.put("/characters/{name}", summary="保存角色卡并热重载")
-async def save_character(name: str, request: Request, _auth=Depends(verify_token)):
+async def save_character(name: str, request: Request, _auth=Depends(require_scopes("persona"))):
     """接收编辑后的角色卡内容，写回文件并热重载角色。
     - .txt/.md：raw body 作为 UTF-8 文本直接写入
     - .json：解析 JSON body 再写入
@@ -294,7 +294,7 @@ async def save_character(name: str, request: Request, _auth=Depends(verify_token
 
 
 @router.post("/characters/{name}/rename", summary="重命名角色卡")
-async def rename_character(name: str, body: Dict[str, Any], auth=Depends(verify_token)):
+async def rename_character(name: str, body: Dict[str, Any], auth=Depends(require_scopes("persona"))):
     new_name = (body.get("new_name") or "").strip()
     if not new_name:
         raise HTTPException(status_code=422, detail="new_name 不能为空")

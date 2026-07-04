@@ -10,7 +10,7 @@ import yaml
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core.sandbox import get_paths
 
 router = APIRouter()
@@ -85,14 +85,14 @@ class LoreEntry(BaseModel):
 # ── 路由 ─────────────────────────────────────────────────────────────────────
 
 @router.get("/lorebook", summary="获取所有世界书条目")
-async def get_lorebook(auth=Depends(verify_token)):
+async def get_lorebook(auth=Depends(require_scopes("persona"))):
     """读取 characters/reality/lorebook.yaml 并返回全部条目"""
     data = _read_lorebook()
     return {"entries": data.get("entries", [])}
 
 
 @router.post("/lorebook", summary="新增世界书条目")
-async def add_lore_entry(entry: LoreEntry, auth=Depends(verify_token)):
+async def add_lore_entry(entry: LoreEntry, auth=Depends(require_scopes("persona"))):
     """在 lorebook.yaml 末尾追加一条新条目，并热重载世界书引擎"""
     data = _read_lorebook()
     new_entry = {
@@ -110,7 +110,7 @@ async def add_lore_entry(entry: LoreEntry, auth=Depends(verify_token)):
 
 
 @router.put("/lorebook/{eid}", summary="修改世界书条目")
-async def update_lore_entry(eid: str, entry: LoreEntry, auth=Depends(verify_token)):
+async def update_lore_entry(eid: str, entry: LoreEntry, auth=Depends(require_scopes("persona"))):
     """按 id 修改 lorebook.yaml 中的条目，并热重载世界书引擎"""
     data = _read_lorebook()
     entries = data.get("entries", [])
@@ -134,7 +134,7 @@ async def update_lore_entry(eid: str, entry: LoreEntry, auth=Depends(verify_toke
 
 
 @router.post("/lorebook/import/txt", summary="从 txt 文件批量导入世界书条目")
-async def import_lorebook_txt(file: UploadFile = File(...), auth=Depends(verify_token)):
+async def import_lorebook_txt(file: UploadFile = File(...), auth=Depends(require_scopes("persona"))):
     """
     读取上传的 .txt 文件，按空行分段：
       - 每段首行作为 keyword（逗号分隔多关键词）
@@ -185,7 +185,7 @@ async def import_lorebook_txt(file: UploadFile = File(...), auth=Depends(verify_
 
 
 @router.delete("/lorebook/{eid}", summary="删除世界书条目")
-async def delete_lore_entry(eid: str, auth=Depends(verify_token)):
+async def delete_lore_entry(eid: str, auth=Depends(require_scopes("persona"))):
     """按 id 删除 lorebook.yaml 中的条目，并热重载世界书引擎"""
     data = _read_lorebook()
     entries = data.get("entries", [])
@@ -199,7 +199,7 @@ async def delete_lore_entry(eid: str, auth=Depends(verify_token)):
 
 
 @router.get("/lorebook/export/json", summary="导出世界书为JSON")
-async def export_lorebook_json(auth=Depends(verify_token)):
+async def export_lorebook_json(auth=Depends(require_scopes("persona"))):
     """导出完整lorebook.yaml为JSON格式"""
     data = _read_lorebook()
     from fastapi.responses import JSONResponse
@@ -214,7 +214,7 @@ async def export_lorebook_json(auth=Depends(verify_token)):
 
 
 @router.post("/lorebook/import/json", summary="从JSON文件导入世界书条目")
-async def import_lorebook_json(file: UploadFile = File(...), auth=Depends(verify_token)):
+async def import_lorebook_json(file: UploadFile = File(...), auth=Depends(require_scopes("persona"))):
     """读取上传的.json文件，合并到现有lorebook.yaml"""
     if not (file.filename or "").lower().endswith(".json"):
         raise HTTPException(status_code=422, detail="只接受 .json 文件")

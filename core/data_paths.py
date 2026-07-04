@@ -506,6 +506,19 @@ class DataPaths:
         """data/runtime/meta_mode.json — global safe/danger mode switch."""
         return self._p("runtime", "meta_mode.json")
 
+    # ── SEC-AUTH-2: scoped token registry + audit ────────────────────────────
+    def auth_dir(self) -> Path:
+        """data/runtime/auth/ — token registry + audit log directory."""
+        return self._p("runtime", "auth")
+
+    def auth_tokens_file(self) -> Path:
+        """data/runtime/auth/tokens.yaml — token registry (label/hash/scopes)."""
+        return self.auth_dir() / "tokens.yaml"
+
+    def auth_audit_log(self) -> Path:
+        """data/runtime/auth/audit.jsonl — token lifecycle + auth failure audit trail."""
+        return self.auth_dir() / "audit.jsonl"
+
     def web_autosearch_state(self) -> Path:
         """data/runtime/web_autosearch_state.json — rate-limit state for autonomous web search (X3)."""
         return self._p("runtime", "web_autosearch_state.json")

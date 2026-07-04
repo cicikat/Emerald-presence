@@ -9,7 +9,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends
 
-from admin.auth import verify_token
+from admin.auth import require_scopes
 from core import activity_manager
 from core.activity.registry import list_enabled_activities
 
@@ -17,7 +17,7 @@ router = APIRouter()
 
 
 @router.get("/list", summary="获取所有已启用 Activity 元信息")
-async def get_activity_list(auth=Depends(verify_token)):
+async def get_activity_list(auth=Depends(require_scopes("state.read"))):
     return [
         {
             "id": m.id,
@@ -98,7 +98,7 @@ def _get_activity_text() -> str:
 
 
 @router.get("/current", summary="获取当前活动状态")
-async def get_activity_state(auth=Depends(verify_token)):
+async def get_activity_state(auth=Depends(require_scopes("state.read"))):
     state = activity_manager.get_current()
 
     started_at = None

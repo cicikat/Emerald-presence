@@ -6,4 +6,5 @@
 #define BACKEND_HOST  "192.168.x.x"   // 后端主机局域网 IP（config.yaml admin.host=0.0.0.0 时局域网可达）
 #define BACKEND_PORT  8080
 #define BACKEND_PATH  "/ws/device"
-#define AUTH_TOKEN    "Emerald1231"   // = 后端 config.yaml 的 admin.secret_key
+#define AUTH_TOKEN    "emt_..."   // 后端 POST /auth/tokens {"label":"esp32-device","profile":"device"} 签发的
+                                  // device profile token（仅 ws.device scope）；legacy admin.secret_key 仍兼容但不建议
