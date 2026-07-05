@@ -1,0 +1,13 @@
+# 示例文件：yexuan_traits.yaml
+# 复制本文件，改名为 traits.yaml，填入真实内容。
+# 每个 trait 由 id（唯一标识）、keywords（触发关键词列表）、description（简述）组成。
+# character_growth 系统用 id 做关联，修改 id 前确认 .md 里无引用。
+
+yexuan_traits:
+  - id: example_trait
+    keywords: [关键词1, 关键词2, 关键词3]
+    description: 这个 trait 的描述
+
+  - id: another_trait
+    keywords: [词A, 词B]
+    description: 另一个 trait 的描述

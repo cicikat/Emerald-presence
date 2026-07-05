@@ -156,9 +156,7 @@ def test_get_growth_calls_character_growth_load():
         with patch("core.config_loader.get_config", return_value=mock_config):
             # Call through the registry
             wrapper = td._TOOL_REGISTRY["get_growth"]["func"]
-            result = asyncio.get_event_loop().run_until_complete(
-                wrapper(user_id="test_uid_r8e3")
-            )
+            result = asyncio.run(wrapper(user_id="test_uid_r8e3"))
 
     assert load_calls, (
         "character_growth.load() was not called by get_growth — functional contract broken"

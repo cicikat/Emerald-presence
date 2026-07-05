@@ -307,7 +307,7 @@ scheduler:
   presence_nag: true
   presence_nag_minutes: 60
   activity_level: high
-  owner_id: 'YOUR-qq号'
+  owner_id: ''  # 留空 = 未配置，调度器会跳过主动触发；填你的 QQ 号或 desktop/mobile 用的 uid（仅 A-Za-z0-9_- ）
   owner_birthday: MM-DD  # 格式示例：01-01
   morning_greeting: true
   night_reminder: true
@@ -367,7 +367,7 @@ toy_autogrow:
 embedding:
   provider_kind: openai_compat
   base_url: https://api.siliconflow.cn/v1
-  api_key: sk-eiczpklfjswjjpuaoqvfktivhjldxnbmtgajlybiklnyjllz
+  api_key: sk-YOUR-EMBEDDING-API-KEY-HERE
   model: BAAI/bge-m3
   dim: 1024
 

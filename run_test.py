@@ -35,16 +35,20 @@ if __name__ == "__main__":
         print("[TEST] 服务已停止")
     finally:
         print()
-        answer = input(f"是否清理沙盒数据 {_paths._base}？(y/n) ").strip().lower()
+        try:
+            answer = input(f"是否清理沙盒数据 {_paths._base}？(y/n) ").strip().lower()
+        except EOFError:
+            answer = "n"
         if answer == "y":
             _paths.cleanup()
             print("[TEST] 沙盒已清理")
-
-            # 同时从 config.yaml 移除 data_prefix 字段
-            from core.sandbox import _CONFIG_PATH
-            lines = _CONFIG_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
-            lines = [l for l in lines if not l.startswith("data_prefix:")]
-            _CONFIG_PATH.write_text("".join(lines), encoding="utf-8")
-            print("[TEST] config.yaml data_prefix 已重置")
         else:
             print(f"[TEST] 沙盒保留在 {_paths._base.resolve()}")
+
+        # 无论是否清理沙盒目录，测试会话结束后 config.yaml 都不应再指向它，
+        # 否则下次以 production 模式启动会读到 test_sandbox 路径（P0-1 已排查的阻断项）。
+        from core.sandbox import _CONFIG_PATH
+        lines = _CONFIG_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
+        lines = [l for l in lines if not l.startswith("data_prefix:")]
+        _CONFIG_PATH.write_text("".join(lines), encoding="utf-8")
+        print("[TEST] config.yaml data_prefix 已重置")

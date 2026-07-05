@@ -19,6 +19,10 @@ python main.py
 # Test mode (data-isolated sandbox, won't touch production data/)
 python run_test.py
 
+## 测试（新增）
+- 跑测试用 `pytest -n auto`,不要用不带 -n 的全量单进程跑法
+- 只改了部分代码时优先用 `pytest --testmon` 或指定路径跑相关测试,避免每次全量
+
 # Run tests
 pytest
 pytest tests/test_short_term.py -v   # single file

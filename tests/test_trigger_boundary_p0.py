@@ -290,7 +290,12 @@ class TestTriggerPerceiveEvent(unittest.TestCase):
         """Same trigger parameters in same 60s bucket → same dedupe_key."""
         from core.perceive_event import PerceiveEvent, _make_dedupe_key
 
-        now = time.time()
+        # Anchored to the start of the current 60s bucket (+10s) instead of raw
+        # time.time(): the bucket is int(created_at // 60), so a wall-clock `now`
+        # within ~5s of a minute boundary makes `now` and `now + 5` land in
+        # different buckets and fail intermittently. +10 keeps both timestamps
+        # safely inside the same bucket regardless of when the test runs.
+        now = (time.time() // 60) * 60 + 10
         e1 = PerceiveEvent(
             source="scheduler", uid="u", channel="system", kind="scheduled",
             char_id="yexuan", payload={"trigger_name": "morning_greeting"},

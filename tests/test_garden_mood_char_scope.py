@@ -155,7 +155,7 @@ def test_water_writes_to_char_id_path_only(sandbox):
 # ── 6. garden_tools.water_garden passes active char_id ───────────────────────
 
 @pytest.mark.asyncio
-async def test_water_garden_tool_passes_active_char_id(sandbox):
+async def test_water_garden_tool_passes_active_char_id(sandbox, character_b_registered):
     """water_garden() must resolve active_character and pass it to force_water."""
     _write_active(sandbox, "character_b")
 
@@ -179,7 +179,7 @@ async def test_water_garden_tool_passes_active_char_id(sandbox):
 # ── 7. admin garden route passes active char_id ──────────────────────────────
 
 @pytest.mark.asyncio
-async def test_garden_admin_route_passes_active_char_id(sandbox):
+async def test_garden_admin_route_passes_active_char_id(sandbox, character_b_registered):
     """GET /garden/state must call get_state(char_id=active_character)."""
     _write_active(sandbox, "character_b")
 

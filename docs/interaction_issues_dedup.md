@@ -267,34 +267,25 @@ iPhone 捷径易用性优先，安全默认值偏宽。
 
 ## ISSUE-008：客户端硬编码 admin token
 
-状态：已有记录
+状态：**已解决**（SEC-AUTH-2 token 注册表 + 各端连接设置页上线后）
 
-严重度：P1：多端状态不一致、重复写入、触发误判
+严重度（历史）：P1：多端状态不一致、重复写入、触发误判
 
-问题描述：  
-Emerald-client、Flutter 前台和 Android 后台服务均硬编码 `Emerald1231`。token 改动会导致多端失联；源码暴露也不适合长期使用。
+问题描述（历史）：  
+Emerald-client、Flutter 前台和 Android 后台服务曾均硬编码 `Emerald1231`。token 改动会导致多端失联；源码暴露也不适合长期使用。旧字符串仍留存于 desktop/mobile 的 **git 历史**中（工作区源码已清除），开源前需确认该值在当前部署上已不再是有效的 admin secret。
 
-证据：
-- `<desktop-client-root>\src\shared\api\backend.ts:5`：`ADMIN_TOKEN`。
-- `<desktop-client-root>\src-tauri\src\sensor_config.rs:15`：`DEFAULT_ADMIN_TOKEN`。
-- `<mobile-client-root>\lib\main.dart:1927`：`_adminToken`。
-- `<mobile-client-root>\android\app\src\main\kotlin\com\example\mobile-client\MobileNotificationService.kt:26`：后台服务 token。
-
-可能根因：  
-单用户本地开发阶段为方便调试把 token 固化在客户端。
+现状：  
+后端改为 `data/runtime/auth/tokens.yaml` token 注册表（label/hash/scopes，见 `<repo-root>\admin\token_registry.py`）。各客户端不再硬编码 token：
+- desktop：连接设置页 → `client.local.json`（`<desktop-client-root>\src\shared\api\connectionSettings.ts`）。
+- mobile Flutter：设置页 → 本地存储（`<mobile-client-root>\lib\pages\app_shell.dart` `_settingsStore.loadAdminToken()`）。
+- mobile Android 后台服务：`SharedPreferences`（`<mobile-client-root>\android\app\src\main\kotlin\com\example\yexuan_memery\BackendSecurityPolicy.kt`）。
 
 影响范围：
 - mobile
 - desktop
 - 鉴权
 
-是否已有记录：  
-重复来源：`<desktop-client-root>\docs\known-issues.md` 的 “P2：admin token 硬编码”；`<desktop-client-root>\docs\backend-integration.md`。
-
-建议处理方式：  
-受控重构。改为本机配置、首次配对、系统 keychain/Android Keystore，或后端本机专用短期 token。
-
-推荐处理顺序：本轮重构处理
+重复来源：`<desktop-client-root>\docs\known-issues.md` 的 “P2：admin token 硬编码”；`<desktop-client-root>\docs\backend-integration.md`（这两处开源前也需同步标注为已解决）。
 
 ## ISSUE-009：桌面 WS action 会成功 ack 但未执行
 

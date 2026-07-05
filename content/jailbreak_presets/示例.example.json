@@ -1,0 +1,12 @@
+{
+  "name": "预设名称",
+  "entries": [
+    {
+      "id": "unique-uuid",
+      "title": "条目标题",
+      "content": "注入的 prompt 内容",
+      "enabled": true,
+      "layer": 11
+    }
+  ]
+}

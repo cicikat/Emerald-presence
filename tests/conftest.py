@@ -76,6 +76,25 @@ def reset_proactive_ledger():
     yield
 
 
+@pytest.fixture
+def character_b_registered():
+    """Register a real 'character_b' character card in the repo's characters/ dir.
+
+    asset_registry._scan_characters() globs the real characters/*.json on disk
+    (not the sandboxed data/ dir), so tests that resolve active_character='character_b'
+    through admin.routers.garden._active_char_id() / core.tools.garden_tools._active_char_id()
+    need an actual characters/character_b.json to exist, or resolve() raises ValueError.
+    reset_asset_registry (autouse) already nulls out the singleton before/after each test,
+    so this only needs to create/remove the file.
+    """
+    p = Path("characters") / "character_b.json"
+    p.write_text('{"name": "Character B"}', encoding="utf-8")
+    try:
+        yield
+    finally:
+        p.unlink(missing_ok=True)
+
+
 @pytest.fixture(autouse=True)
 def reset_asset_registry():
     """Reset core.asset_registry's module-level singleton before/after each test.

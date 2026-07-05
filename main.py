@@ -72,6 +72,10 @@ def _init_modules():
     from core.config_loader import get_config
     cfg = get_config()
     logger.info("配置文件加载完成")
+    logger.info(f"[startup] config.yaml 路径: {os.path.abspath('config.yaml')}")
+
+    from core.sandbox import get_paths as _get_paths_for_log
+    logger.info(f"[startup] 数据根目录: {_get_paths_for_log()._base.resolve()}")
 
     # DX（Brief 22）：secret_key 空/占位且 registry 无任何 token 时提示首次配置，不自动生成、不阻塞启动。
     from admin.token_registry import PLACEHOLDER_ADMIN_SECRET, list_records as _list_auth_tokens

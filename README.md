@@ -1,186 +1,219 @@
-# Emerald-Presence
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-一个有长期记忆、能主动联系你的私人陪伴型 QQ 机器人。
+# PresenceKit
 
----
-
-## 特性
-
-### 记忆系统（五层并行）
-
-- **短期历史**：滑动窗口，最近 20 轮对话，读取时脱敏防止风格自反馈塌缩
-- **中期摘要**：12 小时内的对话压缩视图，三时间桶渲染（刚才 / 几小时前 / 早些时候），LLM 压缩 + fallback 兜底
-- **情景记忆**：由 mid_term 经 eager/sweep 晋升为结构化片段，含 strength 衰减、MMR 多样性召回、emotion_texture 去重
-- **稳定行为模式**（user_identity）：角色对你的长期观察，由固化 pipeline 四段链路驱动（capture → midterm → episodic → identity），重启不丢状态
-- **事件流水账**（event_log）：每日按天分文件，支持关键词搜索 + 强度衰减评分，7 天外低强度条目自动跳过
-
-`character_growth` 仍作为 legacy 兼容数据保留，但已不是现实 prompt 的长期认知主入口。
-
-### 情绪状态系统
-
-- 每轮对话后 LLM 检测角色回复情绪，写入 `mood_state`
-- 情绪漂移公式：`新强度 = 旧强度 × 0.7 + 新情绪强度 × 0.3`，切换需连续两轮确认
-- 情绪底色以软提示形式注入 prompt，随强度分三档描述
-- 情绪联动情景记忆召回评分，记忆越被想起越牢固
-
-### Prompt 架构（12+ 层）
-
-- 分层 prompt 架构，含 tag 门控、token 估算与质量梯度裁剪
-- 世界书 / 角色卡 / 用户画像 / 实时状态 / 情绪底色 / 情景记忆 / 中期摘要 / 活动状态 / 角色日记 / Author's Note 轮转
-- 探针机制：正式对话前用关键词快速路径 + 极简 LLM probe 预判 info/desktop 工具调用
-- 层 11 Author's Note：性格特质轮转 + 纠偏注入（consistency_check 发现问题时追加）
-- token 超限时按质量从低到高依次裁剪
-
-### 梦境系统
-
-- 独立 Dream Session pipeline：不进入现实对话 post-process，不写现实 history / memory，不触发 scheduler
-- 入梦时冻结现实上下文快照，梦内使用独立 D0-D10 prompt 层栈、世界包和 lorebook
-- 支持软退出与不可阻挡的硬退出；退出后归档梦境原文，并提炼低权重梦境印象
-- 现实 prompt 只接收剥离场景细节后的 `6g_dream_impression`，避免把梦境误记成现实
-
-### 主动触发调度器
-
-- 早安 / 晚安 / 随机日间碎碎念（从有情感词的历史发言中抽取触发素材）
-- 天气联动、每日手账（角色写日记）、记忆自然衰减
-- 生日多段触发：前夜预热 / 零点告白 / 下午关心 / 夜间收尾
-- 未完结话题追问、主动回忆触发
-- 节日感知 / 时间节点感知 / 长假加速发送
-- 情景记忆定期扫描晋升（episodic_sweep，冷却 30 分钟）
-- 请勿打扰（DND）模块（已实现，可接入）
-- 高优先级触发（生日 / 生理期 / 心率告警）用户活跃时也强制发送
-- 冷却状态持久化，重启不丢失
-
-### 情绪花园
-
-- 角色拥有独立花槽，支持自动浇水、用户催促浇水、开花与采后处理
-- 花园状态由管理面板读取，关键事件可进入主动触发调度器
-
-### 现实数据感知
-
-- **Apple Watch**：心率异常提醒（>100 低优先级 / >120 高优先级告警）、睡眠感知与报告（iPhone 捷径推送）
-- **Obsidian 日记**：按日期读取，支持关键词搜索最近 30 天，读后标记已共享
-- **生理期感知**：周期中和临近期 tag 门控，自动注入关怀层
-- **手机传感器**：步数 / 电量 / 位置 / 亮屏次数，当天有数据即注入
-- **桌宠屏幕活动快照**：TTL 5 分钟，tag 命中时注入
-
-### 对话能力
-
-- 图片识别（GLM / Gemini / OpenAI Vision）
-- TTS 语音合成（GPT-SoVITS，情绪联动参考音频切换）
-- 表情包发送（情绪联动，与 TTS 互斥）
-- 工具调用：天气查询、备忘录提醒、网页搜索（DuckDuckGo）、桌面控制；memory 类工具已注册但尚未接入正式主 LLM 自动调用
-- 桌面意图解析：角色说"我去把游戏关掉"→ 真的执行窗口最小化
-- QQ / 桌宠 / 手机轮询三通道；桌宠主动下行优先 WebSocket，失败时降级到文件队列
-- 桌宠 WebSocket 支持叙事分段 `message_segments` 视图，原始回复仍是记忆链路的 source of truth
-- 跨通道连续性感知，切换时注入接续提示
-
-### 工程质量
-
-- 数据路径统一通过 `core/data_paths.py` 实现、`core/data_registry.py` 登记治理元数据、`core/sandbox.py` 提供单例胶水、`core/migration.py` 负责迁移期兼容读
-- 测试模式把数据整体偏移到 `data/test_sandbox/{session_id}/`，不污染生产数据
-- 原子写入（`safe_write`，跨平台 `os.replace`）
-- LLM 输出校验 + 最多 3 次重试，失败保留旧数据
-- Post-process 拆分为关键路径（持锁）和慢队列（单 worker，退避重试），避免锁饥饿
-- 慢任务失败写入死信队列（DLQ），调度器定期监控
-- 并发保护：per-uid 锁 + 全局情绪状态锁
+An AI companion backend with long-term memory, emotional state, and the ability to reach out to you first. A QQ bot is just one of several optional channels — the core is a persona/memory/scheduling engine you can talk to over HTTP/WebSocket from any client.
 
 ---
 
-## 技术栈
+## Repo relationship
 
-Python · FastAPI · NapCat (OneBot 11) · DeepSeek · GPT-SoVITS
+```
+PresenceKit (this repo, backend)
+  ├── PresenceKit-desktop  Tauri desktop pet + admin panel client
+  └── PresenceKit-mobile   Flutter mobile client
+```
+
+The backend is the single source of truth: long-term memory, emotional state, the proactive scheduler, the tool system, and the persona all live here. Desktop and mobile are **thin clients** — they render UI and forward user input, they don't own any business data. All three talk over HTTP/WebSocket; you can run the backend with only one client connected, both, or neither (pure QQ-bot mode).
 
 ---
 
-## 快速开始
+## Features
 
-**环境要求**
+### Memory system (five layers, running in parallel)
+
+- **Short-term history**: sliding window of the last 20 turns, sanitized on read to avoid style self-feedback collapse
+- **Mid-term summary**: compressed view of the last 12 hours, rendered into three time buckets (just now / a few hours ago / earlier), LLM-compressed with a rule-based fallback
+- **Episodic memory**: structured fragments promoted from mid-term via eager/sweep, with strength decay, MMR diversity recall, and emotion-texture dedup
+- **Stable behavior patterns** (user_identity): the character's long-term read on you, driven by a four-stage consolidation pipeline (capture → midterm → episodic → identity); survives restarts
+- **Event log**: daily-sharded, keyword-searchable, with intensity decay scoring — low-intensity entries older than 7 days are skipped automatically
+
+`character_growth` is kept as legacy-compatible data but is no longer the primary long-term context source for the live prompt.
+
+### Emotional state system
+
+- After every turn, an LLM detects the character's reply emotion and writes it to `mood_state`
+- Drift formula: `new_intensity = old_intensity × 0.7 + new_emotion_intensity × 0.3`; a state switch needs two consecutive confirming turns
+- The current emotional undertone is injected into the prompt as a soft hint, described at three intensity tiers
+- Emotion feeds back into episodic recall scoring — memories that get recalled more often become more durable
+
+### Prompt architecture (12+ layers)
+
+- Layered prompt construction with tag gating, token estimation, and quality-graded trimming
+- Lorebook / character card / user profile / realtime state / emotional undertone / episodic memory / mid-term summary / activity state / character diary / rotating Author's Note
+- Probe mechanism: a keyword fast-path plus a minimal LLM probe runs ahead of the main turn to pre-判断 info/desktop tool calls
+- Layer 11 (Author's Note): rotating personality traits plus corrective injection appended when `consistency_check` flags an issue
+- When the token budget is exceeded, layers are trimmed lowest-quality-first
+
+### Dream system
+
+- An isolated Dream Session pipeline: doesn't enter the waking-conversation post-process, doesn't write to waking history/memory, doesn't trigger the scheduler
+- A snapshot of the waking context is frozen on dream entry; dreams run their own D0–D10 prompt layer stack, world pack, and lorebook
+- Supports a soft exit and an unstoppable hard exit; on exit the raw dream text is archived and a low-weight dream impression is distilled
+- The waking prompt only ever receives the scene-stripped `6g_dream_impression`, so dream content can't be misremembered as reality
+
+### Proactive trigger scheduler
+
+- Good morning / good night / random daytime small talk (drawn from past messages carrying emotional words)
+- Weather-linked messages, a daily diary entry the character writes itself, natural memory decay
+- Multi-stage birthday triggers: night-before warmup, midnight greeting, afternoon check-in, evening wind-down
+- Follow-ups on unfinished topics, proactive-recall triggers
+- Holiday awareness, calendar-moment awareness, faster cadence over long holidays
+- Periodic episodic-memory sweep/promotion (30-minute cooldown)
+- Do-not-disturb module (implemented, pluggable)
+- High-priority triggers (birthday / period / heart-rate alert) force-send even while the do-not-disturb window is active
+- Cooldown state is persisted and survives restarts
+
+### Emotional garden
+
+- The character has its own flower plot: auto-watering, user-prompted watering, blooming, and post-harvest handling
+- Garden state is exposed to the admin panel; key events can feed into the proactive scheduler
+
+### Real-world data awareness
+
+- **Apple Watch**: abnormal heart-rate alerts (low priority above 100bpm, high priority above 120bpm), sleep awareness and reports (pushed via an iPhone Shortcut)
+- **Obsidian journal**: read by date, keyword-searchable over the last 30 days, marked as shared once read
+- **Menstrual cycle awareness**: tag-gated during and near the cycle, auto-injects a care layer
+- **Phone sensors**: steps / battery / location / screen-on count, injected whenever same-day data exists
+- **Desktop pet screen-activity snapshot**: 5-minute TTL, injected on tag match
+
+### Conversation capabilities
+
+- Image recognition (GLM / Gemini / OpenAI Vision)
+- TTS speech synthesis (GPT-SoVITS, reference audio switches with emotion)
+- Sticker sending (emotion-linked, mutually exclusive with TTS)
+- Tool calls: weather lookup, reminders, web search (DuckDuckGo), desktop control; memory-category tools are registered but not yet wired into automatic main-LLM tool calling
+- Desktop intent parsing: the character saying "let me close that game for you" actually minimizes the window
+- Three channels — QQ, desktop pet, mobile polling — with WebSocket preferred for proactive desktop pushes and a file-queue fallback
+- The desktop WebSocket supports a segmented `message_segments` narrative view; the raw reply remains the source of truth for memory
+- Cross-channel continuity awareness — switching channels injects a pick-up-where-we-left-off hint
+
+### Engineering quality
+
+- Data paths are unified through `core/data_paths.py`, governance metadata is registered via `core/data_registry.py`, `core/sandbox.py` provides the singleton glue, and `core/migration.py` handles compatibility reads during migrations
+- Test mode redirects all data writes to `data/test_sandbox/{session_id}/`, keeping production data untouched
+- Atomic writes (`safe_write`, cross-platform `os.replace`)
+- LLM output validation with up to 3 retries; on failure, old data is preserved
+- Post-process is split into a critical path (lock-holding) and a slow queue (single worker, backoff retry), avoiding lock starvation
+- Failed slow tasks go to a dead-letter queue (DLQ), monitored periodically by the scheduler
+- Concurrency protection: per-uid locks plus a global emotional-state lock
+
+---
+
+## Tech stack
+
+Python · FastAPI · NapCat (OneBot 11, optional) · DeepSeek / any OpenAI-compatible LLM API · GPT-SoVITS (optional)
+
+---
+
+## Quickstart
+
+**Requirements**
 
 - Python 3.10+
-- [NapCat](https://github.com/NapNeko/NapCatQQ)（QQ 协议端）
 
-**安装**
+**Install**
 
 ```bash
-git clone https://github.com/chah69634-arch/Emerald-presence.git
-cd Emerald-presence
+git clone https://github.com/cicikat/PresenceKit.git
+cd PresenceKit
 pip install -r requirements.txt
 ```
 
-**配置**
+**Configure**
 
 ```bash
 cp config.example.yaml config.yaml
 ```
 
-按 [AA1先看说明书正式版README.md](AA1先看说明书正式版README.md) 和 `config.example.yaml` 填写必填项：LLM API Key、QQ 号、管理面板密钥。
+Fill in the required fields per the comments in `config.example.yaml`: your LLM API key and an admin-panel secret; add a QQ number only if you're using the QQ bot.
 
-在 `characters/` 目录放入角色卡文件；当前 loader 支持 `.json`、`.txt` 和 `.md`，可参考 `examples/character_template.json`。
+Drop character card files into `characters/`; the loader currently supports `.json`, `.txt`, and `.md` — see `examples/character_template.json`. The repo ships a neutral `default` character card that works out of the box.
 
-**初始化鉴权**（首次运行前）
+**Initialize auth** (before the first run)
 
 ```bash
 python scripts/setup_auth.py
 ```
 
-自动生成管理面板密钥 + 各设备 token，写入本地密码本 `secrets.local.yaml`（已 gitignore）。
-详见 `docs/token-rotation.md`。
+This generates the admin-panel secret and per-device tokens, and writes them to a local secrets file `secrets.local.yaml` (already gitignored). See [docs/token-rotation.md](docs/token-rotation.md).
 
-**运行**
+**Run**
 
 ```bash
-# 1. 启动 NapCat，确保 QQ 已登录，WebSocket 服务端监听 3001 端口
-# 2. 启动机器人
+# Using only the desktop pet or mobile client? Set standalone_mode: true in config.yaml to skip NapCat.
 python main.py
 ```
 
-只使用桌宠或手机端时，可在 `config.yaml` 设置 `standalone_mode: true`，跳过 NapCat 连接。
+To use the QQ bot: start NapCat first, make sure QQ is logged in and its WebSocket server is listening on port 3001, then run `python main.py`.
 
-测试模式会隔离数据写入：
+Test mode redirects all writes to an isolated sandbox, leaving production data untouched:
 
 ```bash
 python run_test.py
 ```
 
-管理面板：`http://127.0.0.1:8080`
+Admin panel: `http://127.0.0.1:8080`
 
 ---
 
-## 文档
+## Optional integrations
 
-| 文档 | 内容 |
+- **QQ / NapCat**: see "Run" above; skip it entirely with `standalone_mode: true` if you don't need the QQ bot.
+- **Desktop client**: [PresenceKit-desktop](https://github.com/cicikat/PresenceKit-desktop) — requires the backend to be running.
+- **Mobile client**: [PresenceKit-mobile](https://github.com/cicikat/PresenceKit-mobile) — connects over a LAN IP or `adb reverse`.
+- **TTS**: GPT-SoVITS; see the TTS-related fields in `config.example.yaml`.
+- **Apple Watch**: push heart-rate/sleep data to the backend via an iPhone Shortcut; see the relevant fields in `config.example.yaml` and [docs/known-issues.md](docs/known-issues.md).
+
+---
+
+## Testing
+
+```bash
+pytest
+python run_test.py
+```
+
+If you touch `tag_rules`-related logic, also run the eval suite:
+
+```bash
+python tests/run_eval.py
+```
+
+---
+
+## Docs
+
+| Doc | Content |
 |---|---|
-| [AA1先看说明书正式版README.md](AA1先看说明书正式版README.md) | 安装、启动、常见问题 |
-| [AAWatch配置指南.md](AAWatch配置指南.md) | Apple Watch 心率 / 睡眠数据接入（iPhone 捷径） |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 系统架构总览、Pipeline 四步骤、数据目录结构 |
-| [docs/memory.md](docs/memory.md) | 五层记忆子系统设计与并发保护 |
-| [docs/prompt-layers.md](docs/prompt-layers.md) | Prompt 层结构、Tag 门控、token 裁剪 |
-| [docs/tools.md](docs/tools.md) | 工具系统、探针机制、桌面动作执行 |
-| [docs/scheduler.md](docs/scheduler.md) | 调度器触发器完整列表与冷却设计 |
-| [docs/channels.md](docs/channels.md) | QQ / 桌宠通道、WebSocket、文件降级与跨通道接续 |
-| [docs/garden.md](docs/garden.md) | 情绪花园、自动/被动浇水、采后处理、管理面板状态接口 |
-| [docs/dream.md](docs/dream.md) | Dream Session 隔离边界、独立 prompt、世界包与印象回流 |
-| [docs/data-taxonomy.md](docs/data-taxonomy.md) | 当前 datapath 布局、治理元数据与迁移期兼容读 |
-| [docs/assistant-turn-sink.md](docs/assistant-turn-sink.md) | assistant turn 统一写入、广播与叙事分段协议 |
-| [docs/security_model.md](docs/security_model.md) | 管理面板、桌宠 WebSocket 与客户端密钥边界 |
-| [docs/security.md](docs/security.md) | 鉴权模型（scoped tokens）：scope/profile 表、token 管理 API |
-| [docs/token-rotation.md](docs/token-rotation.md) | 首次配置、各设备 token 轮换命令、401/403/429 排障 |
-| [docs/known-issues.md](docs/known-issues.md) | 当前技术债与已核对修复项 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture overview, the four-stage pipeline, data directory layout |
+| [docs/memory.md](docs/memory.md) | The five-layer memory subsystem design and concurrency protection |
+| [docs/prompt-layers.md](docs/prompt-layers.md) | Prompt layer structure, tag gating, token trimming |
+| [docs/tools.md](docs/tools.md) | Tool system, probe mechanism, desktop action execution |
+| [docs/scheduler.md](docs/scheduler.md) | Full list of scheduler triggers and their cooldown design |
+| [docs/channels.md](docs/channels.md) | QQ / desktop-pet channels, WebSocket, file fallback, cross-channel continuity |
+| [docs/garden.md](docs/garden.md) | Emotional garden, auto/manual watering, post-harvest handling, admin panel state API |
+| [docs/dream.md](docs/dream.md) | Dream Session isolation boundary, independent prompt stack, world pack and impression writeback |
+| [docs/data-taxonomy.md](docs/data-taxonomy.md) | Current datapath layout, governance metadata, migration-era compatibility reads |
+| [docs/assistant-turn-sink.md](docs/assistant-turn-sink.md) | Unified assistant-turn writes, broadcast, and the narrative-segment protocol |
+| [docs/security_model.md](docs/security_model.md) | Admin panel, desktop-pet WebSocket, and client-secret boundaries |
+| [docs/security.md](docs/security.md) | Auth model (scoped tokens): scope/profile tables, token management API |
+| [docs/token-rotation.md](docs/token-rotation.md) | First-time setup, per-device token rotation commands, 401/403/429 troubleshooting |
+| [docs/fresh-clone-testing.md](docs/fresh-clone-testing.md) | How to correctly test a fresh clone (avoid connecting to a stale backend process/data) |
+| [docs/known-issues.md](docs/known-issues.md) | Current tech debt and verified fixes |
 
 ---
 
-## 注意
+## Notes
 
-- 仅供个人学习使用
-- 需自备 LLM API Key（推荐 DeepSeek，国内直连）
-- 角色卡需自行准备，`characters/` 目录有格式示例
-- 本项目不包含任何角色版权素材
-- 本项目以他为示例角色。常用角色名可在 `config.yaml` 的 `character.name` 中调整；部分默认值、兼容路径和文档仍保留 `yexuan` / “他”命名,不影响功能
+- Personal/learning use only.
+- Bring your own LLM API key (DeepSeek is recommended if you're in mainland China — direct connect, no proxy needed).
+- Bring your own character card; see `characters/` for the format. This project ships no copyrighted character material.
+- The project uses "他" (a male original character) as its example persona. The display name is configurable via `character.name` in `config.yaml`; some defaults, compatibility paths, and older docs still say `yexuan` internally — this doesn't affect functionality, and will be unified in a later version.
 
 ---
 
 ## License
-
 
 This project is licensed under the PolyForm Noncommercial License 1.0.0.
 

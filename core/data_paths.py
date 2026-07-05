@@ -383,15 +383,19 @@ class DataPaths:
 
     # ── authored reality prompt assets（characters/reality/，不走 data/ 沙盒偏移）
     def jailbreak_entries(self) -> Path:
-        """主路径：characters/reality/jailbreak_entries.json（无 data/ fallback）"""
+        """主路径：characters/reality/jailbreak_entries.json（无 data/ fallback）。
+
+        首次运行缺失时从 defaults/ 播种一个空壳（entries: []，不含任何私人条目），
+        production/test 两种模式都播种——保证 fresh clone 不改配置就能直接启动；
+        用户可随时用自己的真实内容覆盖播种出的文件。
+        """
         p = self._reality_p("jailbreak_entries.json")
         if not p.exists():
-            if self.mode == "test":
-                src = _DEFAULTS_ROOT / "jailbreak_entries.json"
-                if src.exists():
-                    p.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src, p)
-                    logger.info(f"[sandbox] seeded {p} from {src}")
+            src = _DEFAULTS_ROOT / "jailbreak_entries.json"
+            if src.exists():
+                p.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, p)
+                logger.info(f"[sandbox] seeded {p} from {src}")
             else:
                 logger.error(
                     f"[data_paths] authored asset missing: {p}  "
@@ -400,15 +404,18 @@ class DataPaths:
         return p
 
     def lorebook(self) -> Path:
-        """主路径：characters/reality/lorebook.yaml（无 data/ fallback）"""
+        """主路径：characters/reality/lorebook.yaml（无 data/ fallback）。
+
+        首次运行缺失时从 defaults/ 播种一个空壳（entries: []），
+        production/test 两种模式都播种，理由同 jailbreak_entries()。
+        """
         p = self._reality_p("lorebook.yaml")
         if not p.exists():
-            if self.mode == "test":
-                src = _DEFAULTS_ROOT / "lorebook.yaml"
-                if src.exists():
-                    p.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src, p)
-                    logger.info(f"[sandbox] seeded {p} from {src}")
+            src = _DEFAULTS_ROOT / "lorebook.yaml"
+            if src.exists():
+                p.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, p)
+                logger.info(f"[sandbox] seeded {p} from {src}")
             else:
                 logger.error(
                     f"[data_paths] authored asset missing: {p}  "

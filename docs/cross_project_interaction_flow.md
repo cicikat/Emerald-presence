@@ -121,9 +121,10 @@
 | `watch_secret` / `_watch_secret()` | Watch query secret；未配置则不校验 | `<repo-root>\admin\routers\watch.py:164` |
 | `HTTPBearer(auto_error=False)` | 管理面板鉴权机制 | `<repo-root>\admin\auth.py:11` |
 | `reqwest::Client::builder().no_proxy()` | Emerald-client Rust HTTP 代理绕过 | `<desktop-client-root>\src-tauri\src\lib.rs:27` |
-| `token = "Emerald1231"` | Android 后台服务硬编码 token | `<mobile-client-root>\android\app\src\main\kotlin\com\example\mobile-client\MobileNotificationService.kt:26` |
-| `_adminToken = "Emerald1231"` | Flutter 前台硬编码 token | `<mobile-client-root>\lib\main.dart:1927` |
-| `ADMIN_TOKEN = "Emerald1231"` | Emerald-client 前端硬编码 token | `<desktop-client-root>\src\shared\api\backend.ts:5` |
+| `admin.token_registry` / `data/runtime/auth/tokens.yaml` | SEC-AUTH-2 token 注册表（label/hash/scopes），取代早期三端硬编码同一个 admin token 的方案 | `<repo-root>\admin\token_registry.py` |
+| `BackendSecurityPolicy.adminToken()` | Android 侧从 `SharedPreferences` 读取用户自行配置的 token（不再硬编码） | `<mobile-client-root>\android\app\src\main\kotlin\com\example\yexuan_memery\BackendSecurityPolicy.kt:16` |
+| `_settingsStore.loadAdminToken()` | Flutter 前台从设置页读取用户自行配置的 token（不再硬编码） | `<mobile-client-root>\lib\pages\app_shell.dart:132` |
+| `connectionSettings` / `client.local.json` `adminToken` | Emerald-client 前端从连接设置页/本地配置文件读取用户自行配置的 token（不再硬编码） | `<desktop-client-root>\src\shared\api\connectionSettings.ts` |
 
 ### 测试/调试标记名称
 

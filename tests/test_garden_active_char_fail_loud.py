@@ -276,7 +276,7 @@ def test_no_yexuan_fallback_admin_garden(sandbox):
 # ── 11. active=character_b passes character_b correctly ───────────────────────────────
 
 @pytest.mark.asyncio
-async def test_garden_water_character_b_passes_character_b(sandbox):
+async def test_garden_water_character_b_passes_character_b(sandbox, character_b_registered):
     """_check_garden_water with active=character_b must call auto_water_tick(char_id='character_b')."""
     _write_active(sandbox, "character_b")
 
@@ -299,7 +299,7 @@ async def test_garden_water_character_b_passes_character_b(sandbox):
 
 
 @pytest.mark.asyncio
-async def test_garden_tools_character_b_passes_character_b(sandbox):
+async def test_garden_tools_character_b_passes_character_b(sandbox, character_b_registered):
     """water_garden with active=character_b must call force_water(char_id='character_b')."""
     _write_active(sandbox, "character_b")
 
@@ -316,7 +316,7 @@ async def test_garden_tools_character_b_passes_character_b(sandbox):
     assert called == ["character_b"], f"expected char_id='character_b', got {called}"
 
 
-def test_admin_garden_character_b_returns_character_b(sandbox):
+def test_admin_garden_character_b_returns_character_b(sandbox, character_b_registered):
     """admin _active_char_id with active=character_b must return 'character_b' without exception."""
     _write_active(sandbox, "character_b")
 
