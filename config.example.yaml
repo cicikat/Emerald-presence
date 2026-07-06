@@ -233,8 +233,14 @@ recall:
   batch_size: 32
 
 screen_peek:
-  enabled: false           # 默认关；在设置页打开后叶瑄可自主查看屏幕内容
+  enabled: false           # 默认关；在设置页打开后他可自主查看屏幕内容
   cooldown_minutes: 30     # 同一文件/窗口最短间隔分钟数（范围 5–240）
+
+action_trace:
+  enabled: true              # 关闭后不记录、不注入，零行为变化（回滚开关）
+  inject_max_items: 5        # 层 10.5 最多注入几条痕迹
+  inject_window_hours: 24    # 只注入这个时间窗内的痕迹
+  event_log_echo: true       # status=ok 时是否回流一条到 event_log（供日记/往事检索看见）
 
 mode: production
 standalone_mode: false
@@ -299,6 +305,9 @@ character:
   default: default
   name: 角色名
   consistency_check_every_n: 15
+# 用户显示名（可选）：梦境等 prompt 层用它称呼用户；留空则用无名称写法（只用"你"）。
+user:
+  display_name: ""
 session:
   timeout_minutes: 10
 scheduler:
@@ -338,12 +347,12 @@ error:
   retry_delay_seconds: 2
   fallback_message: 我现在有点累，等会儿再聊～
 toy_autogrow:
-  enabled: false           # true=叶瑄每轮判断后自主写入思考笔记；false=退回纯手动玩具
+  enabled: false           # true=他每轮判断后自主写入思考笔记；false=退回纯手动玩具
   min_interval_hours: 6   # 同一角色/用户最短写入间隔（小时）
   target: diary            # 写入目标文件键：diary=思考笔记，wishlist=愿望清单，doodle=涂鸦板
 
 web_autosearch:
-  enabled: false           # true=叶瑄可在author_note提示下自主调用web_search；false=纯反应式（用户明确要求才搜）
+  enabled: false           # true=他可在author_note提示下自主调用web_search；false=纯反应式（用户明确要求才搜）
   min_interval_min: 30     # 自主搜索最短间隔（分钟），防止频繁搜索；用户明确触发不受此限
 
 forensic_logs:

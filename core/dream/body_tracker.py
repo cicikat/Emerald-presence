@@ -2,7 +2,7 @@
 Dream body state analyzer — runs once per dream turn.
 
 Reads {her_msg, yexuan_reply, current_body} → updated BodyState.
-叶瑄's reply chain never sees raw numbers — only the projection from
+The character's reply chain never sees raw numbers — only the projection from
 body_projection.py (by construction: tracker runs AFTER LLM, result
 stored for NEXT turn's D5).
 
@@ -43,7 +43,7 @@ def analyze_turn(
     Compute updated BodyState after one dream turn.
 
     Returns a new clamped BodyState. Never mutates current.
-    叶瑄's reply is already generated before this runs — tracker has no
+    The character's reply is already generated before this runs — tracker has no
     feedback path into the current turn's LLM call.
     """
     dh = ds = dt = 0.0

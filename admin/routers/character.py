@@ -209,7 +209,7 @@ async def upload_character(file: UploadFile = File(...), auth=Depends(require_sc
 
 @router.get("/characters/active-info", summary="当前活跃角色基本信息（前端初始化用）")
 async def get_active_char_info(auth=Depends(require_scopes("persona"))):
-    """返回当前活跃角色的显示名与性别，供前端替换叶瑄占位文本。
+    """返回当前活跃角色的显示名与性别，供前端替换角色占位文本。
 
     Response: {"char_id": "yexuan", "name": "叶瑄", "gender": "male"}
     """

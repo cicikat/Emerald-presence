@@ -243,7 +243,7 @@ _LEVEL_OPENERS = {
 def build_situation_narrative(behavior: dict) -> str:
     """
     把 behavior 转成括号叙事，作为 _pipeline_send 的 prompt。
-    LLM 看到后用叶瑄的语气产出一句回应。
+    LLM 看到后用角色的语气产出一句回应。
     """
     char = _char_name()
     level = behavior["level"]

@@ -74,7 +74,7 @@ def record_read(uid: str, char_id: str, fingerprint: str) -> None:
 
 
 def format_read_memo(tool_name: str, tool_args: dict) -> str:
-    """生成叶瑄视角的"读了《X》"一句（作为 assistant 条目写入 short_term）。"""
+    """生成角色视角的"读了《X》"一句（作为 assistant 条目写入 short_term）。"""
     if tool_name == "read_diary":
         date = (tool_args.get("date") or "").strip()
         if date:

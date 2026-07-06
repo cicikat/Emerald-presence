@@ -14,6 +14,7 @@ from core.memory.locks import uid_lock
 from core.memory.path_resolver import resolve_path
 from core.memory.scope import MemoryScope, require_character_id
 from core.safe_write import safe_write_text
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +34,13 @@ _VALID_KEYS = {k for k, _ in IDENTITY_DIMENSIONS}
 _REQUIRED_FIELDS = {"text", "confidence", "evidence_count", "last_updated"}
 
 
-def _identity_read_file(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _identity_read_file(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(user_id), char_id)
     return resolve_path(scope, "identity")
 
 
-def _identity_write_file(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _identity_write_file(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(user_id), char_id)
     p = resolve_path(scope, "identity")
@@ -47,7 +48,7 @@ def _identity_write_file(user_id: str, *, char_id: str = "yexuan") -> Path:
     return p
 
 
-async def load(user_id: str, *, char_id: str = "yexuan") -> dict:
+async def load(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> dict:
     """读取用户身份文件，返回通过校验的维度 dict。
 
     文件不存在返回空 dict。
@@ -85,7 +86,7 @@ async def load(user_id: str, *, char_id: str = "yexuan") -> dict:
     return result
 
 
-async def save(user_id: str, identity_dict: dict, *, char_id: str = "yexuan") -> bool:
+async def save(user_id: str, identity_dict: dict, *, char_id: str = DEFAULT_CHAR_ID) -> bool:
     """写入用户身份文件，写入前备份现有文件为 .yaml.bak。
 
     identity_dict 中不在 IDENTITY_DIMENSIONS 的 key 记 warning 并过滤掉；
@@ -118,7 +119,7 @@ async def save(user_id: str, identity_dict: dict, *, char_id: str = "yexuan") ->
         return safe_write_text(write_path, text)
 
 
-async def delete_dimension(user_id: str, key: str, *, char_id: str = "yexuan") -> bool:
+async def delete_dimension(user_id: str, key: str, *, char_id: str = DEFAULT_CHAR_ID) -> bool:
     """Remove one dimension from the identity file by key.
 
     Returns True if the dimension existed and was removed, False otherwise.
@@ -155,7 +156,7 @@ async def overwrite_dimension(
     key: str,
     text: str,
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
     confidence: float = 1.0,
     evidence_count: int = 1,
 ) -> bool:
@@ -195,7 +196,7 @@ async def overwrite_dimension(
     return ok
 
 
-async def format_for_prompt(user_id: str, min_confidence: float = 0.5, *, char_id: str = "yexuan") -> str:
+async def format_for_prompt(user_id: str, min_confidence: float = 0.5, *, char_id: str = DEFAULT_CHAR_ID) -> str:
     """返回 confidence >= min_confidence 的维度描述，按 IDENTITY_DIMENSIONS 顺序拼接。
 
     每条前缀 "- "，以换行符连接。空结果（无维度或全不达标）返回 ""。

@@ -272,7 +272,7 @@ def build_gomoku_grounding_facts(state: dict) -> dict:
 
     user_color, ai_color = _get_user_ai_colors(state)
     last_move = state.get("last_move")
-    is_ai_mode = opponent == "yexuan_ai"
+    is_ai_mode = opponent == "character_ai"
 
     last_user_move = _find_last_by_player(move_history, user_color)
     last_ai_move = _find_last_ai_move(move_history) if is_ai_mode else None

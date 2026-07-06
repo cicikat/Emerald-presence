@@ -74,6 +74,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
+from core.data_paths import DEFAULT_CHAR_ID
 
 _log = logging.getLogger(__name__)
 
@@ -887,7 +888,7 @@ _SNAPSHOT_BUCKET_HIGH: float = 65.0
 _SNAPSHOT_TOP_CUES: int = 5
 
 
-def read_afterglow_residue(uid: str, now: str, *, char_id: str = "yexuan") -> Optional[AfterglowResidueInput]:
+def read_afterglow_residue(uid: str, now: str, *, char_id: str = DEFAULT_CHAR_ID) -> Optional[AfterglowResidueInput]:
     """Return the most recent afterglow residue for uid if within TTL, else None.
 
     Phase 5 implementation.  Reads from disk via the store (lazy import to

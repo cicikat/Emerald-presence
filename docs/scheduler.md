@@ -450,7 +450,7 @@ owner QQ 消息
 
 | 触发器 | 文件 | 让路逻辑 |
 |---|---|---|
-| morning_greeting, night_reminder, random_message, weather_alert, daily_journal, spontaneous_recall | time_based.py | `legacy_tick_should_send()` 让路 + proposer 接管 |
+| morning_greeting, night_reminder, random_message, weather_alert, daily_journal, spontaneous_recall | time_based.py | `legacy_tick_should_send()` 让路 + proposer 接管；daily_journal 只负责发言，不再写日记（见类型四 `inner_diary_write`）|
 | diary_reminder, diary_share_reminder | diary.py | 同上 |
 | period_reminder | period.py | 同上 |
 | birthday_midnight/eve/afternoon/night | birthday.py | 同上 |
@@ -477,7 +477,7 @@ owner QQ 消息
 
 | 触发器 | 文件 |
 |---|---|
-| episodic_decay, dlq_monitor | time_based.py |
+| episodic_decay, dlq_monitor, inner_diary_write | time_based.py |
 | log_maintenance | loop.py 内联 |
 | episodic_sweep | episodic_sweep.py |
 | hidden_state_decay, hidden_state_consolidate | hidden_state_decay.py |
@@ -633,8 +633,9 @@ window 拦截、LLM 空回复或发送前异常时，不调用 execute 的 `afte
 | `night_reminder` | 5h | 低 | time_based | 晚安 |
 | `random_message` | 4h | 低 | time_based | 随机日间碎碎念 |
 | `weather_alert` | 6h | 低 | time_based | 特殊天气联动 |
-| `daily_journal` | 1h | 低 | time_based | 他写今日手账（深夜触发） |
+| `daily_journal` | 1h | 低 | time_based | 他写今日手账并发出来（深夜触发，只负责发言）|
 | `episodic_decay` | 20h | 低 | time_based | 情景记忆每日衰减 |
+| `inner_diary_write` | 2h | 维护 | time_based | 静默写角色内心日记，与 daily_journal 发言解耦；23:00–次日05:00 窗口，幂等靠当日日记文件是否存在 |
 | `spontaneous_recall` | 4h | 低 | time_based | 主动回忆触发 |
 | `dlq_monitor` | 24h | 低 | time_based | 扫 DLQ 目录，文件数 > 0 时 log warning；R8-A：legacy task 超 30 天自动归档到 `expired/` |
 | `log_maintenance` | 24h | 维护 | loop.py 内联 | 清理 event_log、done reminders、dream archive、inbox/image cache，并压缩 observations |

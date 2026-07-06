@@ -149,7 +149,10 @@ async def get_chess_state(
     session = activity_store.find_active_session(char_id, resolved_uid, _ACTIVITY_TYPE)
     if session is None:
         return {"active": False}
-    return {"active": True, "session_id": session.session_id, **session.state}
+    state = {**session.state}
+    if "opponent" in state:
+        state["opponent"] = chess_activity._normalize_opponent(state["opponent"])
+    return {"active": True, "session_id": session.session_id, **state}
 
 
 @router.post("/chess/move", summary="落子（UCI 或 SAN）")
@@ -309,7 +312,7 @@ async def chess_ai_move(body: AiMoveRequest, auth=Depends(require_scopes("activi
         "result": new_state["result"],
         "termination": new_state["termination"],
         "last_move": new_state["last_move"],
-        "opponent": new_state.get("opponent", "yexuan_ai"),
+        "opponent": new_state.get("opponent", "character_ai"),
         "ai_player": new_state.get("ai_player"),
         "pending_ai_turn": new_state.get("pending_ai_turn", False),
     }

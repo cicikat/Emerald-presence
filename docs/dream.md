@@ -345,9 +345,9 @@ REALITY_CHAT → DREAM_ENTRANCE_AVAILABLE → DREAM_ACTIVE → DREAM_CLOSING →
 | `POST /dream/enter` | ✅ 已有 | 入梦，冻结世界/快照 |
 | `POST /dream/chat` | ✅ 已有 | 梦内回合，走独立 dream pipeline |
 | `POST /dream/exit` | ✅ 已有 | 硬退出；无条件穿透并立即关闭梦境（Invariant D，永不可改） |
-| `POST /dream/wake` | ✅ 已有 | 软挽留闸门；满足门控时叶瑄挽留一次，否则直接硬退 |
+| `POST /dream/wake` | ✅ 已有 | 软挽留闸门；满足门控时角色挽留一次，否则直接硬退 |
 | `POST /dream/resume` | ✅ 已有 | 挽留后留下；`DREAM_EXIT_REQUESTED → DREAM_ACTIVE` |
-| `GET /dream/state` | ✅ 已有 | 只读 UI 投影：状态、身体数值、张力、场景和象征锚 |
+| `GET /dream/state` | ✅ 已有 | 只读 UI 投影：状态、身体数值、张力、场景和象征锚、`flow_entries`（梦境流动，见下） |
 | `GET /dream/settings` | ✅ 已有 | 读取 per-uid 偏好默认值 |
 | `PATCH /dream/settings` | ✅ 已有 | 枚举校验后的局部更新；`world_layer` / `lucid_mode` 仅影响下一场梦 |
 
@@ -359,12 +359,45 @@ REALITY_CHAT → DREAM_ENTRANCE_AVAILABLE → DREAM_ACTIVE → DREAM_CLOSING →
 - 用户坚持醒来：前端调 `/dream/exit`（硬退，必成功）。
 - `DREAM_EXIT_REQUESTED` 状态下 `dream_turn()` 仍被 status 守卫拒绝（只接受 DREAM_ACTIVE / DREAM_CLOSING）；`/dream/resume` 把状态置回 DREAM_ACTIVE 后对话恢复。
 
+**协议字段更名（Brief 25 §3 P2）**：`GET /dream/state` 的情绪张力字段协议名是
+`char_tension`；`yexuan_tension` 作为已废弃别名双发（同值），供尚未升级的客户端过渡，
+计划保留 ≥1 个版本后删除（见 `tests/test_no_hardcoded_character.py`
+`YEXUAN_TENSION_ALLOWLIST` 的到期条件）。内部实现（`body_projection.py` /
+`dream_pipeline.py` 的 `yexuan_tension` 参数名/dict key）不受此次协议更名影响，
+仍是内部 plumbing，非对外协议。
+
 入梦构建 `context_snapshot` 时会尝试消费 reality-scoped `dream_seed.json`。有效种子以前缀
 `今晚的梦境设定：...` 注入 `entry_reason`；TTL 12 小时、一次性消费、失败不阻断 Dream。
 
 ### dream_state.json 字段
 
-`user_id` / `status` / `dream_id` / `frozen_world` / `lucid_mode` / `context_snapshot` / `body_state{heat,sensitivity,tension}` / `emotional_tension`(他的，0–1)。关闭后保留 `char_id` / `last_dream_id` / `last_exit_type` / `last_dream_mode` / `last_exited_at` / `last_greeted_dream_id`，供现实侧出梦问候去重与降级判断；`clear_local_state()` 不清这些字段。软挽留相关字段：`retention_offered_dream_id`（标记本场已挽留过，防重复；`clear_local_state()` 不清，因为存在于活跃梦期间的 state dict 外层）。
+`user_id` / `status` / `dream_id` / `frozen_world` / `lucid_mode` / `context_snapshot` / `body_state{heat,sensitivity,tension}` / `emotional_tension`(他的，0–1) / `flow_entries`（见下）。关闭后保留 `char_id` / `last_dream_id` / `last_exit_type` / `last_dream_mode` / `last_exited_at` / `last_greeted_dream_id`，供现实侧出梦问候去重与降级判断；`clear_local_state()` 不清这些字段。软挽留相关字段：`retention_offered_dream_id`（标记本场已挽留过，防重复；`clear_local_state()` 不清，因为存在于活跃梦期间的 state dict 外层）。
+
+### 梦境流动（`flow_entries`，Brief 25 §2）
+
+规则驱动、零额外 LLM 调用的"发生了什么"时间线，供前端侧栏展示（此前前端读的
+`flow_entries`/`dream_events`/`events` 后端从未产出，永远走前端三条固定 fallback
+文案；现在后端真正产出 `flow_entries`）。
+
+- **数据结构**：`state["flow_entries"]: list[{"ts": iso, "kind": str, "summary": str}]`，
+  FIFO 上限 10 条，最新在末尾。实现在 `core/dream/dream_flow.py`（纯函数，不做 I/O）。
+- **产出规则**（一轮最多 2 条命中，按下表顺序）：
+
+  | kind | 触发 | summary |
+  |---|---|---|
+  | `status_shift` | 入梦 / `/dream/wake` 进入 EXIT_REQUESTED / 挽留成功 / 关闭 | 「梦境正在成形」「醒来的边缘在靠近」「他把你留了下来」「梦在慢慢消散」 |
+  | `scene_shift` | `scene_state` 较上轮变化 | 「场景转入：{前20字}」 |
+  | `tension_up` / `tension_down` | `emotional_tension` 较上轮 Δ≥0.15 | 「他的情绪张力在上升/回落」 |
+  | `anchor_new` | `symbolic_anchors` 新增项 | 「新的象征浮现：{anchor}」 |
+
+  模板不写角色名（统一用「他」，与前端既有 fallback 文案一致），天然不含硬编码角色名。
+- **产出点**：`enter_dream()`（清空重开 + 追加 `status_shift`"梦境正在成形"）、
+  `dream_turn()`（`patch_local_state()` 前后 diff 出 `scene_shift`/`tension_*`/`anchor_new`）、
+  `admin/routers/dream.py` 的 `dream_wake()`（`exit_requested`/`retained`）、
+  `_do_close_dream()`（`closing`，在 `clear_local_state()` 之前写入，因为该函数不清
+  `flow_entries` 字段）。
+- **暴露**：`GET /dream/state` 的 `flow_entries` 字段；非梦境期该 key 本就为空数组。
+- **测试**：`tests/test_dream_flow_entries.py`。
 
 ### dream_settings.json 字段（UI 设置页对应）
 

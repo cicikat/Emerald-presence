@@ -77,6 +77,16 @@ def test_ai_auto_moves_after_user(sandbox):
     assert result["current_turn"] == "black"
 
 
+def test_legacy_opponent_value_normalized_to_character_ai(sandbox):
+    """Brief 25 §3 P2: opponent="yexuan_ai" (legacy input) is accepted, but the
+    session is persisted and returned under the new canonical value "character_ai"."""
+    session = G.start_game("user1", "yexuan", opponent="yexuan_ai")
+    assert session.state["opponent"] == "character_ai"
+
+    reloaded = G.get_active_session("user1", "yexuan")
+    assert reloaded.state["opponent"] == "character_ai"
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # P23 — AI 落子合法
 # ═══════════════════════════════════════════════════════════════════════════════

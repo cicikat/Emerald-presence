@@ -17,11 +17,12 @@ memory_access tiers:
 import logging
 import time
 from typing import Any
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
 
-async def build_snapshot(user_id: str, entry_reason: str = "", *, char_id: str = "yexuan", char_name: str = "(角色未加载)") -> dict[str, Any]:
+async def build_snapshot(user_id: str, entry_reason: str = "", *, char_id: str = DEFAULT_CHAR_ID, char_name: str = "(角色未加载)") -> dict[str, Any]:
     """
     Assemble and return the frozen dream context snapshot.
 

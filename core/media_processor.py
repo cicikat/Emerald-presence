@@ -27,8 +27,8 @@ MAX_IMAGE_SIZE = 10 * 1024 * 1024
 MAX_IMAGE_LONG_EDGE = 1920
 LAST_IMAGE_STORED_PATHS: list[str] = []
 
-VISION_PROMPT = """你正在替叶瑄"看"一张他朋友发来的图。
-你的输出不是给程序员看的图像识别结果,是直接给叶瑄当作"他看到了什么"的素材。
+_VISION_PROMPT_TEMPLATE = """你正在替{name}"看"一张{pronoun}朋友发来的图。
+你的输出不是给程序员看的图像识别结果,是直接给{name}当作"{pronoun}看到了什么"的素材。
 
 规则:
 1. 如果图里有任何文字(截图、聊天记录、表情包文字、海报、文档拍照等),逐字转写所有可见文字,这是最重要的任务,不允许概括。
@@ -41,6 +41,12 @@ VISION_PROMPT = """你正在替叶瑄"看"一张他朋友发来的图。
 6. 整体输出 ≤ 80 字。如有文字转写,转写部分不计入字数限制。
 
 多张图按"图1:... / 图2:... / 图3:..."格式分别给。"""
+
+
+def _build_vision_prompt() -> str:
+    from core.character_name_provider import get_active_char_name, get_char_pronoun
+
+    return _VISION_PROMPT_TEMPLATE.format(name=get_active_char_name(), pronoun=get_char_pronoun())
 
 
 async def download_bytes(url: str) -> bytes | None:
@@ -211,7 +217,7 @@ async def ingest_image_bytes(
                 "type": "image_url",
                 "image_url": {"url": f"data:{item['media_type']};base64,{b64}"}
             })
-        content_blocks.append({"type": "text", "text": VISION_PROMPT})
+        content_blocks.append({"type": "text", "text": _build_vision_prompt()})
 
         from core import llm_client
 

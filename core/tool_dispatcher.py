@@ -392,6 +392,7 @@ _TOOL_REGISTRY["add_reminder"] = {
     },
     "examples": ["提醒我8点吃药", "明天下午三点记得开会", "帮我记一下"],
     "keywords": ["提醒", "记得", "帮我记"],
+    "trace_args": ["remind_at"],
 }
 
 _TOOL_REGISTRY["weather"] = {
@@ -408,6 +409,7 @@ _TOOL_REGISTRY["weather"] = {
     },
     "examples": ["今天天气怎么样", "明天下雨吗", "外面冷不冷", "几度"],
     "keywords": ["天气", "下雨", "气温", "几度", "冷不冷", "热不热"],
+    "trace_args": ["city"],
 }
 
 _TOOL_REGISTRY["device_shutdown"] = {
@@ -453,6 +455,7 @@ _TOOL_REGISTRY["web_search"] = {
     },
     "examples": ["帮我搜一下", "查一下这个", "去网上看看"],
     "keywords": ["搜一下", "查一下", "去网上", "帮我搜", "帮我查"],
+    "trace_args": ["query"],
 }
 
 _TOOL_REGISTRY["read_diary"] = {
@@ -482,6 +485,7 @@ _TOOL_REGISTRY["read_diary"] = {
         },
         "required": [],
     },
+    "trace_args": ["date"],
 }
 
 _TOOL_REGISTRY["read_watch"] = {
@@ -500,6 +504,7 @@ _TOOL_REGISTRY["read_watch"] = {
         },
         "required": [],
     },
+    "trace_args": ["query"],
 }
 
 _TOOL_REGISTRY["search_diary"] = {
@@ -518,6 +523,7 @@ _TOOL_REGISTRY["search_diary"] = {
         },
         "required": [],
     },
+    "trace_args": ["query"],
 }
 
 _TOOL_REGISTRY["desktop_minimize"] = {
@@ -537,6 +543,7 @@ _TOOL_REGISTRY["desktop_minimize"] = {
     },
     "examples": ["最小化微信", "关掉这个窗口"],
     "keywords": ["最小化", "关掉窗口"],
+    "trace_args": ["window"],
 }
 
 _TOOL_REGISTRY["desktop_open_url"] = {
@@ -556,6 +563,7 @@ _TOOL_REGISTRY["desktop_open_url"] = {
     },
     "examples": ["打开bilibili", "帮我开一下知乎"],
     "keywords": ["打开", "开一下"],
+    "trace_args": ["url"],
 }
 
 _TOOL_REGISTRY["desktop_play_pause"] = {
@@ -616,6 +624,7 @@ _TOOL_REGISTRY["play_song"] = {
     },
     "examples": ["放一首歌", "听周杰伦", "播放稻香"],
     "keywords": ["放歌", "听歌", "播放", "放一首"],
+    "trace_args": ["song_name"],
 }
 
 _TOOL_REGISTRY["get_profile"] = {
@@ -645,6 +654,7 @@ _TOOL_REGISTRY["get_episodic"] = {
         },
         "required": [],
     },
+    "trace_args": ["topic"],
 }
 
 _TOOL_REGISTRY["get_growth"] = {
@@ -755,6 +765,7 @@ _TOOL_REGISTRY["toy_pattern"] = {
     },
     "examples": ["让玩具用波浪模式振动", "让设备执行轻柔模式"],
     "keywords": ["玩具模式", "波浪振动"],
+    "trace_args": ["pattern_name"],
 }
 
 _TOOL_REGISTRY["read_toy_file"] = {
@@ -779,6 +790,7 @@ _TOOL_REGISTRY["read_toy_file"] = {
     },
     "examples": ["读一下我们的思考笔记", "看看愿望清单", "打开涂鸦板看看"],
     "keywords": ["思考笔记", "愿望清单", "涂鸦板"],
+    "trace_args": ["file_key"],
 }
 
 _TOOL_REGISTRY["write_toy_file"] = {
@@ -987,21 +999,40 @@ async def execute(
             "[tool_dispatcher.execute] 拒绝执行: origin=%r 不在白名单, tool=%s",
             origin, tool_name,
         )
+        # 闸门拒绝不落痕迹——这不是角色做过的事（Brief 27 · 2.2）。
         return None, None
+
+    # Brief 27：工具动作痕迹层，execute() 每条 return 前落一条精简痕迹（origin 闸门拒绝除外）。
+    def _trace(status: str, digest_source=None) -> None:
+        try:
+            from core.memory import action_trace
+            action_trace.record(
+                user_id, char_id,
+                tool=tool_name, origin=origin, status=status,
+                args_digest=action_trace.build_args_digest(tool_name, tool_args),
+                result_digest=action_trace.build_result_digest(tool_name, digest_source),
+            )
+        except Exception as _at_err:
+            logger.debug("[tool_dispatcher] action_trace record error: %s", _at_err)
 
     from core import user_relation
 
     from core.error_handler import get_tool_fail_response
 
     if tool_name not in _TOOL_REGISTRY:
-        return get_tool_fail_response(), None
+        _fail = get_tool_fail_response()
+        _trace("failed", _fail)
+        return _fail, None
 
     gate_msg = _mode_gate(tool_name)
     if gate_msg is not None:
+        _trace("failed", gate_msg)
         return gate_msg, None
 
     if not _is_tool_enabled(tool_name):
-        return get_tool_fail_response(), None
+        _fail = get_tool_fail_response()
+        _trace("failed", _fail)
+        return _fail, None
 
     tool_info = _TOOL_REGISTRY[tool_name]
 
@@ -1013,17 +1044,23 @@ async def execute(
                 "[tool_dispatcher.execute] 拒绝硬件控制: 非 owner 私聊, user_id=%s is_group=%s tool=%s",
                 user_id, is_group, tool_name,
             )
-            return "硬件控制只允许 owner 私聊触发", None
+            _msg = "硬件控制只允许 owner 私聊触发"
+            _trace("failed", _msg)
+            return _msg, None
 
     if tool_name in ("device_shutdown", "device_sleep"):
         if not user_relation.has_permission(user_id, "agent_control"):
-            return "你没有执行此操作的权限哦", None
+            _msg = "你没有执行此操作的权限哦"
+            _trace("failed", _msg)
+            return _msg, None
 
     # 高危工具确认机制
     if tool_info["dangerous"]:
         if session_state.status != session_state.WAITING_CONFIRM:
+            _ask = _build_confirm_ask(tool_name, tool_args)
+            _trace("pending_confirm", _ask)
             session_state.set_waiting_confirm(tool_name, tool_args)
-            return None, _build_confirm_ask(tool_name, tool_args)
+            return None, _ask
 
     # ── persist 工具：指纹去重检查 ────────────────────────────────────────────
     _is_persist = bool(tool_info.get("persist", False))
@@ -1037,7 +1074,9 @@ async def execute(
                     "[tool_dispatcher] persist 工具已读，跳过: tool=%s fp=%s",
                     tool_name, _fingerprint,
                 )
-                return f"（刚读过这个，这次跳过）", None
+                _skip = "（刚读过这个，这次跳过）"
+                _trace("ok", _skip)
+                return _skip, None
         except Exception as _fp_err:
             logger.debug("[tool_dispatcher] fingerprint check error: %s", _fp_err)
 
@@ -1082,14 +1121,17 @@ async def execute(
             except Exception as _rec_err:
                 logger.warning("[tool_dispatcher] persist record error: %s", _rec_err)
 
+        _trace("ok", result)
         return f"工具已执行：{tool_name}，结果：{result}", None
     except TypeError as e:
         log_error("tool_dispatcher.execute", e)
         fallback = _TOOL_FALLBACKS.get(tool_name, "工具暂时不可用")
+        _trace("failed", fallback)
         return fallback, None
     except Exception as e:
         log_error("tool_dispatcher.execute", e)
         fallback = _TOOL_FALLBACKS.get(tool_name, "工具暂时不可用")
+        _trace("failed", fallback)
         return fallback, None
 
 

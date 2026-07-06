@@ -48,3 +48,11 @@ def reload_config() -> dict:
 
 def _char_name() -> str:
     return get_config().get("character", {}).get("name", "他")
+
+
+def get_user_display_name() -> str:
+    """用户显示名（config.yaml → user.display_name），未配置时返回空串。
+
+    调用方在空值时应回退到无名称写法（例如直接省略称呼、只用"你"），
+    不得拼出"用户（）"这类怪句。"""
+    return str(get_config().get("user", {}).get("display_name") or "").strip()

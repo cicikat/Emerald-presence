@@ -11,6 +11,7 @@ import logging
 from core.llm_output_validator import record_failure, reset
 from core.memory import pending_perception as _pending_perception
 from core.memory.scope import MemoryScope
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -396,7 +397,7 @@ class Pipeline:
         # Dream impression — ambient, read-only, never written by reality chain
         try:
             from core.dream.impression_loader import load_impression_text as _load_imp
-            dream_impression_text = _load_imp(uid, char_id=char_id)
+            dream_impression_text = _load_imp(uid, char_id=char_id, char_name=scoped_character.name)
         except Exception:
             dream_impression_text = ""
 
@@ -456,6 +457,20 @@ class Pipeline:
         except Exception as _te:
             logger.warning("[pipeline.fetch_context] recall trace write failed: %s", _te)
 
+        # Brief 27: 最近工具动作痕迹（跨轮"你刚才做过什么"），fail-open
+        _action_trace_entries: list = []
+        try:
+            from core.memory import action_trace
+            from core.config_loader import get_config as _get_config_at
+            _at_cfg = _get_config_at().get("action_trace", {})
+            _action_trace_entries = action_trace.recent(
+                uid, char_id,
+                max_items=_at_cfg.get("inject_max_items", 5),
+                window_hours=_at_cfg.get("inject_window_hours", 24),
+            )
+        except Exception as _ate:
+            logger.debug("[pipeline.fetch_context] action_trace recent failed: %s", _ate)
+
         return {
             "history":             history,
             "profile":             profile,
@@ -479,6 +494,7 @@ class Pipeline:
             # X3: web 资料召回（外部事实，已标注来源，不进 episodic/identity）
             "web_recall_result": _web_recall_text,
             "web_recall_hits":   _web_recall_hits,
+            "action_trace_entries": _action_trace_entries,
         }
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -566,6 +582,7 @@ class Pipeline:
             suppress_emotional_recall=context.get("suppress_emotional_recall", False),
             web_recall_result=context.get("web_recall_result", ""),
             web_recall_hits=context.get("web_recall_hits", []),
+            action_trace_entries=context.get("action_trace_entries", []),
         )
         if _char_id == self._active_character_id:
             self.author_note_extra = ""
@@ -900,6 +917,7 @@ class Pipeline:
                 trigger_name=trigger_name,
                 user_content=content,
                 user_id=user_id,
+                char_id=char_id,
             ))
         except Exception as e:
             log_error("pipeline.post_process.intent", e)
@@ -922,6 +940,7 @@ class Pipeline:
         trigger_name: str = "",
         user_content: str = "",
         user_id: str = "",
+        char_id: str | None = None,
     ) -> None:
         """
         Path B: 解析角色回复里声称要执行的桌面操作，写入 agent_actions.json 队列。
@@ -1058,6 +1077,22 @@ class Pipeline:
 
             logger.info("[pipeline.intent] 检测到意图: %s(%s), result=%s", action, params, last_result)
 
+            # Brief 27 · 2.2: Path B 不经 tool_dispatcher.execute()，在此单独补记痕迹。
+            try:
+                from core.memory import action_trace
+                _at_char_id = char_id or self._active_character_id
+                _at_args = ", ".join(
+                    f"{k}={v}" for k, v in params.items() if isinstance(v, (str, int, float))
+                )[:60]
+                action_trace.record(
+                    user_id, _at_char_id,
+                    tool=action, origin="assistant_intent",
+                    status=("ok" if last_result == "ok" else "failed"),
+                    args_digest=_at_args, result_digest=str(last_result)[:80],
+                )
+            except Exception as _at_err:
+                log_error("pipeline.intent.action_trace", _at_err)
+
         except _json.JSONDecodeError:
             pass
         except Exception as e:
@@ -1129,7 +1164,7 @@ def _get_scope_from_payload(payload: dict, handler_name: str) -> MemoryScope:
 
 
 async def _do_compress_episode(
-    user_id: str, user_content: str, reply: str, *, char_id: str = "yexuan"
+    user_id: str, user_content: str, reply: str, *, char_id: str = DEFAULT_CHAR_ID
 ) -> None:
     """
     用 LLM 把一轮对话压缩成情景记忆并写入。

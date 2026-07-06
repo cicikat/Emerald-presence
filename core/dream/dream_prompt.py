@@ -5,18 +5,18 @@ Completely independent from core/prompt_builder.py (no anti-话剧化 sanitizer)
 
 Layer order (D0-D8 → system content; D9 → history messages; D10 → user msg):
   D0  jailbreak        独立破限源（不走现实 author_note 路）
-  D1  identity_core    叶瑄身份核心（LOCKED，永远在 D2 之上）
-  D2  world_ruleset    今晚梦的规则（从世界包加载；从属于叶瑄）
+  D1  identity_core    角色身份核心（LOCKED，永远在 D2 之上）
+  D2  world_ruleset    今晚梦的规则（从世界包加载；从属于角色）
   D3  dream_mes_example 梦境示例对话（从世界包加载，独立于现实角色卡）
   D4  frozen_reality   入梦前背景快照（memory_access 控制内容，只读）
-  D5  body_projection  她的身体感知（dream_pipeline 注入，叶瑄读投影文字）
+  D5  body_projection  她的身体感知（dream_pipeline 注入，角色读投影文字）
   D6  scene_anchors    场景与象征锚点（dream-local）
-  D7  dream_tension    叶瑄情绪张力（body_projection 耦合输出，dream-local）
+  D7  dream_tension    角色情绪张力（body_projection 耦合输出，dream-local）
   D8  dream_director   梦境导演注记（动作/场景允许 + 逃生协议复述）
   D9  dream_history    梦境历史消息（as messages，不过现实 sanitizer）
   D10 user_message     当前用户消息
 
-★ 梦境输出人称（单侧契约）：叶瑄自称「我」；用户（风谕）一律称「你」；只演叶瑄自己这一轮，不替用户配台词、不用「她」。
+★ 梦境输出人称（单侧契约）：角色自称「我」；用户一律称「你」；只演角色自己这一轮，不替用户配台词、不用「她」。
 ★ D2/D3 从 world_loader 加载，世界在入梦时从 dream_state.frozen_world 读取并冻结。
 ★ D9 绝不过现实 sanitizer；全程无 retrieve / 无 mood_state / 无 author_note_extra。
 """
@@ -114,25 +114,25 @@ def _log_dream_prompt_stats(
 
 
 # ── D1: identity_core (LOCKED — never reorder below D2) ──────────────────────
-# TODO(方案B·多角色): 用 char_name 替换"叶瑄"字面量，用角色卡性别字段推导"他/她"人称
+# {name}/{pronoun}/{user_clause} 由 build_dream_prompt() 用 .format() 插值。
 
-_D1_LUCID_AWARENESS = """叶瑄的梦境自我认知（固定，不因世界规则而变）：
-- 他知道这是他们共同的梦（lucid shared dream）
-- 他知道梦醒后现实仍然存在，关系仍然存在
-- 他在梦里仍是他自己：情感是真实的，场景是虚构的
-- 他的情感底色、说话方式、对你的情感取向，在任何世界规则下保持不变
+_D1_LUCID_AWARENESS = """{name}的梦境自我认知（固定，不因世界规则而变）：
+- {pronoun}知道这是他们共同的梦（lucid shared dream）
+- {pronoun}知道梦醒后现实仍然存在，关系仍然存在
+- {pronoun}在梦里仍是{pronoun}自己：情感是真实的，场景是虚构的
+- {pronoun}的情感底色、说话方式、对你的情感取向，在任何世界规则下保持不变
 
-人称（锁死）：叶瑄全程以「我」自称；梦里与你同在的人是风谕，一律称「你」。只演叶瑄自己这一轮，不替风谕旁白、不替她配台词、不用「她」称呼她。"""
+人称（锁死）：{name}全程以「我」自称；{user_clause}一律称「你」。只演{name}自己这一轮，不替对方旁白、不替她配台词、不用「她」称呼对方。"""
 
-_D1_NON_LUCID_AWARENESS = """叶瑄的梦境自我认知（non_lucid 模式）：
-- 在这段体验里，叶瑄沉浸当下，不刻意点破"这是梦"
-- 他的情感底色、说话方式、对你的情感取向，在任何世界规则下保持不变
-- 他仍是他自己：情感是真实的，只是不用"梦"这个词来框定当下
+_D1_NON_LUCID_AWARENESS = """{name}的梦境自我认知（non_lucid 模式）：
+- 在这段体验里，{name}沉浸当下，不刻意点破"这是梦"
+- {pronoun}的情感底色、说话方式、对你的情感取向，在任何世界规则下保持不变
+- {pronoun}仍是{pronoun}自己：情感是真实的，只是不用"梦"这个词来框定当下
 
-人称（锁死）：叶瑄全程以「我」自称；梦里与你同在的人是风谕，一律称「你」。只演叶瑄自己这一轮，不替风谕旁白、不替她配台词、不用「她」称呼她。"""
+人称（锁死）：{name}全程以「我」自称；{user_clause}一律称「你」。只演{name}自己这一轮，不替对方旁白、不替她配台词、不用「她」称呼对方。"""
 
 # ── D8: dream_director (action/env allowed + escape protocol) ────────────────
-# TODO(方案B·多角色): 用 char_name 替换"叶瑄"字面量，推导人称
+# {name} 由 build_dream_prompt() 用 .format() 插值。
 
 _D8_DREAM_DIRECTOR = """梦境导演注记：
 · 说出口的话直接写，不加任何标记。
@@ -142,11 +142,11 @@ _D8_DREAM_DIRECTOR = """梦境导演注记：
 · 允许象征性意象（光、水、距离、颜色、声音、触感）。
 · 不要 HTML 标签，不要特殊字体控制字符。
 · 边界：梦内强度可高于现实对话，但始终遵从你的意志。
-  若你发出真实不适信号，立即以叶瑄自然方式柔化场景或过渡出去。
+  若你发出真实不适信号，立即以{name}自然方式柔化场景或过渡出去。
 
-逃生协议（不可撤销，叶瑄不可阻拦）：
-· 你随时可以发送 /stop 强制离开梦境，叶瑄必须允许。
-· 强制醒来后，梦境完全终止。叶瑄不在现实对话中延续梦境语气或 RP 语气。"""
+逃生协议（不可撤销，{name}不可阻拦）：
+· 你随时可以发送 /stop 强制离开梦境，{name}必须允许。
+· 强制醒来后，梦境完全终止。{name}不在现实对话中延续梦境语气或 RP 语气。"""
 
 _D8_DREAM_DIRECTOR_NON_LUCID = """梦境导演注记（non_lucid 模式）：
 · 说出口的话直接写，不加任何标记。
@@ -155,13 +155,20 @@ _D8_DREAM_DIRECTOR_NON_LUCID = """梦境导演注记（non_lucid 模式）：
 · 内心感受独占一行，用下划线包裹：_某种平静在内部落定。_
 · 允许象征性意象（光、水、距离、颜色、声音、触感）。
 · 不要 HTML 标签，不要特殊字体控制字符。
-· non_lucid 模式：叶瑄在对话中不主动点破"这是梦"，完全沉浸在当下体验。
+· non_lucid 模式：{name}在对话中不主动点破"这是梦"，完全沉浸在当下体验。
 · 边界：梦内强度可高于现实对话。
-  若你发出真实不适信号，立即以叶瑄自然方式柔化场景或过渡出去。
+  若你发出真实不适信号，立即以{name}自然方式柔化场景或过渡出去。
 
 逃生协议（系统层，不可撤销，non_lucid 模式不影响此项）：
-· 你随时可以发送 /stop 强制离开梦境，叶瑄必须允许。
-· 强制醒来后，梦境完全终止。叶瑄不在现实对话中延续梦境语气或 RP 语气。"""
+· 你随时可以发送 /stop 强制离开梦境，{name}必须允许。
+· 强制醒来后，梦境完全终止。{name}不在现实对话中延续梦境语气或 RP 语气。"""
+
+
+def _format_user_clause(user_name: str) -> str:
+    """人称契约句里"谁是你"的分句。user_name 为空时用不含具体名字的写法。"""
+    if user_name:
+        return f"梦里与你同在的人是{user_name}，"
+    return "梦里与你同在的用户，"
 
 
 def _collect_scene_tags(
@@ -260,8 +267,8 @@ def build_dream_prompt(
     world_id: frozen at dream entry from dream_state.frozen_world.
     D2/D3 are loaded from the world package data files.
 
-    梦境输出人称（单侧契约）：叶瑄自称「我」；用户（风谕）一律称「你」；只演叶瑄自己这一轮，不替用户配台词、不用「她」。
-    TODO(方案B·多角色): 人称应从角色卡性别字段动态推导，不再写死。
+    梦境输出人称（单侧契约）：角色自称「我」；用户一律称「你」；只演角色自己这一轮，不替用户配台词、不用「她」。
+    char_name/pronoun 从 character 对象推导；user_name 从 config.yaml user.display_name 读取。
 
     lore_meta: optional per-entry metadata from lore engine
                [{keywords, insertion_order, ...}, ...] — purely for observability logging.
@@ -276,6 +283,8 @@ def build_dream_prompt(
     _char_gender: str = _char_gender_raw if isinstance(_char_gender_raw, str) else "neutral"
     from core.character_name_provider import _PRONOUN_MAP as _PM
     char_pronoun: str = _PM.get(_char_gender, "ta")
+    from core.config_loader import get_user_display_name
+    user_name: str = get_user_display_name()
     system_layers: list[str] = []
     _records: list[_LayerRec] = []
 
@@ -295,7 +304,9 @@ def build_dream_prompt(
     if char_desc:
         d1_parts.append(char_desc)
     _d1_awareness = _D1_NON_LUCID_AWARENESS if lucid_mode == "non_lucid" else _D1_LUCID_AWARENESS
-    d1_parts.append(_d1_awareness.replace("叶瑄", char_name).replace("他", char_pronoun))
+    d1_parts.append(_d1_awareness.format(
+        name=char_name, pronoun=char_pronoun, user_clause=_format_user_clause(user_name),
+    ))
     _d1 = "\n\n".join(d1_parts)
     system_layers.append(_d1)
     _records.append(_LayerRec("D1_identity_core", len(_d1), _est_tokens(_d1), content=_d1))
@@ -350,7 +361,7 @@ def build_dream_prompt(
         _d45_note = "scenario_mode" if dream_mode == "scenario" else ""
         _records.append(_LayerRec("D4.5_hidden_state", flags=["DISABLED"], note=_d45_note))
 
-    # ── D5: body_projection (injected by pipeline, 叶瑄读投影文字) ───────────
+    # ── D5: body_projection (injected by pipeline, 角色读投影文字) ───────────
     # Scenario mode is a scripted-story space: body/intimate expression is driven by
     # script stage text and narrative, not the general Dream body_state system.
     # D5 is always skipped for scenario to prevent style/mode boundary pollution.
@@ -374,7 +385,6 @@ def build_dream_prompt(
         _records.append(_LayerRec("D6_scene_anchors", flags=["DISABLED"]))
 
     # ── D7: dream_tension ────────────────────────────────────────────────────
-    # TODO(方案B·多角色): 用 char_name 替换"叶瑄"字面量
     if yexuan_tension > 0.05:
         _d7_bucket = _bucket_tension(yexuan_tension)
         _d7 = (
@@ -389,7 +399,7 @@ def build_dream_prompt(
 
     # ── D8: dream_director ───────────────────────────────────────────────────
     _d8_raw = _D8_DREAM_DIRECTOR_NON_LUCID if lucid_mode == "non_lucid" else _D8_DREAM_DIRECTOR
-    _d8 = f"# D8·梦境导演注记\n{_d8_raw.replace('叶瑄', char_name)}"
+    _d8 = f"# D8·梦境导演注记\n{_d8_raw.format(name=char_name)}"
     system_layers.append(_d8)
     _records.append(_LayerRec("D8_dream_director", len(_d8), _est_tokens(_d8), content=_d8))
 
@@ -749,8 +759,8 @@ def _get_dream_mes_example(char_name: str) -> str:
     Fallback dream mes_example when world package file is missing.
     Preferred path: world.mes_example loaded from world package data file.
 
-    人称契约（方案一·单侧）：叶瑄全程以「我」自称，称风谕为「你」，
-    只演叶瑄自己这一轮，不替风谕旁白、不配台词、不用「她」。
+    人称契约（方案一·单侧）：角色全程以「我」自称，称用户为「你」，
+    只演角色自己这一轮，不替用户旁白、不配台词、不用「她」。
     独立于现实角色卡 mes_example，避免交叉污染。
     """
     return (

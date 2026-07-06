@@ -1,5 +1,5 @@
 """
-screen_peek — 叶瑄自主查看当前窗口全文内容的受控工具。
+screen_peek — 角色自主查看当前窗口全文内容的受控工具。
 
 总开关：config.screen_peek.enabled（默认 false）。
 冷却：同一文件/窗口 screen_peek.cooldown_minutes 分钟内只触发一次。

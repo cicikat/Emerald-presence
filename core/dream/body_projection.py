@@ -1,14 +1,14 @@
 """
-Her body state projection for 叶瑄's perception.
+Her body state projection for the character's perception.
 
-叶瑄 only sees what this projection renders — never raw numbers by default.
-She (user/her) always sees her own numbers in the UI panel, orthogonal to
-boundary_level (user_sees_own_numbers is always True on her side).
+The character only sees what this projection renders — never raw numbers by
+default. She (user/her) always sees her own numbers in the UI panel,
+orthogonal to boundary_level (user_sees_own_numbers is always True on her side).
 
 BoundaryLevel:
   vague            — single ambiguous hint; no axis breakdown
   body_perceptible — qualitative per-axis labels (no numbers) [DEFAULT]
-  numbers_visible  — numeric values shown to 叶瑄
+  numbers_visible  — numeric values shown to the character
   threshold_break  — numeric + cap release (SEAM: not implemented in v0,
                      falls back to numbers_visible; full test matrix = v2)
 
@@ -43,7 +43,7 @@ def project_body_for_yexuan(
     yexuan_tension: float = 0.0,
 ) -> dict[str, Any]:
     """
-    Build 叶瑄's perception of her body state for this turn.
+    Build the character's perception of her body state for this turn.
 
     Returns:
       {

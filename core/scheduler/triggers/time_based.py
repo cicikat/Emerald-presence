@@ -8,6 +8,7 @@ from hashlib import sha1
 from core.character_name_provider import get_char_name
 from core.error_handler import log_error
 from core.scheduler.loop import _is_ready, _mark, _owner_id, _pipeline_send, _cfg, _user_talked_today, _last_trigger, _char_name, _active_char_id_or_none
+from core.scheduler.rhythm import LOGICAL_DAY_CUTOFF_HOUR
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +164,6 @@ def propose_daily_journal(ctx: dict | None = None):
         execute=_make_prompt_execute(
             "daily_journal",
             lambda: "（深夜，他回想起今天和你说的话，提笔写下此刻的感受，并且一想到你，就忍不住写了很多）",
-            after_send=_write_inner_daily_journal,
             # C¹: 只注入当日 event_log 原文（种子 prompt 已带今日对话概要），不做语义
             # 检索——"今天" 这种宽泛词会捞出无关旧情景记忆（RC6）。
             recall_policy="none",
@@ -459,8 +459,8 @@ async def _generate_and_store_diary(oid: str, char_id: str) -> None:
     感受层：注入角色卡性格底色 + 语气示例 + 当前心情 + 真实对话片段，
     让模型写出有具体细节、有温度的私人日记，而非工整套话。
 
-    两条触发路径（legacy _check_daily_journal / proposer after_send）共用本函数，
-    避免重复维护两份 prompt。
+    唯一调用方是静默维护任务 `_check_inner_diary_write`，与 daily_journal 主动发言
+    完全解耦（发言过 gating 与否不影响是否写日记）。
     """
     from core.sandbox import get_paths
     from core.scheduler.rhythm import logical_day
@@ -471,7 +471,8 @@ async def _generate_and_store_diary(oid: str, char_id: str) -> None:
     diary_dir.mkdir(parents=True, exist_ok=True)
 
     char_name = get_char_name(char_id)
-    today_log = get_recent_days(oid, days=1)
+    days = 2 if datetime.now().hour < LOGICAL_DAY_CUTOFF_HOUR else 1
+    today_log = get_recent_days(oid, days=days)
     if not today_log:
         return
 
@@ -567,18 +568,36 @@ async def _check_daily_journal():
             recall_policy="none",
         )
 
-        # 存储各角色日记到内心文档（白名单多角色逐个生成）
-        for _cid in _diary_char_ids():
-            try:
-                await _generate_and_store_diary(oid, _cid)
-            except Exception as e:
-                from core.error_handler import log_error
-                log_error(f"scheduler._check_daily_journal.diary[{_cid}]", e)
-
         _mark("daily_journal")
         logger.info("[scheduler] 每日手账已发送")
     except Exception as e:
         log_error("scheduler._check_daily_journal", e)
+
+
+async def _check_inner_diary_write():
+    """静默写各角色内心日记。与 daily_journal 主动发言完全解耦。"""
+    now = datetime.now()
+    # 窗口：23:00 起，跨午夜宽限到次日 05:00（LOGICAL_DAY_CUTOFF_HOUR）
+    if not (now.hour >= 23 or now.hour < LOGICAL_DAY_CUTOFF_HOUR):
+        return
+    if not _is_ready("inner_diary_write"):
+        return
+    oid = _owner_id()
+    if not oid:
+        return
+    from core.sandbox import get_paths
+    from core.scheduler.rhythm import logical_day
+
+    for _cid in _diary_char_ids():
+        # 幂等主闸：当日（logical day）文件已存在则跳过，不发 LLM 调用
+        diary_file = get_paths().yexuan_inner_diary(char_id=_cid) / f"{logical_day().strftime('%Y-%m-%d')}.md"
+        if diary_file.exists():
+            continue
+        try:
+            await _generate_and_store_diary(oid, _cid)
+        except Exception as e:
+            log_error(f"scheduler._check_inner_diary_write[{_cid}]", e)
+    _mark("inner_diary_write")
 
 
 async def _check_episodic_decay():
@@ -931,21 +950,6 @@ def _weather_prompt(detail: dict, now: datetime, location: str) -> str | None:
     if humidity > 85 and any(k in desc for k in ("晴", "多云")):
         return f"（你感觉{location}今天有点闷热潮湿，想说给她听。）"
     return None
-
-
-async def _write_inner_daily_journal() -> None:
-    """proposer after_send 回调：写各角色内心日记（白名单多角色逐个生成）。"""
-    try:
-        oid = _owner_id()
-        if not oid:
-            return
-        for _cid in _diary_char_ids():
-            try:
-                await _generate_and_store_diary(oid, _cid)
-            except Exception as e:
-                log_error(f"scheduler._write_inner_daily_journal[{_cid}]", e)
-    except Exception as e:
-        log_error("scheduler._write_inner_daily_journal", e)
 
 
 def _spontaneous_recall_prompt(candidates: list[dict]) -> str:

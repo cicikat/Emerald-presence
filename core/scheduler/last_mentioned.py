@@ -36,7 +36,7 @@ _DATE_RE = re.compile(r"^#\s*(\d{4}-\d{2}-\d{2})\s*$")
 _TIME_RE = re.compile(r"^##\s*(\d{2}:\d{2})\s*$")
 _SPEAKER_RE = re.compile(r"^\*\*(.+?)\*\*：(.*)$")
 _PUNCT_RE = re.compile(r"[\s\t\r\n，。！？!?、,.；;：:\"'“”‘’（）()\[\]【】<>《》…—-]+")
-_FILLER_RE = re.compile(r"^(我|她|你|叶瑄|嗯|啊|唔|那个|就是|不是|然后|所以|但是|可是)+")
+_FILLER_RE = re.compile(r"^(我|她|你|嗯|啊|唔|那个|就是|不是|然后|所以|但是|可是)+")
 
 _FOLLOWABLE_HINTS = (
     "最近",
@@ -130,6 +130,9 @@ def recall_last_mentioned(
     if not resolved:
         return None
 
+    from core.character_name_provider import get_char_name
+    char_name = get_char_name(resolved)
+
     now_dt = now or datetime.now()
     text = _read_recent_event_log(user_id, days=days, now=now_dt, char_id=resolved)
     if not text.strip():
@@ -138,7 +141,7 @@ def recall_last_mentioned(
     candidates = [
         topic
         for turn in _parse_event_log_turns(text)
-        if (topic := _topic_from_turn(turn, now_dt)) is not None
+        if (topic := _topic_from_turn(turn, now_dt, char_name)) is not None
     ]
     ordered = _rank_last_mentioned_candidates(candidates, now=now_dt, dry_run=dry_run)
     return ordered[0] if ordered else None
@@ -498,7 +501,7 @@ def _turn_from_block(date_text: str, time_text: str, order: int, lines: list[str
     )
 
 
-def _topic_from_turn(turn: _Turn, now: datetime) -> LastMentionedTopic | None:
+def _topic_from_turn(turn: _Turn, now: datetime, char_name: str) -> LastMentionedTopic | None:
     user_text = _clean_text(turn.user_text)
     if not _is_followable_user_text(user_text):
         return None
@@ -513,7 +516,7 @@ def _topic_from_turn(turn: _Turn, now: datetime) -> LastMentionedTopic | None:
     return LastMentionedTopic(
         topic=topic,
         topic_key=topic_key,
-        context=_format_context(turn),
+        context=_format_context(turn, char_name),
         user_text=user_text,
         assistant_text=_clean_text(turn.assistant_text),
         mentioned_at=f"{turn.date} {turn.time_text}".strip(),
@@ -541,11 +544,11 @@ def _extract_topic(text: str) -> str:
     return first_clause[:30]
 
 
-def _format_context(turn: _Turn) -> str:
+def _format_context(turn: _Turn, char_name: str) -> str:
     parts = [f"{turn.date} {turn.time_text}".strip(), f"用户：{_clean_text(turn.user_text)}"]
     assistant = _clean_text(turn.assistant_text)
     if assistant:
-        parts.append(f"叶瑄：{assistant}")
+        parts.append(f"{char_name}：{assistant}")
     return "\n".join(part for part in parts if part)
 
 

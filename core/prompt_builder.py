@@ -12,6 +12,7 @@ from typing import Literal
 from core.character_loader import Character
 from core.error_handler import log_error
 from core.prompt_ablation import ALWAYS_ON
+from core.data_paths import DEFAULT_CHAR_ID
 
 
 @dataclass
@@ -37,7 +38,7 @@ _AG_TONE_DESC: dict[str, str] = {
 }
 
 
-def _format_dream_afterglow_detail(uid: str, *, char_id: str = "yexuan") -> str:
+def _format_dream_afterglow_detail(uid: str, *, char_id: str = DEFAULT_CHAR_ID) -> str:
     """Return the active clear/fading dream summary, failing closed."""
     try:
         from core.dream.dream_afterglow import load_afterglow
@@ -47,7 +48,7 @@ def _format_dream_afterglow_detail(uid: str, *, char_id: str = "yexuan") -> str:
         return ""
 
 
-def _format_afterglow_soft_hint(uid: str, *, char_id: str = "yexuan") -> str:
+def _format_afterglow_soft_hint(uid: str, *, char_id: str = DEFAULT_CHAR_ID) -> str:
     """Return a short soft-hint string if a fresh afterglow residue exists, else ''.
 
     Read-only.  Never raises.  Never writes memory / mood / profile / hidden state.
@@ -359,13 +360,14 @@ def build(
     mid_term_context: str = "",
     tags: set[str] | None = None,
     dream_impression_text: str = "",
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
     user_facts_text: str = "",
     stage_presence: str = "",
     stage_transcript: str = "",
     suppress_emotional_recall: bool = False,
     web_recall_result: str = "",
     web_recall_hits: list | None = None,
+    action_trace_entries: list[dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """
     组装完整的 prompt 消息列表
@@ -384,6 +386,7 @@ def build(
         event_search_result: event_log.search() 的返回值（相关往事摘要）
         lore_entries:        lore_engine.match() 的返回值
         tool_result:         本轮工具执行结果（有则注入）
+        action_trace_entries: action_trace.recent() 返回的最近工具动作痕迹（层 10.5，跨轮回忆）
         author_note_extra:   consistency_check 发现问题时的纠偏提示
     """
     if lore_entries is None:
@@ -1044,7 +1047,7 @@ def build(
         pass
 
     # ─────────────────────────────────────────────────────────────────────────
-    # 层 web_recall（X3）：叶瑄查过的相关网络资料（外部事实，非记忆/经历）
+    # 层 web_recall（X3）：角色查过的相关网络资料（外部事实，非记忆/经历）
     # 标注来源，提示 LLM 这是外部信息，不应固化为自身记忆。最先裁剪（优先级 35）。
     # ─────────────────────────────────────────────────────────────────────────
     if web_recall_result:
@@ -1224,9 +1227,26 @@ def build(
         _layers.append("10_tool_result")
         messages.append({
             "role": "system",
-            "content": frame_tool_result(_tr.safe_summary),
+            "content": frame_tool_result(_tr.safe_summary, char_name=character.name),
             "_layer": "10_tool_result",
         })
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 层 10.5：工具动作痕迹（Brief 27 · action_trace）——跨轮"你最近做过的操作"
+    # 不进裁剪优先链（够小且时效性强），但带 _layer 供裁剪逻辑感知。
+    # ─────────────────────────────────────────────────────────────────────────
+    if action_trace_entries:
+        from core.memory import action_trace
+        _at_block = action_trace.format_trace_block(
+            action_trace_entries, current_tool_result=tool_result,
+        )
+        if _at_block:
+            _layers.append("10.5_action_trace")
+            messages.append({
+                "role": "system",
+                "content": _at_block,
+                "_layer": "10.5_action_trace",
+            })
 
     # ─────────────────────────────────────────────────────────────────────────
     # 层 11：Author's Note（固定人设提醒 + 动态纠偏追加）
@@ -1632,6 +1652,7 @@ KNOWN_LAYERS: list[tuple[str, str]] = [
     ("9_anti_repeat", "跨轮开头去同质软约束"),
     ("9.5_episodic_top", "最相关情景记忆置顶一条"),
     ("10_tool_result", "本轮工具执行结果"),
+    ("10.5_action_trace", "工具动作痕迹：你最近做过的操作（跨轮回忆，不进裁剪链）"),
     ("11_author_note", "Author's Note 人设核心提醒"),
     ("11_jailbreak", "破限预设 layer=11"),
     ("11.5_post_history", "酒馆卡历史之后约束层"),

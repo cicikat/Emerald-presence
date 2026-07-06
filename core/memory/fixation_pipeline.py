@@ -24,6 +24,7 @@ from core.memory.path_resolver import resolve_path
 from core.memory.scope import MemoryScope, require_character_id
 from core.safe_write import rotate_jsonl_if_needed, safe_append_jsonl, safe_write_json, safe_write_text
 from core.sandbox import get_paths
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ _IDENTITY_SYSTEM_PROMPT = """\
 - sleep_pattern（作息模式）
 - topic_preference（话题偏好）
 - self_relation（自我关系）
-- address_style（称呼习惯：她平时怎么称呼叶瑄/自己，有没有固定的爱称、昵称、角色化称呼，如"主人"等）
+- address_style（称呼习惯：她平时怎么称呼角色/自己，有没有固定的爱称、昵称、角色化称呼，如"主人"等）
 
 规则：
 1. 每个维度的 text 字段必须是第三人称"她"开头的短句，30-60 字，自然口语，不要心理学术语。
@@ -110,13 +111,13 @@ _IDENTITY_SYSTEM_PROMPT = """\
 # fixation_state 读写
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _state_read_file(uid: str, *, char_id: str = "yexuan") -> Path:
+def _state_read_file(uid: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(uid), char_id)
     return resolve_path(scope, "fixation_state")
 
 
-def _state_write_file(uid: str, *, char_id: str = "yexuan") -> Path:
+def _state_write_file(uid: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     """写路径：始终写新布局。"""
     require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(uid), char_id)
@@ -125,7 +126,7 @@ def _state_write_file(uid: str, *, char_id: str = "yexuan") -> Path:
     return p
 
 
-def _load_fixation_state(uid: str, *, char_id: str = "yexuan") -> dict:
+def _load_fixation_state(uid: str, *, char_id: str = DEFAULT_CHAR_ID) -> dict:
     """读取 fixation_state，缺失字段按默认值填充，不阻塞读路径。"""
     path = _state_read_file(uid, char_id=char_id)
     try:
@@ -139,7 +140,7 @@ def _load_fixation_state(uid: str, *, char_id: str = "yexuan") -> dict:
     return dict(_STATE_DEFAULTS)
 
 
-def _save_fixation_state(uid: str, state: dict, *, char_id: str = "yexuan") -> None:
+def _save_fixation_state(uid: str, state: dict, *, char_id: str = DEFAULT_CHAR_ID) -> None:
     safe_write_json(_state_write_file(uid, char_id=char_id), state)
 
 
@@ -522,7 +523,7 @@ def capture_turn(
     trigger_name: str = "",
     envelope=None,
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
     audit_extras: dict | None = None,
 ) -> str:
     """
@@ -532,7 +533,7 @@ def capture_turn(
         保留对话连续性，同时写 event_log + trigger_audit_log。
       - 非会话型触发（系统锚点等）：不写 short_term，只写 event_log + trigger_audit_log。
     P0 trigger boundary rule: trigger 的 user_msg 侧永远不是 history；
-    会话型触发的 assistant 正文例外，以维持叶瑄主动开口后的上下文连续性。
+    会话型触发的 assistant 正文例外，以维持角色主动开口后的上下文连续性。
 
     调用约束：必须在 uid_lock 内、detect_emotion 完成后调用。
     envelope 未传时默认零值（fail-closed）。
@@ -606,7 +607,7 @@ async def summarize_to_midterm(
     tags: list[str],
     emotion: str = "neutral",
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
     source: str = "",
     memory_strength: float = 1.0,
     force_reflect: bool = False,
@@ -694,7 +695,7 @@ async def reflect_to_episodic(
     mid_ids: list[str],
     trigger: Literal["eager", "sweep"] = "eager",
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
 ) -> str | None:
     """
     将一批 mid_term 条目合并反思为一条 episodic 记忆。
@@ -1068,7 +1069,7 @@ async def _synthesize_identity(
     return result
 
 
-async def consolidate_to_identity(uid: str, llm_client, *, char_id: str = "yexuan") -> bool:
+async def consolidate_to_identity(uid: str, llm_client, *, char_id: str = DEFAULT_CHAR_ID) -> bool:
     """
     读取待固化 episodic，调 _synthesize_identity 生成新 identity，
     写入 user_identity.yaml，标记 episodic consolidated_at，重置 fixation_state。

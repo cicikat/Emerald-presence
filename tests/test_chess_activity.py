@@ -61,6 +61,14 @@ def test_start_creates_session(sandbox):
     assert session.state
 
 
+def test_legacy_opponent_value_normalized_to_character_ai(sandbox):
+    """Brief 25 §3 P2: opponent="yexuan_ai" (legacy input) is accepted, but the
+    initial state is built under the new canonical value "character_ai"."""
+    state = make_initial_state(opponent="yexuan_ai")
+    assert state["opponent"] == "character_ai"
+    assert state["ai_player"] == "black"
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. 默认初始 FEN 正确
 # ═══════════════════════════════════════════════════════════════════════════

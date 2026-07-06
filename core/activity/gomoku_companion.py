@@ -137,7 +137,7 @@ def _format_grounding_for_prompt(facts: dict) -> str:
     # AI last move facts
     lai = facts.get("last_ai_move")
     laif = facts.get("last_ai_move_facts", {})
-    if lai and facts.get("opponent") == "yexuan_ai":
+    if lai and facts.get("opponent") == "character_ai":
         lines.append(f"\n最近AI落子：({lai.get('x')},{lai.get('y')}) 第{lai.get('move_no')}手")
         lines.append(f"  意图：{laif.get('purpose', 'unknown')}")
         lines.append(f"  形成连子：{laif.get('created_chain', '?')}连")
@@ -221,7 +221,7 @@ def _build_messages(
     char_name: str = "(角色未加载)",
 ) -> list[dict]:
     """Build LLM messages from game state, grounding facts, transcript context, and user message."""
-    is_ai = state.get("opponent") == "yexuan_ai"
+    is_ai = state.get("opponent") == "character_ai"
     system = (_SYSTEM_YEXUAN_AI if is_ai else _SYSTEM_HUMAN).replace("叶瑄", char_name)
 
     status_label = {"active": "进行中", "completed": "已结束"}.get(
@@ -329,6 +329,11 @@ async def generate_reply(
     """
     from core.character_name_provider import get_char_name as _get_char_name
     char_name = _get_char_name(char_id)
+
+    # Read-path normalization for legacy sessions (Brief 25 §3 P2): callers may pass
+    # session.state loaded directly (bypassing gomoku.get_active_session()'s normalization).
+    from core.activity.gomoku import _normalize_opponent
+    state = {**state, "opponent": _normalize_opponent(state.get("opponent", "human"))}
 
     # 1. Grounding facts (deterministic)
     facts = build_gomoku_grounding_facts(state)

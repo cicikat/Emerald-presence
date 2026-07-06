@@ -15,6 +15,7 @@ from core.character_name_provider import get_active_char_name
 from core.error_handler import log_error
 from core.memory.path_resolver import resolve_path
 from core.memory.scope import MemoryScope, require_character_id
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +65,13 @@ def _is_recency_tag(tag: str) -> bool:
     return tag in _RECENCY_TAGS or tag.startswith(_PREF_PREFIX)
 
 
-def _profile_read_path(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _profile_read_path(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(user_id), char_id)
     return resolve_path(scope, "profile")
 
 
-def _profile_write_path(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _profile_write_path(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(user_id), char_id)
     p = resolve_path(scope, "profile")
@@ -78,7 +79,7 @@ def _profile_write_path(user_id: str, *, char_id: str = "yexuan") -> Path:
     return p
 
 
-def load(user_id: str, *, char_id: str = "yexuan") -> dict:
+def load(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> dict:
     """
     读取用户画像，文件不存在时返回空模板
     """
@@ -144,7 +145,7 @@ async def _compress_facts(facts: list) -> list:
 _PENDING_OVERRIDE_THRESHOLD = 2  # 连续 N 次一致提取才落盘覆盖
 
 
-async def update(user_id: str, new_facts: dict, *, char_id: str = "yexuan"):
+async def update(user_id: str, new_facts: dict, *, char_id: str = DEFAULT_CHAR_ID):
     """
     合并更新用户画像。
 
@@ -211,7 +212,7 @@ async def update(user_id: str, new_facts: dict, *, char_id: str = "yexuan"):
     _save(user_id, profile, char_id=char_id)
 
 
-async def extract_and_update(user_id: str, recent_messages: list[dict], *, char_id: str = "yexuan"):
+async def extract_and_update(user_id: str, recent_messages: list[dict], *, char_id: str = DEFAULT_CHAR_ID):
     """
     用 LLM 从最近对话中提取新的用户信息，并更新画像
     应每 N 轮调用一次（N = summary_every_n_rounds）
@@ -271,7 +272,7 @@ async def extract_and_update(user_id: str, recent_messages: list[dict], *, char_
         log_error("user_profile.extract_and_update", e)
 
 
-def _save(user_id: str, profile: dict, *, char_id: str = "yexuan"):
+def _save(user_id: str, profile: dict, *, char_id: str = DEFAULT_CHAR_ID):
     """把画像写回磁盘"""
     path = _profile_write_path(user_id, char_id=char_id)
     try:
@@ -281,12 +282,12 @@ def _save(user_id: str, profile: dict, *, char_id: str = "yexuan"):
         log_error("user_profile._save", e)
 
 
-def save(user_id: str, profile: dict, *, char_id: str = "yexuan"):
+def save(user_id: str, profile: dict, *, char_id: str = DEFAULT_CHAR_ID):
     """公开接口：直接将 profile 写回磁盘（admin 覆盖编辑用）"""
     _save(user_id, profile, char_id=char_id)
 
 
-def delete_important_fact(user_id: str, index: int, *, char_id: str = "yexuan") -> bool:
+def delete_important_fact(user_id: str, index: int, *, char_id: str = DEFAULT_CHAR_ID) -> bool:
     """Delete one important_fact entry by list index.
 
     Returns True if removed, False if index out of range.
@@ -316,7 +317,7 @@ def delete_important_fact(user_id: str, index: int, *, char_id: str = "yexuan") 
     return True
 
 
-def overwrite_important_fact(user_id: str, index: int, new_text: str, *, char_id: str = "yexuan", tag: str = "misc") -> bool:
+def overwrite_important_fact(user_id: str, index: int, new_text: str, *, char_id: str = DEFAULT_CHAR_ID, tag: str = "misc") -> bool:
     """Overwrite one important_fact entry by list index with new_text.
 
     Returns True if updated, False if index out of range.
@@ -348,7 +349,7 @@ def overwrite_important_fact(user_id: str, index: int, new_text: str, *, char_id
     return True
 
 
-def clear(user_id: str, *, char_id: str = "yexuan"):
+def clear(user_id: str, *, char_id: str = DEFAULT_CHAR_ID):
     """清空用户画像（admin 用）"""
     _save(user_id, dict(_DEFAULT_PROFILE), char_id=char_id)
 
@@ -425,7 +426,7 @@ def get_affection_level(user_id: str) -> dict:
 
 # ─── 生理期 ────────────────────────────────────────────────────────────────────
 
-def get_period_info(user_id: str, *, char_id: str = "yexuan") -> dict:
+def get_period_info(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> dict:
     """读取生理期信息，返回包含 last_period_date 字段的字典"""
     profile = load(user_id, char_id=char_id)
     return {"last_period_date": profile.get("last_period_date")}

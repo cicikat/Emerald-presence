@@ -35,6 +35,10 @@ def _read_default_char_id() -> str:
 
 _DEFAULT_CHAR_ID: str = _read_default_char_id()
 
+# 公开导出别名（Brief 25 P1）：外部模块的 `char_id: str = ...` 默认参数统一 import 这个，
+# 而不是各自硬编码字面量 "yexuan"。语义不变，值在 import 时冻结自 character.default。
+DEFAULT_CHAR_ID: str = _DEFAULT_CHAR_ID
+
 # ── 多角色布局开关（默认 legacy = 维持旧单角色路径）──────────────────────────────
 # S5 将 character_inner 类翻至 v1（global → per_char）；
 # S6 将 reality 类翻至 v1（per_user → per_char_user）：
@@ -168,6 +172,8 @@ class DataPaths:
         return self._p("group_context")
 
     def yexuan_inner_diary(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
+        # "yexuan_inner" path segment below is a legacy on-disk layout name (pre-multi-char),
+        # whitelisted in tests/test_no_hardcoded_character.py — see Brief 25 §3 P1/P3.
         if _LAYOUT_CHARACTER_INNER == "legacy":
             return self._p("yexuan_inner", "diary")
         return self._p("runtime", "characters", char_id, "inner", "diary")

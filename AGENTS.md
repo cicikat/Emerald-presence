@@ -102,6 +102,7 @@
 | web 与梦境来源同等隔离，不固化 | `web_recall_result` 非空时 `post_process` 携带 `web_echo=True`，`fixation_pipeline.handler_summarize_to_midterm` 与 dream_echo 同路跳过 mid_term/episodic/identity 写入 |
 | 工具探针（声明式） | `core/tool_dispatcher.py` → `get_probe_prompt()` / `_TOOL_REGISTRY` |
 | 工具已读指纹日志（P2，去重防重读） | `core/memory/tool_read_log.py`（`persist=True` 工具：read_diary / read_watch / read_toy_file / search_diary） |
+| 工具动作痕迹（Brief 27，跨轮"你最近做过的操作"，层 `10.5_action_trace`） | `core/memory/action_trace.py`（`execute()` 收口埋点 + `event_log_echo` 经 `capture_turn` 回流） |
 | trusted_user_text / probe grounding | `main.py` `_trusted_user_text` 在 media merge 前捕获；`admin/routers/chat.py` `run_owner_chat_turn(trusted_user_text=)` |
 | execute() origin 闸门 | `core/tool_dispatcher.py` → `_EXECUTE_ALLOWED_ORIGINS` / `execute(origin=)` |
 | Path B 守卫（意图反射去重） | `core/pipeline.py` → `_parse_and_execute_intent()` guards (a/b/c) + `_INTENT_LAST_ACTION` c2 幂等 |
@@ -135,6 +136,14 @@ python run_test.py
 7. WebSocket 客户端必须绕过系统代理。`websocket-client` 库会自动读取
    `HTTP_PROXY` / `HTTPS_PROXY` 环境变量，必须在 `run_forever` 调用前
    临时清除（连接结束后恢复）。`http_proxy_host=""` 这种参数不顶用。
+8. **新代码禁止字面角色名/用户名。** 进入 LLM prompt 或展示给用户的文本用
+   `char_name`（现实侧 `core.character_name_provider.get_char_name()` /
+   梦境侧 `character.name`）与 `user_name`
+   （`core.config_loader.get_user_display_name()`）插值，不写死"叶瑄"/"风谕"这类
+   具体名字；路径默认参数用 `char_id: str = DEFAULT_CHAR_ID`
+   （`from core.data_paths import DEFAULT_CHAR_ID`），不写死 `"yexuan"`。
+   守门测试：`tests/test_no_hardcoded_character.py`（字面角色名/用户名 + 协议兼容
+   字段白名单）、`tests/test_r3_scope_lint.py`（`char_id="yexuan"` 默认参数）。
 
 ---
 

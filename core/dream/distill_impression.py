@@ -4,7 +4,7 @@ Dream → impression distiller.
 Called after DREAM_CLOSING (soft or hard), after generate_summary.
 Reads the archived dream log and asks the LLM to emit a structured impression
 containing: a plot summary (what happened), up to 2 vivid verbatim lines, an
-overall impression text in 叶瑄's first-person voice, emotional tags, and a
+overall impression text in the character's first-person voice, emotional tags, and a
 weight value.
 
 I4 contract (write-side): distill_impression only writes to impression_store —
@@ -26,6 +26,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ _DISTILL_SYSTEM = """\
 
 
 async def distill_impression(
-    uid: str, dream_id: str, exit_type: str, *, char_id: str = "yexuan"
+    uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_CHAR_ID
 ) -> None:
     """Top-level entry — failure is silently downgraded to a warning."""
     try:
@@ -73,7 +74,7 @@ async def distill_impression(
         )
 
 
-async def _distill(uid: str, dream_id: str, exit_type: str, *, char_id: str = "yexuan") -> None:
+async def _distill(uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_CHAR_ID) -> None:
     from core.sandbox import get_paths
     from core import llm_client
     from core.dream.impression_store import append_impression

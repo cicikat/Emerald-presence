@@ -16,6 +16,7 @@ from core.memory.path_resolver import resolve_path
 from core.memory.scope import MemoryScope, require_character_id
 from core.safe_write import safe_write_json
 from core.sandbox import safe_user_id
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -259,13 +260,13 @@ def _log_turn_group_score(user_id, group: list[dict], selected: bool, total: flo
     )
 
 
-def _history_path(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _history_path(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     require_character_id(char_id)
     scope = MemoryScope.reality_scope(safe_user_id(user_id), char_id)
     return resolve_path(scope, "history")
 
 
-def _history_write_path(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _history_write_path(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     """写路径：始终写新布局。"""
     require_character_id(char_id)
     scope = MemoryScope.reality_scope(safe_user_id(user_id), char_id)
@@ -274,7 +275,7 @@ def _history_write_path(user_id: str, *, char_id: str = "yexuan") -> Path:
     return p
 
 
-def load(user_id: str, *, char_id: str = "yexuan") -> list[dict]:
+def load(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> list[dict]:
     """
     读取用户的短期对话历史（完整历史，不做截断）
 
@@ -301,7 +302,7 @@ def load(user_id: str, *, char_id: str = "yexuan") -> list[dict]:
     return []
 
 
-def get_history(user_id: str, max_turns: int | None = None, *, char_id: str = "yexuan") -> list[dict]:
+def get_history(user_id: str, max_turns: int | None = None, *, char_id: str = DEFAULT_CHAR_ID) -> list[dict]:
     """
     读取用户的短期对话历史，支持按轮数截断。
 
@@ -334,7 +335,7 @@ def get_history(user_id: str, max_turns: int | None = None, *, char_id: str = "y
     return [entry for group in groups[-max_turns:] for entry in group]
 
 
-def load_for_prompt(user_id, *, budget_rounds=None, near_k=NEAR_K, char_id: str = "yexuan") -> list[dict]:
+def load_for_prompt(user_id, *, budget_rounds=None, near_k=NEAR_K, char_id: str = DEFAULT_CHAR_ID) -> list[dict]:
     """读取已 sanitize 的 short_term，并按 turn-group 加权选择 prompt 子集。"""
     raw = load(user_id, char_id=char_id)
     # trigger_stub 是系统触发锚点（内容含内部 trigger_name 明文），绝不能投影进 prompt。
@@ -398,7 +399,7 @@ def append(
     content: str,
     turn_id: str | None = None,
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
     source: str | None = None,
     speaker_id: str | None = None,
 ) -> bool:
@@ -449,7 +450,7 @@ def append(
     return _save(user_id, history, char_id=char_id)
 
 
-def _save(user_id: str, history: list[dict], *, char_id: str = "yexuan") -> bool:
+def _save(user_id: str, history: list[dict], *, char_id: str = DEFAULT_CHAR_ID) -> bool:
     """把历史记录写回磁盘"""
     path = _history_write_path(user_id, char_id=char_id)
     try:
@@ -563,7 +564,7 @@ def detect_reply_length_collapse(
     return None
 
 
-def clear(user_id: str, *, char_id: str = "yexuan"):
+def clear(user_id: str, *, char_id: str = DEFAULT_CHAR_ID):
     """清空指定用户的短期历史（admin 用）"""
     _save(user_id, [], char_id=char_id)
 
@@ -571,10 +572,10 @@ def clear(user_id: str, *, char_id: str = "yexuan"):
 class ShortTermMemory:
     """短期记忆类，封装模块级函数，供外部按类方式导入使用"""
 
-    def load(self, user_id: str, *, char_id: str = "yexuan") -> list[dict]:
+    def load(self, user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> list[dict]:
         return load(user_id, char_id=char_id)
 
-    def get_history(self, user_id: str, max_turns: int | None = None, *, char_id: str = "yexuan") -> list[dict]:
+    def get_history(self, user_id: str, max_turns: int | None = None, *, char_id: str = DEFAULT_CHAR_ID) -> list[dict]:
         return get_history(user_id, max_turns, char_id=char_id)
 
     def append(
@@ -584,7 +585,7 @@ class ShortTermMemory:
         content: str,
         turn_id: str | None = None,
         *,
-        char_id: str = "yexuan",
+        char_id: str = DEFAULT_CHAR_ID,
         source: str | None = None,
         speaker_id: str | None = None,
     ) -> bool:
@@ -598,5 +599,5 @@ class ShortTermMemory:
             speaker_id=speaker_id,
         )
 
-    def clear(self, user_id: str, *, char_id: str = "yexuan"):
+    def clear(self, user_id: str, *, char_id: str = DEFAULT_CHAR_ID):
         clear(user_id, char_id=char_id)

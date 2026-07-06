@@ -13,6 +13,7 @@ from core.error_handler import log_error
 from core.memory.path_resolver import resolve_path
 from core.memory.scope import MemoryScope, require_character_id
 from core.safe_write import safe_write_json
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +21,13 @@ EXPIRE_SECONDS = 12 * 3600
 MAX_EVENTS = 20
 
 
-def _read_file(uid: str, *, char_id: str = "yexuan") -> Path:
+def _read_file(uid: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(uid), char_id)
     return resolve_path(scope, "mid_term")
 
 
-def _write_file(uid: str, *, char_id: str = "yexuan") -> Path:
+def _write_file(uid: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(uid), char_id)
     p = resolve_path(scope, "mid_term")
@@ -34,7 +35,7 @@ def _write_file(uid: str, *, char_id: str = "yexuan") -> Path:
     return p
 
 
-def load(uid: str, *, char_id: str = "yexuan") -> list[dict]:
+def load(uid: str, *, char_id: str = DEFAULT_CHAR_ID) -> list[dict]:
     """读取所有未过期事件，按 ts 升序返回。文件不存在返回 []。"""
     path = _read_file(uid, char_id=char_id)
     if not path.exists():
@@ -56,7 +57,7 @@ def append(
     mid_id: str | None = None,
     source_turn_id: str | None = None,
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
     source: str = "",
     memory_strength: float = 1.0,
     is_trigger_turn: bool = False,
@@ -100,7 +101,7 @@ def append(
         log_error("mid_term.append", e)
 
 
-def mark_promoted(uid: str, mid_id: str, ep_id: str, *, char_id: str = "yexuan") -> None:
+def mark_promoted(uid: str, mid_id: str, ep_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> None:
     """将 mid_term 里某条 entry 的 promoted_to_episodic_id 字段置为 ep_id。幂等。"""
     read_path = _read_file(uid, char_id=char_id)
     write_path = _write_file(uid, char_id=char_id)
@@ -121,7 +122,7 @@ def mark_promoted(uid: str, mid_id: str, ep_id: str, *, char_id: str = "yexuan")
         log_error("mid_term.mark_promoted", e)
 
 
-def delete_event(uid: str, mid_id: str, *, char_id: str = "yexuan") -> bool:
+def delete_event(uid: str, mid_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> bool:
     """Delete one mid-term event by mid_id.
 
     Returns True if found and removed. Appends provenance record on success.
@@ -163,7 +164,7 @@ def delete_event(uid: str, mid_id: str, *, char_id: str = "yexuan") -> bool:
         return False
 
 
-def format_for_prompt(uid: str, *, char_id: str = "yexuan") -> str:
+def format_for_prompt(uid: str, *, char_id: str = DEFAULT_CHAR_ID) -> str:
     """读取 + 时间桶分组 + 渲染成 prompt 段落。空返空串。"""
     events = load(uid, char_id=char_id)
     if not events:

@@ -1,4 +1,4 @@
-"""garden_daily — 每天扫一次 harvest 过期 / handle / vase 枯萎，关键事件让叶瑄说话。"""
+"""garden_daily — 每天扫一次 harvest 过期 / handle / vase 枯萎，关键事件让角色说话。"""
 
 import logging
 import time

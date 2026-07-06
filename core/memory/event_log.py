@@ -26,6 +26,7 @@ from core.memory.path_resolver import resolve_path
 from core.memory.scope import MemoryScope, require_character_id
 from core.migration import for_read
 from core.sandbox import get_paths, safe_user_id
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +38,14 @@ _TURN_ID_RE = re.compile(r"turn_id:(\S+)")
 _SPEAKER_META_RE = re.compile(r"^>\s*.*\bspeaker:(\w+)")
 
 
-def _event_log_write_dir(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _event_log_write_dir(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     """写目录：始终写新布局 runtime/memory/{char_id}/{uid}/event_log/。"""
     require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(user_id), char_id)
     return resolve_path(scope, "event_log")
 
 
-def _event_log_read_dir(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _event_log_read_dir(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     """读目录：新目录存在时读新，否则降级旧路径。"""
     require_character_id(char_id)
     uid = safe_user_id(user_id)
@@ -55,7 +56,7 @@ def _event_log_read_dir(user_id: str, *, char_id: str = "yexuan") -> Path:
     return new if new.is_dir() else old
 
 
-def _day_file_read(user_id: str, date: datetime, *, char_id: str = "yexuan") -> Path:
+def _day_file_read(user_id: str, date: datetime, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     """读：指定日期日志文件，新存在读新，否则降级旧路径。"""
     require_character_id(char_id)
     uid = safe_user_id(user_id)
@@ -66,7 +67,7 @@ def _day_file_read(user_id: str, date: datetime, *, char_id: str = "yexuan") -> 
     return for_read(new, old)
 
 
-def _day_file_write(user_id: str, date: datetime, *, char_id: str = "yexuan") -> Path:
+def _day_file_write(user_id: str, date: datetime, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     """写：指定日期日志文件，始终写新布局，保证目录存在。"""
     require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(user_id), char_id)
@@ -75,7 +76,7 @@ def _day_file_write(user_id: str, date: datetime, *, char_id: str = "yexuan") ->
     return d / f"{date.strftime('%Y-%m-%d')}.md"
 
 
-def _full_log_file_write(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _full_log_file_write(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     """写：full_log.md，始终写新布局。"""
     require_character_id(char_id)
     scope = MemoryScope.reality_scope(str(user_id), char_id)
@@ -84,7 +85,7 @@ def _full_log_file_write(user_id: str, *, char_id: str = "yexuan") -> Path:
     return d / "full_log.md"
 
 
-def _ensure_dir(user_id: str, *, char_id: str = "yexuan"):
+def _ensure_dir(user_id: str, *, char_id: str = DEFAULT_CHAR_ID):
     """确保用户日志写入目录存在（写新布局）。"""
     _event_log_write_dir(user_id, char_id=char_id).mkdir(parents=True, exist_ok=True)
 
@@ -211,7 +212,7 @@ def append(
     turn_id: str | None = None,
     trigger_name: str = "",
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
 ) -> bool:
     """
     追加一条对话记录到当天日志和 full_log.md。
@@ -282,7 +283,7 @@ def _already_appended(path: Path, line: str, turn_id: str | None) -> bool:
         return False
 
 
-def get_recent_days(user_id: str, days: int = 3, *, char_id: str = "yexuan") -> str:
+def get_recent_days(user_id: str, days: int = 3, *, char_id: str = DEFAULT_CHAR_ID) -> str:
     """
     读取最近 N 天的日志原文，拼接成一个字符串返回。
     同时读取新路径 memory/{char_id}/{uid}/event_log/ 与旧路径 event_log/{uid}/，
@@ -324,7 +325,7 @@ async def search(
     query: str,
     llm_client=None,
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
     return_trace: bool = False,
     query_vec: list | None = None,
 ) -> str | tuple:
@@ -490,7 +491,7 @@ def get_highlights(user_id: str, days: int = 2, max_lines: int = 5) -> str:
     return "；".join(selected) if selected else ""
 
 
-def delete_day(user_id: str, date_str: str, *, char_id: str = "yexuan") -> bool:
+def delete_day(user_id: str, date_str: str, *, char_id: str = DEFAULT_CHAR_ID) -> bool:
     """Delete (unlink) the YYYY-MM-DD.md file for a given day.
 
     Only removes the new-layout file; does not touch old-layout path or full_log.md.
@@ -536,7 +537,7 @@ class EventLog:
     所有方法都代理到模块级函数。
     """
 
-    def append(self, user_id: str, role: str, content: str, emotion: str = "neutral", intensity: int = 0, *, char_id: str = "yexuan"):
+    def append(self, user_id: str, role: str, content: str, emotion: str = "neutral", intensity: int = 0, *, char_id: str = DEFAULT_CHAR_ID):
         append(user_id, role, content, emotion=emotion, intensity=intensity, char_id=char_id)
 
     def get_recent_days(self, user_id: str, days: int = 3) -> str:

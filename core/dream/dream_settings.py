@@ -9,7 +9,7 @@ memory_access tiers (D4_frozen_reality content):
   relationship_summary — + recent_reality_context + profile_impression
   full_snapshot        — + episodic_summary + mid_term_context
 
-boundary_level (D5 body projection visibility for 叶瑄):
+boundary_level (D5 body projection visibility for the character):
   vague / body_perceptible (default) / numbers_visible / threshold_break(seam)
 
 Migration from legacy booleans:

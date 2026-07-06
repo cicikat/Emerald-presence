@@ -54,7 +54,7 @@
   "winner": null,
   "last_move": {"x": 8, "y": 8, "player": "white", "move_no": 2, "source": "ai",
                 "style": "gentle", "base_style": "balanced", "style_source": "activity_chat_control"},
-  "opponent": "yexuan_ai",
+  "opponent": "character_ai",
   "ai_player": "white",
   "ai_style": "balanced",
   "ai_response_mode": "pending",
@@ -71,7 +71,7 @@
 | `status` | string | `"active"` / `"completed"` |
 | `winner` | string\|null | `"black"` / `"white"` / `null` |
 | `last_move` | dict\|null | 最近一步落子信息 |
-| `opponent` | string | `"human"` / `"yexuan_ai"` |
+| `opponent` | string | `"human"` / `"character_ai"` |
 | `ai_player` | string | AI 执子颜色，固定 `"white"` |
 | `ai_style` | string | `"balanced"` / `"gentle"` / `"serious"` / `"teaching"`（session 基础风格） |
 | `ai_response_mode` | string | `"auto"`（立即 AI 落子）/ `"pending"`（等待 /ai_move） |
@@ -88,7 +88,7 @@
 {
   "board_size": 15,
   "uid": "",
-  "opponent": "yexuan_ai",
+  "opponent": "character_ai",
   "ai_style": "balanced",
   "ai_response_mode": "pending"
 }
@@ -104,7 +104,7 @@
   "board": [[null, ...], ...],
   "current_turn": "black",
   "status": "active",
-  "opponent": "yexuan_ai",
+  "opponent": "character_ai",
   "ai_player": "white",
   "ai_style": "balanced",
   "ai_response_mode": "pending",
@@ -183,7 +183,7 @@
 }
 ```
 
-**AI 自动落子流程（`opponent=yexuan_ai`，`ai_response_mode="auto"`）：**
+**AI 自动落子流程（`opponent=character_ai`，`ai_response_mode="auto"`）：**
 1. 应用用户落子，检查用户是否赢
 2. 若未结束且 `current_turn == ai_player`：调用 `choose_gomoku_ai_move(board, ai_player, style)` 得到合法点
 3. 应用 AI 落子，再次检查胜负
@@ -226,7 +226,7 @@
   "winner": null,
   "pending_ai_turn": false,
   "ai_player": "white",
-  "opponent": "yexuan_ai",
+  "opponent": "character_ai",
   "ai_style": "balanced",
   "ai_response_mode": "pending"
 }
@@ -374,7 +374,7 @@ total = attack_score + defense_score + center_bias * 2 + adjacency_bias * 10
 
 摘要文本仅含"参与方 + 步数 + 结果"，不含棋谱坐标列表。
 
-- `opponent=yexuan_ai`：`"用户和他进行了一局五子棋。用户执黑，他执白，对局共 N 手，结果：{黑棋获胜|白棋获胜|未分胜负}。"`
+- `opponent=character_ai`：`"用户和他进行了一局五子棋。用户执黑，他执白，对局共 N 手，结果：{黑棋获胜|白棋获胜|未分胜负}。"`
 - `opponent=human`：`"用户进行了一局本地双人五子棋，对局共 N 手，结果：{黑棋获胜|白棋获胜|未分胜负}。"`
 
 ### 存储路径
@@ -390,7 +390,7 @@ data/runtime/activity/{char_id}/{uid}/gomoku/{session_id}/summary.json
 | `text` | string | 摘要文本 |
 | `move_count` | int | 对局总步数 |
 | `winner` | string\|null | `"black"` / `"white"` / `null` |
-| `opponent` | string | `"human"` / `"yexuan_ai"` |
+| `opponent` | string | `"human"` / `"character_ai"` |
 | `generated_at` | string | ISO 8601 UTC 时间戳 |
 
 ### 主记忆接入（待后续实现）

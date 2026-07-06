@@ -7,7 +7,7 @@ Chess Activity 棋局逻辑 (P0 + P1-AI)
 
 P1 新增：
 - make_initial_state 接受 opponent / ai_style 参数
-- apply_move 用户落子后若 opponent=yexuan_ai 且轮到 AI，设 pending_ai_turn=True
+- apply_move 用户落子后若 opponent=character_ai 且轮到 AI，设 pending_ai_turn=True
 - apply_ai_move() 执行待处理 AI 落子
 """
 from __future__ import annotations
@@ -18,8 +18,17 @@ import chess
 
 STARTING_FEN: str = chess.STARTING_FEN
 
-_VALID_OPPONENTS = frozenset({"human", "yexuan_ai"})
+_VALID_OPPONENTS = frozenset({"human", "character_ai"})
 _VALID_STYLES = frozenset({"balanced", "gentle", "serious", "teaching"})
+
+# Brief 25 §3 P2: "yexuan_ai" -> "character_ai" rename, back-compat normalization.
+_LEGACY_OPPONENT_ALIASES: dict[str, str] = {"yexuan_ai": "character_ai"}
+
+
+def _normalize_opponent(value: str) -> str:
+    """Map legacy opponent values to their current canonical name; unknown values pass through
+    unchanged so _VALID_OPPONENTS validation can reject them with a clear error."""
+    return _LEGACY_OPPONENT_ALIASES.get(value, value)
 
 
 def _turn_str(board: chess.Board) -> str:
@@ -51,6 +60,7 @@ def make_initial_state(
     Uses the standard starting position when fen is None.
     Raises ValueError for an invalid FEN string or unknown opponent/style.
     """
+    opponent = _normalize_opponent(opponent)
     if opponent not in _VALID_OPPONENTS:
         raise ValueError(f"opponent 必须是 {sorted(_VALID_OPPONENTS)}，收到 {opponent!r}")
     if ai_style not in _VALID_STYLES:
@@ -65,7 +75,7 @@ def make_initial_state(
             raise ValueError(f"无效的 FEN: {e}") from e
 
     # User always plays white (first move); AI plays black when enabled.
-    ai_player = "black" if opponent == "yexuan_ai" else None
+    ai_player = "black" if opponent == "character_ai" else None
 
     return {
         "fen": board.fen(),
@@ -137,14 +147,14 @@ def apply_move(state: dict, move_str: str) -> dict:
     result, termination = _check_game_over(board)
     game_status = "completed" if result is not None else "active"
 
-    opponent = state.get("opponent", "human")
+    opponent = _normalize_opponent(state.get("opponent", "human"))
     ai_player = state.get("ai_player")
     ai_style = state.get("ai_style", "balanced")
 
     # If game still active and AI opponent, check if it's now AI's turn.
     pending_ai_turn = (
         game_status == "active"
-        and opponent == "yexuan_ai"
+        and opponent == "character_ai"
         and ai_player is not None
         and _turn_str(board) == ai_player
     )
@@ -169,6 +179,7 @@ def apply_ai_move(state: dict) -> dict:
 
     Raises ValueError if there is no pending AI turn or the game is over.
     """
+    opponent = _normalize_opponent(state.get("opponent", "character_ai"))
     if state.get("status") != "active":
         raise ValueError("棋局已结束，无法 AI 落子")
     if not state.get("pending_ai_turn"):
@@ -219,7 +230,7 @@ def apply_ai_move(state: dict) -> dict:
         "termination": termination,
         "move_history": history,
         "last_move": entry,
-        "opponent": state.get("opponent", "yexuan_ai"),
+        "opponent": opponent,
         "ai_player": ai_player_str,
         "ai_style": ai_style,
         "pending_ai_turn": False,

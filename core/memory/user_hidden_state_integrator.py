@@ -58,6 +58,7 @@ from core.memory.user_hidden_state import (
     nudge_embodied_ease,
     reinforce_body_memory,
 )
+from core.data_paths import DEFAULT_CHAR_ID
 from core.memory.user_hidden_state_store import load_hidden_state, save_hidden_state
 from core.write_envelope import SourceType, WriteEnvelope
 
@@ -300,7 +301,7 @@ def integrate_event_and_save(
     write_envelope: WriteEnvelope,
     now: str,
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
 ) -> tuple[UserHiddenState, IntegratorResult]:
     """Load hidden state, apply a Reality event, and persist if permitted.
 
@@ -339,7 +340,7 @@ def integrate_impression_and_save(
     write_envelope: WriteEnvelope,
     now: str,
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
 ) -> tuple[UserHiddenState, IntegratorResult]:
     """Load hidden state, apply a Dream-derived impression, and persist if permitted.
 
@@ -590,7 +591,7 @@ def integrate_afterglow_and_save(
     write_envelope: WriteEnvelope,
     now: str,
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
 ) -> tuple[UserHiddenState, IntegratorResult]:
     """Load hidden state, apply afterglow residue, and persist if permitted.
 
@@ -630,7 +631,7 @@ def integrate_body_cue_and_save(
     write_envelope: WriteEnvelope,
     now: str,
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
 ) -> tuple[UserHiddenState, IntegratorResult]:
     """Load hidden state, reinforce a body-memory cue, and persist if permitted.
 

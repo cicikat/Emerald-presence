@@ -3,7 +3,7 @@ core/reality_output_guard — shared reality output guard for all channels.
 
 Applies basic AI-side output filters that are channel-agnostic:
   1. Remove <tool_call>…</tool_call> residue tags (xml_fallback artefacts)
-  2. Remove character-name prefix  (叶瑄：, 叶瑄:, [叶瑄], 叶瑄 说：)
+  2. Remove character-name prefix  (角色：, 角色:, [角色], 角色 说：)
   3. Filter AI self-disclosure sentences (作为一个AI…)
 
 Design constraints:

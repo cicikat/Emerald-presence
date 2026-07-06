@@ -133,7 +133,7 @@ async def dream_exit(_auth=Depends(require_scopes("activity"))):
     return {"ok": True, "exited": True}
 
 
-@router.post("/dream/wake", summary="软挽留闸门（满足门控时叶瑄挽留一次；否则直接硬退）")
+@router.post("/dream/wake", summary="软挽留闸门（满足门控时角色挽留一次；否则直接硬退）")
 async def dream_wake(_auth=Depends(require_scopes("activity"))):
     """
     Soft retention gate called when user taps the WAKE button.
@@ -174,6 +174,8 @@ async def dream_wake(_auth=Depends(require_scopes("activity"))):
         return {"retained": False, "exited": True}
 
     # Transition to EXIT_REQUESTED and mark retention offered
+    from core.dream.dream_flow import append_status_shift
+    state = append_status_shift(state, "exit_requested")
     state["status"] = DreamStatus.DREAM_EXIT_REQUESTED.value
     state["retention_offered_dream_id"] = dream_id
     write_state(uid, state)
@@ -185,6 +187,8 @@ async def dream_wake(_auth=Depends(require_scopes("activity"))):
         await force_exit_dream(uid)
         return {"retained": False, "exited": True}
 
+    state = append_status_shift(state, "retained")
+    write_state(uid, state)
     return {"retained": True, "retention_text": retention_text, "dream_id": dream_id}
 
 
@@ -293,8 +297,9 @@ async def dream_state_get(_auth=Depends(require_scopes("activity"))):
     Does not read mood_state, user_identity, or any reality store.
 
     body.{heat,sensitivity,tension} — user always sees own numbers (orthogonal to
-      boundary_level, which controls 叶瑄's perception only).
-    yexuan_tension — 叶瑄's dream-local emotional tension (0.0–1.0).
+      boundary_level, which controls the character's perception only).
+    char_tension (yexuan_tension deprecated alias) — the character's dream-local
+      emotional tension (0.0–1.0).
     HUD fields: emotion_label, scene_label, emotion_tension, boundary_intrusion,
       intimacy_tendency, obsession, dream_stability, dream_depth,
       physiological_arousal — all int 0–100.
@@ -330,9 +335,11 @@ async def dream_state_get(_auth=Depends(require_scopes("activity"))):
             "sensitivity": round(body.sensitivity, 2),
             "tension": round(body.tension, 2),
         },
-        "yexuan_tension": float(state.get("emotional_tension", 0.0)),
+        "char_tension": float(state.get("emotional_tension", 0.0)),
+        "yexuan_tension": float(state.get("emotional_tension", 0.0)),  # deprecated alias, see Brief 25 §3 P2
         "scene_state": state.get("scene_state"),
         "symbolic_anchors": list(state.get("symbolic_anchors") or []),
+        "flow_entries": list(state.get("flow_entries") or []),
     }
 
     # HUD v1: EMA smooth + anchor_charge + world corrections

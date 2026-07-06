@@ -43,39 +43,16 @@ def _iter_core_py(root: Path = CORE_ROOT):
 
 # core/data_paths.py is the canonical path-authority class; its methods carry
 # backward-compat defaults intentionally so call-sites can migrate incrementally.
-# All other entries are EXISTING VIOLATIONS scheduled for future migration.
+#
+# Brief 25 §3 P1 migrated every other former violation to
+# `char_id: str = DEFAULT_CHAR_ID` (imported from core.data_paths). The only
+# remaining entry is an intentional functional gate, not a path/default hardcode.
 CHAR_ID_DEFAULT_ALLOWLIST: frozenset[str] = frozenset({
     "core/data_paths.py",                          # canonical path authority — by design
 
-    # existing violations / to migrate
-    "core/pipeline.py",
-    "core/prompt_builder.py",
-    "core/tools/reminder.py",
-    "core/garden/manager.py",
-    # memory subsystem
-    "core/memory/short_term.py",
-    "core/memory/mid_term.py",
-    "core/memory/episodic_memory.py",
-    "core/memory/event_log.py",
-    "core/memory/fixation_pipeline.py",
-    "core/memory/diary_context.py",
-    "core/memory/mood_state.py",
-    "core/memory/user_profile.py",
-    "core/memory/user_identity.py",
-    "core/memory/user_hidden_state.py",
-    "core/memory/user_hidden_state_store.py",
-    "core/memory/user_hidden_state_integrator.py",
-    # "core/memory/character_growth.py" — R8-E2: update(char_id="yexuan") deleted; no longer a violation
-    # dream subsystem
-    "core/dream/dream_afterglow.py",
-    "core/dream/dream_context.py",
-    "core/dream/dream_exit_afterglow.py",
-    "core/dream/dream_log.py",
-    "core/dream/dream_pipeline.py",
-    "core/dream/dream_summary.py",
-    "core/dream/distill_impression.py",
-    "core/dream/impression_loader.py",
-    "core/dream/impression_store.py",
+    "core/dream/dream_pipeline.py",                # enter_dream(): "dream subsystem supports
+                                                    # yexuan only" fail-closed gate — not a
+                                                    # path/default-param hardcode, left as-is.
 })
 
 _GUARDED_PARAM_NAMES: frozenset[str] = frozenset({"char_id", "character_id"})

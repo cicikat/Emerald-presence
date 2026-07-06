@@ -75,7 +75,7 @@ def _parse_day(text: str) -> list[dict]:
       ## HH:MM
       **用户**：...
       > turn_id:...
-      **叶瑄**：...
+      **他**：...
       > emotion:... intensity:N turn_id:...
       ---
     返回 [{"time": "HH:MM", "user": "...", "assistant": "..."}]
@@ -127,7 +127,7 @@ def _parse_day(text: str) -> list[dict]:
                     state = "in_user"
             elif state == "in_user":
                 if stripped.startswith("**") and "**：" in stripped or "**:" in stripped:
-                    # 可能是叶瑄行
+                    # 可能是他行
                     char_match = re.match(r'^\*\*(.+?)\*\*[：:](.*)', stripped)
                     if char_match and char_match.group(1) != "用户":
                         assistant_lines.append(char_match.group(2))

@@ -17,6 +17,7 @@ from core.memory.path_resolver import resolve_path
 from core.sandbox import safe_user_id
 from core.safe_write import safe_write_json
 from core.llm_output_validator import record_failure
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +26,14 @@ class EpisodicCorruptError(Exception):
     """Raised when episodic.json exists but cannot be parsed. Prevents silent memory wipe."""
 
 
-def _mem_read_file(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _mem_read_file(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     require_character_id(char_id)
     uid = safe_user_id(user_id)
     scope = MemoryScope.reality_scope(uid, char_id)
     return resolve_path(scope, "episodic")
 
 
-def _mem_write_file(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _mem_write_file(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     require_character_id(char_id)
     uid = safe_user_id(user_id)
     scope = MemoryScope.reality_scope(uid, char_id)
@@ -41,14 +42,14 @@ def _mem_write_file(user_id: str, *, char_id: str = "yexuan") -> Path:
     return p
 
 
-def _index_read_file(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _index_read_file(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     require_character_id(char_id)
     uid = safe_user_id(user_id)
     scope = MemoryScope.reality_scope(uid, char_id)
     return resolve_path(scope, "memory_index")
 
 
-def _index_write_file(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _index_write_file(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     require_character_id(char_id)
     uid = safe_user_id(user_id)
     scope = MemoryScope.reality_scope(uid, char_id)
@@ -57,7 +58,7 @@ def _index_write_file(user_id: str, *, char_id: str = "yexuan") -> Path:
     return p
 
 
-def _load_memories(user_id: str, *, char_id: str = "yexuan") -> list:
+def _load_memories(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> list:
     require_character_id(char_id)  # guard before try — ValueError must not be swallowed
     p = _mem_read_file(user_id, char_id=char_id)
     try:
@@ -72,7 +73,7 @@ def _load_memories(user_id: str, *, char_id: str = "yexuan") -> list:
         raise EpisodicCorruptError(str(p)) from e
 
 
-def _save_memories(user_id: str, memories: list, *, char_id: str = "yexuan") -> None:
+def _save_memories(user_id: str, memories: list, *, char_id: str = DEFAULT_CHAR_ID) -> None:
     p = _mem_write_file(user_id, char_id=char_id)
     # Guard: refuse to overwrite a non-empty file with an empty list — almost certainly
     # means an upstream _load_memories failure leaked through.
@@ -85,7 +86,7 @@ def _save_memories(user_id: str, memories: list, *, char_id: str = "yexuan") -> 
     safe_write_json(p, memories)
 
 
-def load_unconsolidated(user_id: str, *, char_id: str = "yexuan") -> list[dict]:
+def load_unconsolidated(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> list[dict]:
     """供 consolidate 类慢任务读取待处理 episodic 的接口。
 
     返回所有 consolidated_at 为 None 的条目，按 timestamp 升序排列，
@@ -96,7 +97,7 @@ def load_unconsolidated(user_id: str, *, char_id: str = "yexuan") -> list[dict]:
     return sorted(raw, key=lambda m: m.get("timestamp", 0))
 
 
-def _load_index(user_id: str, *, char_id: str = "yexuan") -> dict:
+def _load_index(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> dict:
     require_character_id(char_id)  # guard before try — ValueError must not be swallowed
     p = _index_read_file(user_id, char_id=char_id)
     try:
@@ -114,7 +115,7 @@ def _load_index(user_id: str, *, char_id: str = "yexuan") -> dict:
         return {}
 
 
-def _save_index(user_id: str, index: dict, *, char_id: str = "yexuan") -> None:
+def _save_index(user_id: str, index: dict, *, char_id: str = DEFAULT_CHAR_ID) -> None:
     safe_write_json(_index_write_file(user_id, char_id=char_id), index)
 
 
@@ -138,7 +139,7 @@ def _texture_similarity(a: str, b: str) -> float:
     return intersection / union if union > 0 else 0.0
 
 
-def _rebuild_index(user_id: str, memories: list, *, char_id: str = "yexuan") -> None:
+def _rebuild_index(user_id: str, memories: list, *, char_id: str = DEFAULT_CHAR_ID) -> None:
     """按标签建倒排索引：tag -> [memory_id, ...]"""
     index = {}
     for mem in memories:
@@ -150,7 +151,7 @@ def _rebuild_index(user_id: str, memories: list, *, char_id: str = "yexuan") -> 
     _save_index(user_id, index, char_id=char_id)
 
 
-def write_episode(user_id: str, episode: dict, *, char_id: str = "yexuan") -> None:
+def write_episode(user_id: str, episode: dict, *, char_id: str = DEFAULT_CHAR_ID) -> None:
     """
     写入一条情景记忆。
     episode格式（新字段）：
@@ -283,7 +284,7 @@ def retrieve(
     topic: str = "",
     top_k: int = 3,
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
     char_name: str = "",
     allow_strengthen: bool = True,
     return_trace: bool = False,
@@ -577,7 +578,7 @@ def retrieve(
     return result
 
 
-def delete_episode(user_id: str, ep_id: str, *, char_id: str = "yexuan") -> bool:
+def delete_episode(user_id: str, ep_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> bool:
     """Delete one episodic entry by id and cascade-delete its vector.
 
     Returns True if the entry was found and removed, False otherwise.
@@ -750,7 +751,7 @@ def _render_elapsed_summary(summary: str) -> str:
     return re.sub(r"(?:这周|本周|下周)?周末|下周[一二三四五六日天]", "那天", rendered)
 
 
-def retrieve_fallback(user_id: str, recent_history: list[str], top_k: int = 1, *, char_id: str = "yexuan", return_trace: bool = False) -> list[dict] | tuple:
+def retrieve_fallback(user_id: str, recent_history: list[str], top_k: int = 1, *, char_id: str = DEFAULT_CHAR_ID, return_trace: bool = False) -> list[dict] | tuple:
     """
     tag 未命中时的兜底召回。不依赖 query，按强度+时间挑近期高强度记忆。
     筛选条件：7天内、strength >= 0.6、不在最近 short_term 内容里。

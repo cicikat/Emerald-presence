@@ -18,6 +18,7 @@ import json
 import logging
 import time
 from typing import Any
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -32,26 +33,26 @@ _SENTINEL = {
 }
 
 
-def _impressions_file(uid: str, *, char_id: str = "yexuan"):
+def _impressions_file(uid: str, *, char_id: str = DEFAULT_CHAR_ID):
     from core.sandbox import get_paths, safe_user_id
     d = get_paths().dreams_impressions_dir(char_id=char_id)
     d.mkdir(parents=True, exist_ok=True)
     return d / f"{safe_user_id(uid)}.json"
 
 
-def load_impressions(uid: str, *, char_id: str = "yexuan") -> list[dict[str, Any]]:
+def load_impressions(uid: str, *, char_id: str = DEFAULT_CHAR_ID) -> list[dict[str, Any]]:
     try:
         return json.loads(_impressions_file(uid, char_id=char_id).read_text(encoding="utf-8"))
     except Exception:
         return []
 
 
-def save_impressions(uid: str, entries: list[dict[str, Any]], *, char_id: str = "yexuan") -> None:
+def save_impressions(uid: str, entries: list[dict[str, Any]], *, char_id: str = DEFAULT_CHAR_ID) -> None:
     from core.safe_write import safe_write_json
     safe_write_json(_impressions_file(uid, char_id=char_id), entries)
 
 
-def append_impression(uid: str, entry: dict[str, Any], *, char_id: str = "yexuan") -> None:
+def append_impression(uid: str, entry: dict[str, Any], *, char_id: str = DEFAULT_CHAR_ID) -> None:
     """Append one impression, decay existing weights, enforce 50-entry cap."""
     entries = load_impressions(uid, char_id=char_id)
     entries = _apply_decay(entries)
@@ -68,7 +69,7 @@ def append_impression(uid: str, entry: dict[str, Any], *, char_id: str = "yexuan
 
 
 def get_active_impressions(
-    uid: str, now: float | None = None, *, char_id: str = "yexuan"
+    uid: str, now: float | None = None, *, char_id: str = DEFAULT_CHAR_ID
 ) -> list[dict[str, Any]]:
     """Return unexpired impressions, newest first. Applies decay in-place."""
     if now is None:

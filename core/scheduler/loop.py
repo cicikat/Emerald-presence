@@ -55,6 +55,7 @@ _COOLDOWNS: dict[str, int] = {
     "festival":            20 * 3600,
     "holiday_boost":        2 * 3600,
     "episodic_decay":      20 * 3600,   # 情景记忆衰减：20小时
+    "inner_diary_write":    2 * 3600,   # 角色内心日记静默写入：2小时冷却（幂等靠文件存在性）
     "spontaneous_recall":   4 * 3600,   # 主动回忆：4小时冷却
     "dlq_monitor":         24 * 3600,   # DLQ 扫描：24小时
     "log_maintenance":     24 * 3600,   # forensic 日志归档/滚动：24小时
@@ -901,6 +902,7 @@ async def _loop():
                 from core.scheduler.triggers.time_based import (
                     _check_morning, _check_night, _check_random_message,
                     _check_weather, _check_daily_journal, _check_episodic_decay,
+                    _check_inner_diary_write,
                     _check_spontaneous_recall, check_activity_switch,
                     _check_dlq_monitor,
                 )
@@ -931,7 +933,8 @@ async def _loop():
                 _trigger_names = [
                     "morning", "night", "random_message", "weather",
                     "reminders", "period", "diary_reminder", "diary_inject",
-                    "daily_journal", "episodic_decay", "spontaneous_recall",
+                    "daily_journal", "episodic_decay", "inner_diary_write",
+                    "spontaneous_recall",
                     "diary_share_reminder", "topic_followup",
                     "birthday_midnight", "birthday_eve",
                     "birthday_afternoon", "birthday_night",
@@ -952,6 +955,7 @@ async def _loop():
                     _check_diary_inject(),
                     _check_daily_journal(),
                     _check_episodic_decay(),
+                    _check_inner_diary_write(),
                     _check_spontaneous_recall(),
                     _check_diary_share_reminder(),
                     _check_topic_followup(),

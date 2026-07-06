@@ -34,6 +34,7 @@ REALITY_USER_ARTIFACTS: frozenset[str] = frozenset({
     "relationship_facts",  # dynamic lorebook — per-user relationship fact table
     "vector_store",      # sqlite-vec semantic index (derived, rebuildable)
     "provenance_log",    # append-only JSONL: memory write provenance (G3)
+    "action_trace",      # ring buffer: recent tool-execution traces (Brief 27)
 })
 
 # Reality-scoped, character-global: path uses char_id only, uid is NOT part of path.
@@ -159,6 +160,9 @@ def resolve_path(scope: MemoryScope, artifact: str) -> Path:
 
     if artifact == "provenance_log":
         return paths.user_memory_root(uid, char_id=char_id) / "provenance_log.jsonl"
+
+    if artifact == "action_trace":
+        return paths.user_memory_root(uid, char_id=char_id) / "action_trace.json"
 
     # ── character-global scoped: (char_id) only — uid is not part of path ───
 

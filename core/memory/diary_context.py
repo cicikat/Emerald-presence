@@ -8,16 +8,17 @@ import time
 from pathlib import Path
 from core.error_handler import log_error
 from core.sandbox import get_paths, safe_user_id
+from core.data_paths import DEFAULT_CHAR_ID
 
 _DATE_HDR_RE = re.compile(r"^#\s*(\d{4}-\d{2}-\d{2})", re.MULTILINE)
 
 
-def _diary_context_read_path(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _diary_context_read_path(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     uid = safe_user_id(user_id)
     return get_paths().user_memory_root(uid, char_id=char_id) / "diary_context.txt"
 
 
-def _diary_context_write_path(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _diary_context_write_path(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     """写路径：始终写新布局。"""
     uid = safe_user_id(user_id)
     p = get_paths().user_memory_root(uid, char_id=char_id) / "diary_context.txt"
@@ -25,7 +26,7 @@ def _diary_context_write_path(user_id: str, *, char_id: str = "yexuan") -> Path:
     return p
 
 
-def _meta_path(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _meta_path(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     uid = safe_user_id(user_id)
     p = get_paths().user_memory_root(uid, char_id=char_id) / "diary_context.meta.json"
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -38,7 +39,7 @@ def _parse_latest_date(text: str) -> str | None:
     return max(dates) if dates else None
 
 
-def save(user_id: str, text: str, *, char_id: str = "yexuan"):
+def save(user_id: str, text: str, *, char_id: str = DEFAULT_CHAR_ID):
     """text 为空也写（清空快照），同时写元数据。"""
     try:
         _diary_context_write_path(user_id, char_id=char_id).write_text(text or "", encoding="utf-8")
@@ -50,7 +51,7 @@ def save(user_id: str, text: str, *, char_id: str = "yexuan"):
         log_error("diary_context.save", e)
 
 
-def load_meta(user_id: str, *, char_id: str = "yexuan") -> dict:
+def load_meta(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> dict:
     """返回 {captured_at, latest_entry_date}；缺失返回 {}。"""
     try:
         p = _meta_path(user_id, char_id=char_id)
@@ -61,7 +62,7 @@ def load_meta(user_id: str, *, char_id: str = "yexuan") -> dict:
     return {}
 
 
-def load(user_id: str, *, char_id: str = "yexuan") -> str:
+def load(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> str:
     try:
         p = _diary_context_read_path(user_id, char_id=char_id)
         if p.exists():

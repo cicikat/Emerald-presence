@@ -25,7 +25,7 @@ from core.activity.gomoku_grounding import build_gomoku_grounding_facts, _comput
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _empty_state(board_size: int = 15, opponent: str = "yexuan_ai", ai_style: str = "balanced") -> dict:
+def _empty_state(board_size: int = 15, opponent: str = "character_ai", ai_style: str = "balanced") -> dict:
     board = [[None] * board_size for _ in range(board_size)]
     return {
         "board_size": board_size,

@@ -137,12 +137,15 @@ def test_identity_stable_across_world_ruleset_change():
 
 def test_pronoun_correctness_in_d1_and_d2():
     """D1 和 D2 文案中Companion自称正确（他/他的），无"她"错位。"""
-    from core.dream.dream_prompt import _D1_LUCID_AWARENESS
+    from core.dream.dream_prompt import _D1_LUCID_AWARENESS, _format_user_clause
     from core.dream.world_loader import load_world
 
+    rendered = _D1_LUCID_AWARENESS.format(
+        name="Companion", pronoun="他", user_clause=_format_user_clause(""),
+    )
     # D1: should reference Companion as 他
-    assert "他知道" in _D1_LUCID_AWARENESS
-    assert "他仍是他自己" in _D1_LUCID_AWARENESS or "他在梦里仍是他自己" in _D1_LUCID_AWARENESS
+    assert "他知道" in rendered
+    assert "他仍是他自己" in rendered or "他在梦里仍是他自己" in rendered
 
     # D2: reality_derived ruleset should preserve the character's male pronoun.
     d2_text = load_world("reality_derived").ruleset

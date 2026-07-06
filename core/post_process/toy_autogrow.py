@@ -1,5 +1,5 @@
 """
-toy_autogrow.py — 叶瑄自主写入思考笔记（沙盒自生长雏形）
+toy_autogrow.py — 角色自主写入思考笔记（沙盒自生长雏形）
 
 慢队列 handler：每轮回复后用轻量 LLM 判断是否值得记录一句话，
 命中则 rollover append 到目标玩具文件。

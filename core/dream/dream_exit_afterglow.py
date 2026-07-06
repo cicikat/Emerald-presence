@@ -26,12 +26,13 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
 
 def wire_afterglow_from_summary(
-    uid: str, dream_id: str, exit_type: str, *, char_id: str = "yexuan"
+    uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_CHAR_ID
 ) -> None:
     """Save afterglow residue and integrate into hidden state at Dream exit.
 
@@ -60,7 +61,7 @@ def wire_afterglow_from_summary(
         )
 
 
-def _do_wire(uid: str, dream_id: str, exit_type: str, *, char_id: str = "yexuan") -> None:
+def _do_wire(uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_CHAR_ID) -> None:
     from core.memory.user_hidden_state import AfterglowResidueInput
     from core.memory.user_hidden_state_store import save_afterglow_residue
     from core.memory.user_hidden_state_integrator import integrate_afterglow_and_save

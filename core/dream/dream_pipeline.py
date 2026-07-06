@@ -259,7 +259,7 @@ async def dream_turn(
         exit_accepted = True
 
     # ── Body tracker: update body_state + yexuan_tension AFTER reply ─────────
-    # Runs post-LLM so 叶瑄 never sees raw numbers (by construction).
+    # Runs post-LLM so the character never sees raw numbers (by construction).
     from core.dream.body_tracker import analyze_turn as _analyze_body
     new_body = _analyze_body(user_msg, reply, current_body)
     new_projection = project_body_for_yexuan(new_body, boundary_level, current_yexuan_tension)
@@ -271,11 +271,14 @@ async def dream_turn(
     # ── Persist updated dream-local state ────────────────────────────────────
     from core.dream.dream_state import patch_local_state
     state = read_state(uid)
+    _prev_flow_state = state
     state = patch_local_state(
         state,
         emotional_tension=new_projection["yexuan_tension"],
         body_state=new_body.to_dict(),
     )
+    from core.dream.dream_flow import generate_flow_entries, apply_flow_entries
+    state = apply_flow_entries(state, generate_flow_entries(_prev_flow_state, state))
     # Scenario progression update (v0.5 stage_turns + v0.6 progress signal + v0.7 stage transition)
     if state.get("dream_mode") == "scenario" and state.get("scenario_core"):
         from core.dream.scenario_core import ScenarioCore
@@ -491,6 +494,9 @@ async def enter_dream(
     state.pop("scene_state", None)
     state.pop("symbolic_anchors", None)
     state.pop("body_state", None)
+    from core.dream.dream_flow import clear_flow_entries, append_status_shift
+    state = clear_flow_entries(state)
+    state = append_status_shift(state, "enter")
     write_state(uid, state)
 
     # Clear any leftover HUD smooth state from a previous interrupted dream
@@ -516,6 +522,9 @@ async def _do_close_dream(uid: str, dream_id: str, exit_type: str) -> None:
     state = read_state(uid)
     char_id = _state_char_id(state, "_do_close_dream", uid, dream_id)
     dream_mode = state.get("dream_mode", "sandbox")
+
+    from core.dream.dream_flow import append_status_shift
+    state = append_status_shift(state, "closing")
 
     if dream_id:
         archive_current(uid, dream_id, char_id=char_id)
@@ -614,7 +623,7 @@ def _should_retain(state: dict) -> bool:
 
 async def _generate_retention_line(uid: str, state: dict) -> str | None:
     """
-    Generate a single soft-retention sentence from 叶瑄 using dream-mode LLM.
+    Generate a single soft-retention sentence from the character using dream-mode LLM.
 
     Returns the generated text, or None on any failure.
     Fail-open contract: caller must fall back to force_exit_dream on None.

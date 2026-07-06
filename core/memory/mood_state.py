@@ -11,6 +11,7 @@ from pathlib import Path
 from core.sandbox import get_paths, _TRANSITION_CHARACTER_INNER
 from core.safe_write import safe_write_json
 from core.llm_output_validator import record_failure, is_paused, reset
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -48,22 +49,22 @@ _DEFAULT = {
 }
 
 
-def _read_path(char_id: str = "yexuan") -> Path:
+def _read_path(char_id: str = DEFAULT_CHAR_ID) -> Path:
     return get_paths().mood_state(char_id=char_id)
 
 
-def _write_path(char_id: str = "yexuan") -> Path:
+def _write_path(char_id: str = DEFAULT_CHAR_ID) -> Path:
     return get_paths().mood_state(char_id=char_id)
 
 
-def load(*, char_id: str = "yexuan") -> dict:
+def load(*, char_id: str = DEFAULT_CHAR_ID) -> dict:
     try:
         return json.loads(_read_path(char_id).read_text(encoding="utf-8"))
     except Exception:
         return dict(_DEFAULT)
 
 
-def save(state: dict, *, char_id: str = "yexuan") -> None:
+def save(state: dict, *, char_id: str = DEFAULT_CHAR_ID) -> None:
     if is_paused("mood_state"):
         logger.warning("[mood_state] 写入已暂停（连续失败过多），跳过本次 save")
         return
@@ -88,7 +89,7 @@ def update(
     new_intensity: float | None = None,
     source: str = "detect",
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
     force: bool = False,
 ) -> dict:
     """
@@ -143,16 +144,16 @@ def update(
     return state
 
 
-def get_current(*, char_id: str = "yexuan") -> str:
+def get_current(*, char_id: str = DEFAULT_CHAR_ID) -> str:
     """快速获取当前情绪，不更新状态。"""
     return load(char_id=char_id).get("current", "neutral")
 
 
-def get_intensity(*, char_id: str = "yexuan") -> float:
+def get_intensity(*, char_id: str = DEFAULT_CHAR_ID) -> float:
     return load(char_id=char_id).get("intensity", 0.0)
 
 
-def nudge_from_memory(memory_emotion: str, memory_strength: float, *, char_id: str = "yexuan") -> None:
+def nudge_from_memory(memory_emotion: str, memory_strength: float, *, char_id: str = DEFAULT_CHAR_ID) -> None:
     """
     召回了强烈情绪记忆时，轻微推动当前情绪向该方向漂移。
     只在 memory_strength > 0.7 时生效，幅度最多 +0.1。

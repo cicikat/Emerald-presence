@@ -17,17 +17,18 @@ from typing import Any
 from core.safe_write import safe_append_jsonl
 from core.sandbox import get_paths, safe_user_id
 from core.dream.dream_state import apply_dream_artifact_sentinel
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
 
-def _tmp_path(user_id: str | int, *, char_id: str = "yexuan") -> Path:
+def _tmp_path(user_id: str | int, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     d = get_paths().dreams_tmp_dir(char_id=char_id)
     d.mkdir(parents=True, exist_ok=True)
     return d / f"current_dream_{safe_user_id(user_id)}.jsonl"
 
 
-def _archive_dir(*, char_id: str = "yexuan") -> Path:
+def _archive_dir(*, char_id: str = DEFAULT_CHAR_ID) -> Path:
     d = get_paths().dreams_archive_dir(char_id=char_id)
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -40,7 +41,7 @@ def append_turn(
     content: str,
     extra: dict[str, Any] | None = None,
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
 ) -> bool:
     """Append one dream turn to current_dream.jsonl with sentinel fields."""
     record: dict[str, Any] = {
@@ -55,7 +56,7 @@ def append_turn(
     return safe_append_jsonl(_tmp_path(user_id, char_id=char_id), record)
 
 
-def read_current(user_id: str | int, *, char_id: str = "yexuan") -> list[dict[str, Any]]:
+def read_current(user_id: str | int, *, char_id: str = DEFAULT_CHAR_ID) -> list[dict[str, Any]]:
     """Read all turns from the active dream session."""
     path = _tmp_path(user_id, char_id=char_id)
     if not path.exists():
@@ -72,7 +73,7 @@ def read_current(user_id: str | int, *, char_id: str = "yexuan") -> list[dict[st
     return turns
 
 
-def archive_current(user_id: str | int, dream_id: str, *, char_id: str = "yexuan") -> bool:
+def archive_current(user_id: str | int, dream_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> bool:
     """Move current_dream.jsonl to archive/dream_{dream_id}.jsonl (dead storage)."""
     tmp = _tmp_path(user_id, char_id=char_id)
     if not tmp.exists():
@@ -88,7 +89,7 @@ def archive_current(user_id: str | int, dream_id: str, *, char_id: str = "yexuan
         return False
 
 
-def prune_archive(max_files: int = 200, *, char_id: str = "yexuan") -> int:
+def prune_archive(max_files: int = 200, *, char_id: str = DEFAULT_CHAR_ID) -> int:
     """当 archive 文件数超过 max_files 时，按 mtime 删除最旧的。返回删除数。
     archive 是 write-once dead storage，distill/summary 仅在 close 时读一次，之后无 loader 读取。
     """
@@ -110,7 +111,7 @@ def prune_archive(max_files: int = 200, *, char_id: str = "yexuan") -> int:
     return count
 
 
-def clear_current(user_id: str | int, *, char_id: str = "yexuan") -> bool:
+def clear_current(user_id: str | int, *, char_id: str = DEFAULT_CHAR_ID) -> bool:
     """Delete current_dream.jsonl without archiving (emergency force-clear)."""
     tmp = _tmp_path(user_id, char_id=char_id)
     try:
@@ -126,7 +127,7 @@ def clear_current(user_id: str | int, *, char_id: str = "yexuan") -> bool:
 VALID_DREAM_MIN_USER_TURNS = 3
 
 
-def count_valid_dreams(*, char_id: str = "yexuan") -> dict:
+def count_valid_dreams(*, char_id: str = DEFAULT_CHAR_ID) -> dict:
     """Count valid archived dreams for the given character.
 
     Scans archive directory; a dream is valid if it contains more than

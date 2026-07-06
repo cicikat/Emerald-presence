@@ -348,7 +348,7 @@ def test_fetch_context_passes_char_id_to_impression_loader(
 
     captured: list[str] = []
 
-    def _spy_load_imp(uid, *, char_id="yexuan"):
+    def _spy_load_imp(uid, *, char_id="yexuan", **_kwargs):
         captured.append(char_id)
         return ""
 

@@ -42,6 +42,7 @@ from core.memory.user_hidden_state import (
     to_dict,
     to_dream_snapshot,
 )
+from core.data_paths import DEFAULT_CHAR_ID
 from core.memory.path_resolver import resolve_path
 from core.memory.scope import MemoryScope, require_character_id
 from core.safe_write import safe_write_json
@@ -52,7 +53,7 @@ HIDDEN_STATE_FILENAME = "hidden_state.json"
 AFTERGLOW_FILENAME = "afterglow_residue.json"
 
 
-def load_hidden_state(uid: str | int, *, char_id: str = "yexuan") -> UserHiddenState:
+def load_hidden_state(uid: str | int, *, char_id: str = DEFAULT_CHAR_ID) -> UserHiddenState:
     """Load UserHiddenState for uid from disk.
 
     Returns default_hidden_state() if the file does not exist or is
@@ -91,7 +92,7 @@ def load_hidden_state(uid: str | int, *, char_id: str = "yexuan") -> UserHiddenS
         return default_hidden_state()
 
 
-def load_dream_snapshot(uid: str | int, now: str, *, char_id: str = "yexuan") -> dict[str, Any]:
+def load_dream_snapshot(uid: str | int, now: str, *, char_id: str = DEFAULT_CHAR_ID) -> dict[str, Any]:
     """Load UserHiddenState and return a read-only Dream-safe bucket snapshot.
 
     This is the single sanctioned read path for Dream context injection.
@@ -115,7 +116,7 @@ def load_dream_snapshot(uid: str | int, now: str, *, char_id: str = "yexuan") ->
     return to_dream_snapshot(state, now)
 
 
-def _load_afterglow_raw(uid: str | int, *, char_id: str = "yexuan") -> dict | None:
+def _load_afterglow_raw(uid: str | int, *, char_id: str = DEFAULT_CHAR_ID) -> dict | None:
     """Load raw afterglow residue dict from disk.  Returns None if absent or corrupt.
 
     Internal helper called by read_afterglow_residue() in user_hidden_state.py.
@@ -140,7 +141,7 @@ def save_afterglow_residue(
     residue: AfterglowResidueInput,
     created_at: str,
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
 ) -> bool:
     """Persist an afterglow residue to disk (called at Dream exit).
 
@@ -171,7 +172,7 @@ def save_afterglow_residue(
     return ok
 
 
-def save_hidden_state(uid: str | int, state: UserHiddenState, *, char_id: str = "yexuan") -> bool:
+def save_hidden_state(uid: str | int, state: UserHiddenState, *, char_id: str = DEFAULT_CHAR_ID) -> bool:
     """Persist UserHiddenState for uid using an atomic write.
 
     Returns True on success, False on I/O error.  Never raises.

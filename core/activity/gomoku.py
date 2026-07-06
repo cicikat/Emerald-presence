@@ -6,7 +6,7 @@ P1 新增：
 - 本地 AI 对手（choose_gomoku_ai_move）
 - opponent / ai_player / ai_style session state 字段
 - start_game 接受 opponent / ai_style 参数
-- make_move 用户落子后，若 opponent=yexuan_ai 且当前轮到 AI，自动落一手
+- make_move 用户落子后，若 opponent=character_ai 且当前轮到 AI，自动落一手
 
 P2 新增（记忆边界）：
 - close_game 按步数阈值决定是否生成/写入对局摘要（见 SUMMARY_THRESHOLD）
@@ -47,9 +47,18 @@ BOARD_SIZE = 15
 # 四个方向向量：横 / 竖 / 右斜 / 左斜
 _DIRS = [(1, 0), (0, 1), (1, 1), (1, -1)]
 
-_VALID_OPPONENTS = frozenset({"human", "yexuan_ai"})
+_VALID_OPPONENTS = frozenset({"human", "character_ai"})
 _VALID_STYLES = frozenset({"balanced", "gentle", "serious", "teaching"})
 _VALID_RESPONSE_MODES = frozenset({"auto", "pending"})
+
+# Brief 25 §3 P2: "yexuan_ai" -> "character_ai" rename, back-compat normalization.
+_LEGACY_OPPONENT_ALIASES: dict[str, str] = {"yexuan_ai": "character_ai"}
+
+
+def _normalize_opponent(value: str) -> str:
+    """Map legacy opponent values to their current canonical name; unknown values pass through
+    unchanged so _VALID_OPPONENTS validation can reject them with a clear error."""
+    return _LEGACY_OPPONENT_ALIASES.get(value, value)
 
 
 # ── 棋盘工具 ──────────────────────────────────────────────────────────────────
@@ -128,6 +137,7 @@ def start_game(
     """开局，创建 gomoku session（同类型旧 session 自动关闭）。"""
     if board_size != 15:
         raise ValueError(f"P0 只支持 board_size=15，收到 {board_size}")
+    opponent = _normalize_opponent(opponent)
     if opponent not in _VALID_OPPONENTS:
         raise ValueError(f"opponent 必须是 {sorted(_VALID_OPPONENTS)}，收到 {opponent!r}")
     if ai_style not in _VALID_STYLES:
@@ -139,8 +149,15 @@ def start_game(
 
 
 def get_active_session(uid: str, char_id: str) -> Optional[ActivitySession]:
-    """返回当前 active gomoku session，无则返回 None。"""
-    return find_active_session(char_id, uid, "gomoku")
+    """返回当前 active gomoku session，无则返回 None。
+
+    读路径归一化：旧存档的 opponent="yexuan_ai" 就地改写为 "character_ai"（Brief 25 §3 P2），
+    使调用方（router / companion）永远只看到当前枚举值，不必各自处理兼容。
+    """
+    session = find_active_session(char_id, uid, "gomoku")
+    if session is not None:
+        session.state["opponent"] = _normalize_opponent(session.state.get("opponent", "human"))
+    return session
 
 
 def make_move(
@@ -167,6 +184,7 @@ def make_move(
         raise ValueError(f"session {session_id!r} 已关闭，不能继续落子")
 
     state = session.state
+    state["opponent"] = _normalize_opponent(state.get("opponent", "human"))
     if state.get("status") != "active":
         raise ValueError(f"棋局已结束（{state.get('status')}），不能继续落子")
 
@@ -198,7 +216,7 @@ def make_move(
 
         # ── AI 自动落子（用户未赢时） ──────────────────────────────────────────
         if (
-            state.get("opponent") == "yexuan_ai"
+            state.get("opponent") == "character_ai"
             and state["current_turn"] == state.get("ai_player", "white")
         ):
             if state.get("ai_response_mode", "auto") == "pending":
@@ -271,9 +289,10 @@ def apply_ai_move(
         raise ValueError(f"session {session_id!r} 已关闭，不能追加 AI 落子")
 
     state = session.state
+    state["opponent"] = _normalize_opponent(state.get("opponent", "human"))
     if state.get("status") != "active":
         raise ValueError("棋局已结束，不能追加 AI 落子")
-    if state.get("opponent") != "yexuan_ai":
+    if state.get("opponent") != "character_ai":
         raise ValueError("非 AI 对手模式，不支持 ai_move")
     if not state.get("pending_ai_turn"):
         raise ValueError("当前没有待处理的 AI 落子（pending_ai_turn=False）")
@@ -345,11 +364,11 @@ def build_game_summary(state: dict, char_name: str = "(角色未加载)") -> str
     生成轻量对局摘要文本。
 
     只使用 move_count / winner / opponent，不含棋谱坐标列表。
-    opponent=yexuan_ai 时写"{char_name}执白"；human 时写"本地双人对局"。
+    opponent=character_ai 时写"{char_name}执白"；human 时写"本地双人对局"。
     """
     move_count = len(state.get("move_history", []))
     winner = state.get("winner")
-    opponent = state.get("opponent", "human")
+    opponent = _normalize_opponent(state.get("opponent", "human"))
 
     if winner == "black":
         result = "黑棋获胜"
@@ -358,7 +377,7 @@ def build_game_summary(state: dict, char_name: str = "(角色未加载)") -> str
     else:
         result = "未分胜负"
 
-    if opponent == "yexuan_ai":
+    if opponent == "character_ai":
         return (
             f"用户和{char_name}进行了一局五子棋。"
             f"用户执黑，{char_name}执白，对局共 {move_count} 手，结果：{result}。"

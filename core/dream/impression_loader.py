@@ -10,12 +10,16 @@ when present (D2 细粒度 schema), falls back to impression_text-only for legac
 """
 
 import logging
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
 _MAX_INJECT = 3
 
-_TAG_NOTE = "以下是叶瑄做过的梦，不是现实发生的事；可以像记得一个梦一样自然提起，但绝不可当作真实经历复述为事实"
+
+def _tag_note(char_name: str) -> str:
+    name = char_name or "角色"
+    return f"以下是{name}做过的梦，不是现实发生的事；可以像记得一个梦一样自然提起，但绝不可当作真实经历复述为事实"
 
 
 def _render_entry(imp: dict) -> str:
@@ -39,7 +43,7 @@ def _render_entry(imp: dict) -> str:
     return "\n".join(parts)
 
 
-def load_impression_text(uid: str, *, char_id: str = "yexuan") -> str:
+def load_impression_text(uid: str, *, char_id: str = DEFAULT_CHAR_ID, char_name: str = "") -> str:
     """
     Return formatted impression block for 6g injection.
     Empty string when no active impressions exist.
@@ -61,13 +65,13 @@ def load_impression_text(uid: str, *, char_id: str = "yexuan") -> str:
             return ""
 
         body = "\n\n".join(rendered)
-        return f'<梦境印象 note="{_TAG_NOTE}">\n{body}\n</梦境印象>'
+        return f'<梦境印象 note="{_tag_note(char_name)}">\n{body}\n</梦境印象>'
     except Exception as e:
         logger.warning(f"[impression_loader] uid={uid}: {e}")
         return ""
 
 
-def has_active_impressions(uid: str, *, char_id: str = "yexuan") -> bool:
+def has_active_impressions(uid: str, *, char_id: str = DEFAULT_CHAR_ID) -> bool:
     """D2 隔离用：本轮是否存在活跃梦境印象（fail-closed 返回 False）。"""
     try:
         from core.dream.impression_store import get_active_impressions

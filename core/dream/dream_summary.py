@@ -17,6 +17,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ _STRIP_SCENE_SYSTEM = """你是梦境情感分析器。
 
 
 async def generate_summary(
-    uid: str, dream_id: str, exit_type: str, *, char_id: str = "yexuan"
+    uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_CHAR_ID
 ) -> None:
     """Generate and persist afterglow summary for a completed dream."""
     from core.sandbox import get_paths

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from core.error_handler import log_error
 from core.sandbox import get_paths, safe_user_id
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +26,12 @@ _TIME_FMTS = [
 ]
 
 
-def _read_path(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _read_path(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     uid = safe_user_id(user_id)
     return get_paths().user_memory_root(uid, char_id=char_id) / "reminders.json"
 
 
-def _write_path(user_id: str, *, char_id: str = "yexuan") -> Path:
+def _write_path(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> Path:
     """写路径：始终写新布局。"""
     uid = safe_user_id(user_id)
     p = get_paths().user_memory_root(uid, char_id=char_id) / "reminders.json"

@@ -20,6 +20,7 @@ import logging
 import time
 from pathlib import Path
 from typing import Any
+from core.data_paths import DEFAULT_CHAR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ _PROHIBIT_DREAM_RP = (
 )
 
 
-def load_afterglow(uid: str, *, char_id: str = "yexuan") -> str:
+def load_afterglow(uid: str, *, char_id: str = DEFAULT_CHAR_ID) -> str:
     """
     Return active afterglow text for injection into reality prompt layer 6f.
     Returns empty string if no active afterglow within TTL.
@@ -61,7 +62,7 @@ def load_afterglow(uid: str, *, char_id: str = "yexuan") -> str:
 def _find_best_summary(
     uid: str,
     *,
-    char_id: str = "yexuan",
+    char_id: str = DEFAULT_CHAR_ID,
 ) -> tuple[dict[str, Any] | None, float]:
     summaries_dir = _get_summaries_dir(char_id=char_id)
     if not summaries_dir.exists():
@@ -135,6 +136,6 @@ def _format_afterglow(summary: dict[str, Any], *, age_hours: float = 0.0) -> str
     return "\n".join(part for part in parts if part)
 
 
-def _get_summaries_dir(*, char_id: str = "yexuan") -> Path:
+def _get_summaries_dir(*, char_id: str = DEFAULT_CHAR_ID) -> Path:
     from core.sandbox import get_paths
     return get_paths().dreams_summaries_dir(char_id=char_id)

@@ -33,7 +33,7 @@
 
 | 调用点 | 文件 | 类别 | 说明 |
 |---|---|---|---|
-| `data_paths.py` 所有方法签名 `char_id: str = "yexuan"` | `core/data_paths.py` | **legacy/test 兼容层** | 签名默认值供旧代码 / 测试向后兼容；生产主链路调用方均显式传 char_id |
+| `data_paths.py` 所有方法签名 `char_id: str = DEFAULT_CHAR_ID` | `core/data_paths.py` | **legacy/test 兼容层** | 签名默认值供旧代码 / 测试向后兼容；生产主链路调用方均显式传 char_id。`DEFAULT_CHAR_ID` 是 `_DEFAULT_CHAR_ID`（import 时冻结自 `character.default`）的公开导出别名——Brief 25 §3 P1 起，全仓其余 `char_id: str = "yexuan"` 默认参数已统一改为 `from core.data_paths import DEFAULT_CHAR_ID` + `char_id: str = DEFAULT_CHAR_ID`，不再各自硬编码字面量 |
 | `_get_char_id_from_payload` fallback `"yexuan"` | `core/pipeline.py` / `core/memory/fixation_pipeline.py` | **DLQ 兼容层** | 仅在 DLQ 残留任务缺 char_id 时触发，WARN 日志可见，不静默 |
 | `mood.py GET /state` fallback `"yexuan"` | `admin/routers/mood.py` | ~~admin/debug~~ **✅ 已修复 P1-0F.2** | `_active_char_id()` fail-loud，不再 fallback yexuan；无写路径 |
 | `hidden_state_debug.py` 读 active_char_id | `admin/routers/hidden_state_debug.py` | **admin/debug，可接受** | fail-loud：active 空则 ValueError，不 fallback |
@@ -76,11 +76,12 @@
 
 10. ✅ **`dream_state` 物理路径 v1** — `_LAYOUT_DREAM="v1"` 已走 `runtime/dreams/{char_id}/state/...`，legacy 兼容期完成。
 
-11. **`ShortTermMemory` 类方法默认值**（R3-followup）— `ShortTermMemory.load/clear/append/get_history` 已有 `char_id` 参数，但仍带 `char_id: str = "yexuan"` 默认值（列于 test_r3_scope_lint.py CHAR_ID_DEFAULT_ALLOWLIST）。生产主链路不走此类接口；future R3 pass 可移除默认值。
+11. ✅ **`ShortTermMemory` 类方法默认值** — 已修复（Brief 25 §3 P1）：`ShortTermMemory.load/clear/append/get_history` 及模块级同名函数改为 `char_id: str = DEFAULT_CHAR_ID`（`core/data_paths.DEFAULT_CHAR_ID`），不再硬编码 `"yexuan"`；`test_r3_scope_lint.py` CHAR_ID_DEFAULT_ALLOWLIST 已相应清空（仅剩 `core/data_paths.py` 与 `core/dream/dream_pipeline.py` 的 `enter_dream()` 功能性网关）。
 
 12. **轮级 scope freeze 尚未统一**（R3-followup）— `fetch_context / build_prompt / post_process` 各自接收独立 `char_id` 参数，未在轮入口处构造单一 `MemoryScope` 贯穿全程。极短窗口期内 active_character 切换时各步骤 char_id 可能不一致。建议：在 `Pipeline._run_turn()` 顶端一次性构造 `MemoryScope.reality_scope(uid, active_char_id)` 并向下传递。
 
 > **最近核对**：2026-06-11。第 1–8、10 项已全部落地；第 9、11、12 项为已知 followup，不影响 P0 隔离结论。
+> **2026-07-06 更新**：第 11 项已随 Brief 25 §3 P1 落地（`DEFAULT_CHAR_ID` 全仓迁移），CHAR_ID_DEFAULT_ALLOWLIST 从 ~25 个文件缩到仅 `core/data_paths.py` + `core/dream/dream_pipeline.py`。
 
 ---
 
@@ -1151,7 +1152,7 @@ sensor privacy 全系统已经完成。
 
 ### 去重与回写流程
 
-`tool_dispatcher.execute()` 新增 `char_id` kwarg（默认 `"yexuan"`）：
+`tool_dispatcher.execute()` 的 `char_id` 为必传 kwarg（无默认值，调用方必须显式传入）：
 
 1. **指纹检查**：persist 工具执行前调用 `build_fingerprint()` + `is_recently_read()`；命中 → 返回"刚读过这个，这次跳过"，不调用底层函数。
 2. **执行**：未命中 → 正常执行。

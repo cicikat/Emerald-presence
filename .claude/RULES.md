@@ -28,7 +28,7 @@
 
 ## Dream Rules
 - v0 只允许定性 body projection
-- 叶瑄默认不读数字
+- 他默认不读数字
 - reality pipeline 不读取 dream residue
 - afterglow 不得包含 world_layer 专有词
 

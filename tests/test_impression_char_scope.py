@@ -223,7 +223,7 @@ def test_fetch_context_passes_char_id_to_impression_loader(
 
     captured: list[str] = []
 
-    def _spy(uid, *, char_id="yexuan"):
+    def _spy(uid, *, char_id="yexuan", **_kwargs):
         captured.append(char_id)
         return ""
 
@@ -250,7 +250,7 @@ def test_fetch_context_impression_char_id_updates_after_switch(
 
     captured: list[str] = []
 
-    def _spy(uid, *, char_id="yexuan"):
+    def _spy(uid, *, char_id="yexuan", **_kwargs):
         captured.append(char_id)
         return ""
 
@@ -285,7 +285,7 @@ def test_fetch_context_invalid_active_does_not_call_impression_loader(
 
     reader_called: list[bool] = []
 
-    def _spy(uid, *, char_id="yexuan"):
+    def _spy(uid, *, char_id="yexuan", **_kwargs):
         reader_called.append(True)
         return ""
 

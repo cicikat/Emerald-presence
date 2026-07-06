@@ -30,6 +30,7 @@ from core.garden.constants import (
     HANDLE_SELF_THRESHOLD,
     HANDLE_GIFT_THRESHOLD,
 )
+from core.data_paths import DEFAULT_CHAR_ID
 from core.safe_write import safe_write_json
 from core.sandbox import get_paths, _TRANSITION_CHARACTER_INNER
 
@@ -39,19 +40,19 @@ _garden_lock = threading.RLock()
 
 # ── 路径 helpers ───────────────────────────────────────────────────────────────
 
-def _plants_path(char_id: str = "yexuan") -> Path:
+def _plants_path(char_id: str = DEFAULT_CHAR_ID) -> Path:
     return get_paths().garden(char_id=char_id) / "plants.json"
 
 
-def _storage_path(char_id: str = "yexuan") -> Path:
+def _storage_path(char_id: str = DEFAULT_CHAR_ID) -> Path:
     return get_paths().garden(char_id=char_id) / "storage.json"
 
 
-def _read_plants_path(char_id: str = "yexuan") -> Path:
+def _read_plants_path(char_id: str = DEFAULT_CHAR_ID) -> Path:
     return _plants_path(char_id)
 
 
-def _read_storage_path(char_id: str = "yexuan") -> Path:
+def _read_storage_path(char_id: str = DEFAULT_CHAR_ID) -> Path:
     return _storage_path(char_id)
 
 
@@ -64,7 +65,7 @@ def _load(path: Path, default):
         return default
 
 
-def _save(path: Path, data, *, char_id: str = "yexuan") -> None:
+def _save(path: Path, data, *, char_id: str = DEFAULT_CHAR_ID) -> None:
     if not safe_write_json(path, data):
         raise OSError(f"failed to write garden state: {path}")
     if _TRANSITION_CHARACTER_INNER:
@@ -100,7 +101,7 @@ def _resolve_slot_for_mood(mood: str) -> str | None:
     return None
 
 
-def _bootstrap(*, char_id: str = "yexuan") -> dict:
+def _bootstrap(*, char_id: str = DEFAULT_CHAR_ID) -> dict:
     """plants.json 不存在则初始化五槽位；storage.json 不存在则初始化空仓库。返回 plants 数据。"""
     garden_dir = get_paths().garden(char_id=char_id)
     garden_dir.mkdir(parents=True, exist_ok=True)
@@ -235,7 +236,7 @@ def force_water(mood: str | None = None, *, char_id: str) -> dict:
 def daily_check(*, char_id: str) -> list:
     """
     每天扫一次：harvest 过期 / harvest 触发 handle / vase 枯萎。
-    状态变更必执行；返回事件列表给上层 trigger 决定是否让叶瑄说话。
+    状态变更必执行；返回事件列表给上层 trigger 决定是否让角色说话。
     """
     with _garden_lock:
         _bootstrap(char_id=char_id)
