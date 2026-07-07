@@ -37,6 +37,18 @@ _AVATAR_DIRECTIVE_LAST: dict[str, tuple[str, float]] = {}  # char_id → (emotio
 _AVATAR_DIRECTIVE_COOLDOWN_SEC = 5.0
 
 
+def _voice_reanchor(char_id: str) -> str:
+    """Brief 28 · tool loop 收尾锚定：工具轮之后主生成容易滑进"报告腔"，
+    用这条静态 system 提示把声音收回角色本身。char_name 走 get_char_name()，
+    禁字面角色名（硬性规则8）。"""
+    from core.character_name_provider import get_char_name
+    char_name = get_char_name(char_id)
+    return (
+        f"工具用完了。接下来只以{char_name}的声音回复，"
+        "把查到的东西揉进你自己的话里，不要报告腔、不要罗列。"
+    )
+
+
 def _check_yandere_trigger(user_message: str, reply: str, relation_priority: int) -> bool:
     if relation_priority < YANDERE_RELATION_THRESHOLD:
         return False
@@ -684,6 +696,115 @@ class Pipeline:
             yield full
 
     # ──────────────────────────────────────────────────────────────────────────
+    # 步骤3B：多步工具执行器（Brief 28 · Path C，function_calling 模型专用）
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def run_agentic_loop(
+        self,
+        messages: list[dict],
+        *,
+        uid: str,
+        char_id: str,
+        session_state,
+        is_group: bool = False,
+        stream: bool = False,
+    ):
+        """主生成多步调用工具再回答，只在 tool_dispatcher.tool_loop_active(uid) 为真时被调用。
+
+        stream=False 时返回 str；stream=True 时返回 async generator（仅最终答案流式，
+        工具决策步骤全程非流式——chat_turn 需要 tools 参数，与 chat_stream 的既有约束冲突）。
+
+        origin 固定传 "assistant_loop"（tool_dispatcher._EXECUTE_ALLOWED_ORIGINS 白名单项）。
+        """
+        from core import llm_client
+        from core.config_loader import get_config
+        from core.error_handler import log_error
+        from core.tool_dispatcher import execute as _execute, get_tools_schema
+
+        cfg = get_config().get("tool_loop", {})
+        max_steps = int(cfg.get("max_steps", 5))
+        total_timeout_s = float(cfg.get("total_timeout_s", 90))
+        # per-char 工具暴露面覆盖（Brief 29 · 3.4）：活跃角色卡 presence_ext.tool_categories
+        # 存在则用它，否则回落全局 tool_loop.categories。exclude_tools 保持全局，不许 per-char 绕过。
+        _active_char = getattr(self, "character", None)
+        char_categories = (_active_char.presence_ext or {}).get("tool_categories") if _active_char else None
+        categories = char_categories if char_categories is not None else cfg.get("categories", ["info", "desktop", "memory"])
+        exclude_tools = set(cfg.get("exclude_tools", []))
+
+        tools = [
+            t for t in get_tools_schema(categories=categories)
+            if (t.get("function") or t).get("name") not in exclude_tools
+        ]
+
+        loop_msgs = list(messages)
+        # 工具意愿软提示（Brief 29 · 5，Brief 28 补丁）：利用 recency 位置，插在用户消息
+        # 之前；只在 loop 首步注入一次，不进 short_term history（loop_msgs 本就是一次性副本）。
+        if cfg.get("nudge_hint", True) and loop_msgs:
+            loop_msgs.insert(len(loop_msgs) - 1, {
+                "role": "system",
+                "content": "需要外部信息或操作时，直接调用可用工具，不要凭记忆编造。",
+                "_layer": "11.5_tool_nudge",
+            })
+        used_tool = False
+        # ("natural"/"exhausted"/"confirm", text) — 收尾结果种类 + 文本
+        outcome: tuple[str, str] | None = None
+
+        async def _run_steps() -> None:
+            nonlocal used_tool, outcome
+            for _step in range(max_steps):
+                turn = await llm_client.chat_turn(loop_msgs, tools)
+                if not turn.tool_calls:
+                    outcome = ("natural", turn.content)
+                    return
+                loop_msgs.append(turn.assistant_message)
+                used_tool = True
+                for tc in turn.tool_calls:
+                    try:
+                        result, ask_confirm = await _execute(
+                            tc["name"], tc["arguments"], uid, uid, is_group,
+                            session_state, origin="assistant_loop", char_id=char_id,
+                        )
+                    except Exception as e:
+                        log_error("pipeline.run_agentic_loop.execute", e)
+                        result, ask_confirm = None, None
+                    loop_msgs.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": ask_confirm or result or "（工具无结果或执行失败）",
+                    })
+                    if ask_confirm:
+                        outcome = ("confirm", ask_confirm)
+                        return
+            outcome = ("exhausted", "")
+
+        try:
+            await asyncio.wait_for(_run_steps(), timeout=total_timeout_s)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[pipeline.run_agentic_loop] 总预算 %.0fs 超时，按步数耗尽处理", total_timeout_s
+            )
+            outcome = ("exhausted", "")
+
+        async def _single_chunk(text: str):
+            if text:
+                yield text
+
+        kind, text = outcome
+        if kind == "confirm":
+            return _single_chunk(text) if stream else text
+
+        if kind == "natural" and not used_tool:
+            # 从未调用过工具：等价于原有单发生成，反坍缩检查照旧过一遍。
+            final_text = await self._anti_collapse_prefix_retry(loop_msgs, text)
+            return _single_chunk(final_text) if stream else final_text
+
+        # natural（用过工具）或 exhausted：强制收尾，注入声音锚定，走不带 tools 的出口。
+        loop_msgs.append({"role": "system", "content": _voice_reanchor(char_id)})
+        if stream:
+            return self.run_llm_stream(loop_msgs)
+        return await self.run_llm(loop_msgs)
+
+    # ──────────────────────────────────────────────────────────────────────────
     # 步骤 4：异步后处理
     # ──────────────────────────────────────────────────────────────────────────
 
@@ -700,6 +821,7 @@ class Pipeline:
         audit_extras: dict | None = None,
         frozen_scope: "MemoryScope | None" = None,
         web_echo: bool = False,
+        loop_executed: bool = False,
     ):
         """
         关键写入在 uid_lock 内同步完成，慢任务（LLM调用）入 slow_queue 异步执行。
@@ -717,6 +839,9 @@ class Pipeline:
         side effects（保持 asyncio.create_task）：TTS/表情包 / _parse_and_execute_intent
 
         frozen_scope: 如果传入，直接使用该 scope，跳过 _current_reality_scope()（N1）。
+        loop_executed: 本轮是否走了 tool loop（Brief 28 · Path C）。为真时透传给
+          _parse_and_execute_intent，让 Path B 直接 return——loop 里模型已有完整
+          行动机会，不需要再从回复文本里反向解析意图。
         """
         from core.write_envelope import WriteEnvelope
         if envelope is None:
@@ -918,6 +1043,7 @@ class Pipeline:
                 user_content=content,
                 user_id=user_id,
                 char_id=char_id,
+                loop_executed=loop_executed,
             ))
         except Exception as e:
             log_error("pipeline.post_process.intent", e)
@@ -941,6 +1067,7 @@ class Pipeline:
         user_content: str = "",
         user_id: str = "",
         char_id: str | None = None,
+        loop_executed: bool = False,
     ) -> None:
         """
         Path B: 解析角色回复里声称要执行的桌面操作，写入 agent_actions.json 队列。
@@ -951,12 +1078,19 @@ class Pipeline:
           (b) user_content 非空非纯空白 → 本轮有真实用户输入
           (c) 意图非 dangerous（device_shutdown/device_sleep 永不经此路径触发）
           (c2) per-uid 同动作幂等窗口 60s：窗口内已执行 → 跳过
+          (d) Brief 28：本轮已走 tool loop（loop_executed=True）→ 跳过，模型在 loop 里
+              已有完整行动机会，回复文本里的"我去帮你打开"不再需要反向解析执行一次。
         """
         import json as _json
         import re
         import time as _time
         from core import llm_client
         from core.error_handler import log_error
+
+        # guard (d): this turn already went through the tool loop → skip Path B
+        if loop_executed:
+            logger.debug("[pipeline.intent] 跳过: loop_executed=True，本轮已走 tool loop")
+            return
 
         # guard (a): non-empty trigger_name → scheduler/sensor/watch turn → skip
         if trigger_name:

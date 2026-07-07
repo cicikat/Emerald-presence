@@ -388,6 +388,25 @@ _dnd_detect(user_id, message.get("content", ""))
 
 ---
 
+## proactive=off 闸门（Brief 29 · per-char，3.3）
+
+角色卡 `presence_ext.proactive`：`"full"`（默认，现状）/ `"off"`。判定函数
+`core.character_loader.is_proactive_disabled(char_id=None)`，fail-soft（加载失败/未注册 →
+`False`，不阻断发言）。两处闸门入口：
+
+- `core/scheduler/gating.py::_decide()`：proposals 非空且活跃角色 `proactive=off` 时，直接
+  返回 `(None, "proactive_off", candidates)`，拒绝全部发言类 proposal（不区分 trigger_name）。
+- `core/scheduler/execution.py::legacy_tick_should_send(force=False)`：`force=True`（手动/
+  强制触发）无条件放行，语义不变；`force=False` 时叠加同一判定。
+
+**维护任务不受影响**：`episodic_decay`、`inner_diary_write`（Brief 26）、`diary_inject`、
+`hidden_state_decay`、garden 自动浇水等不经过 `gating._decide()` 或 `legacy_tick_should_send()`
+的扫描型任务照常运行——这两个闸门只挡"发言"这一件事。
+
+v1 不做 `"minimal"` 档（reminders 也一并压掉）；真有需要再分级。
+
+---
+
 ## R2-A（2026-06-10）+ R2-B（2026-06-11）+ R2-C（2026-06-11）+ R2-D（2026-06-11）
 
 > R2-A 是审计和决策包。R2-B 完成"发言决策前移第一段"。R2-C 完成 legacy 安全网删除、

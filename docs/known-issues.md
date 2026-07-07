@@ -589,6 +589,8 @@ R8-D 实测：当前 DLQ 目录无任何 legacy task 文件（`mid_term_append` 
 - `mes_example` 精简、时间联动注入属于 prompt 体感策略，不作为当前小修。
 - R3 CI 门禁（2026-06-11）：`tests/test_r3_scope_lint.py`（13 条）守卫 core/ 不新增 `char_id="yexuan"` 函数默认参数或裸 `data/` 路径；`tests/test_r3_memory_scope_cleanup_contract.py` 追踪迁移目标 allowlist 清理进度，守卫 admin/ 无新违规。`docs/memory.md` 残余工作 1–8、10 项已全部落地；残留 followup：旧 uid-only 数据迁移（9）、scope freeze 统一（12）。
 - ✅ **ShortTermMemory 默认值（原第 11 项）** — 已随 Brief 25 §3 P1（2026-07-06）落地：全仓 `char_id: str = "yexuan"` 默认参数（含 `ShortTermMemory` 类方法）统一迁移为 `char_id: str = DEFAULT_CHAR_ID`（`core.data_paths.DEFAULT_CHAR_ID`）；`CHAR_ID_DEFAULT_ALLOWLIST` 从 ~25 个文件缩到仅 `core/data_paths.py`（路径权威）与 `core/dream/dream_pipeline.py`（`enter_dream()` 的"梦境仅支持 yexuan"功能性网关，非硬编码）。新增守门 `tests/test_no_hardcoded_character.py` 同时防"叶瑄/风谕"字面量与 `yexuan_ai`/`yexuan_tension` 协议兼容字段回流。
+- **观察项（Brief 28）**：tool loop（Path C）激活时，QQ 关键词快速路径仍先于探针独立命中执行；快速路径命中的工具结果虽然会通过 `tool_result` 注入 prompt，loop 里的模型能在层10 看到这次执行，但两者之间没有 Path B 式的 c2 幂等窗口兜底。理论上如果模型没有从层10 读出"已经执行过"的信号，可能对同一意图（如 `get_time`）在同一轮里重复执行一次。当前评估：`get_time` 等快速路径工具幂等本身无害（重复查时间不产生副作用），先记录为已知边角，不在本 brief 内处理，后续如接入有副作用的快速路径工具需重新评估。
+- **观察项（Brief 29 · MCP）**：`core/mcp_client.py` 接入的外部 MCP server 是不可信输入源——工具描述（`list_tools` 返回的 description/inputSchema）与调用结果都可能含有注入性文本（prompt injection）。v1 只做结果截断（2000 字）+ 参数不落 action_trace 痕迹，不做内容级过滤/校验，与现有 `web_search` 结果同级风险处理，现状已接受。后续如需加固，方向是对 MCP 工具结果做与 web 召回内容一致的来源标注/隔离处理。
 
 ### PB1：主动触发把情景记忆 / 角色自己的推断当成「用户的日记」提起
 

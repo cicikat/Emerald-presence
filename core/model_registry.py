@@ -148,17 +148,48 @@ def _get_preset_config() -> dict:
     return _synth_legacy_presets(cfg)
 
 
+def _active_char_model_routing() -> str | None:
+    """活跃角色卡 presence_ext.model_routing（Brief 29 · 3.2）。
+
+    fail-soft：未注册/加载失败/字段缺失 → None（回落全局 active_routing）。
+    """
+    try:
+        from core import pipeline_registry
+        pl = pipeline_registry.get()
+        char = pl.character if pl is not None else None
+        if char is None:
+            return None
+        return getattr(char, "presence_ext", {}).get("model_routing") or None
+    except Exception:
+        return None
+
+
 def _resolve_preset_name(call_category: str) -> str:
     """Map a call_category to a preset name via the active routing profile.
 
-    Fallback chain:
-      1. active_routing profile → call_category key
+    Routing profile selection (Brief 29 · 3.2):
+      1. 活跃角色卡 presence_ext.model_routing，若该 profile 存在于 routing_profiles → 用它
+      2. 否则回落全局 active_routing（profile 不存在时记 warning）
+
+    Fallback chain within the chosen profile:
+      1. profile → call_category key
       2. → "chat" key in same profile
       3. → first preset name in presets dict
     """
     mp = _get_preset_config()
-    active = mp.get("active_routing", "default")
     profiles = mp.get("routing_profiles", {})
+    active = mp.get("active_routing", "default")
+
+    char_routing = _active_char_model_routing()
+    if char_routing:
+        if char_routing in profiles:
+            active = char_routing
+        else:
+            logger.warning(
+                "[model_registry] 角色卡 model_routing=%r 不是已知 routing profile，回落全局 active_routing=%r",
+                char_routing, active,
+            )
+
     profile = profiles.get(active) or (next(iter(profiles.values())) if profiles else {})
     name = profile.get(call_category) or profile.get("chat")
     if not name:

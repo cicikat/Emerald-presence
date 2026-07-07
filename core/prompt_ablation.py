@@ -42,21 +42,39 @@ def _read_raw() -> dict | None:
     return data
 
 
+def _active_char_disabled_layers() -> set:
+    """活跃角色卡 presence_ext.disabled_layers（Brief 29 · 3.1）。
+
+    不缓存：随角色切换即时生效。fail-soft：未注册/加载失败/字段缺失 → 空集合。
+    """
+    try:
+        from core import pipeline_registry
+        pl = pipeline_registry.get()
+        char = pl.character if pl is not None else None
+        if char is None:
+            return set()
+        return set(getattr(char, "presence_ext", {}).get("disabled_layers") or [])
+    except Exception:
+        return set()
+
+
 def get_state() -> dict:
     """返回 {"disabled_layers": set(), "perception_block_disabled": bool}。
 
-    开关文件缺失/损坏时 fail-open，返回全启用默认值（空 disabled_layers）。
+    disabled_layers 是全局开关文件 ∪ 活跃角色卡 presence_ext.disabled_layers（B29·3.1）。
+    开关文件缺失/损坏时该部分 fail-open（视为空），角色卡部分仍照常合并。
     """
     data = _read_raw()
+    char_layers = _active_char_disabled_layers()
     if data is None:
-        return {"disabled_layers": set(), "perception_block_disabled": False}
+        return {"disabled_layers": char_layers, "perception_block_disabled": False}
     try:
-        disabled = set(data.get("disabled_layers") or [])
+        disabled = set(data.get("disabled_layers") or []) | char_layers
         perception_disabled = bool(data.get("perception_block_disabled", False))
         return {"disabled_layers": disabled, "perception_block_disabled": perception_disabled}
     except Exception as exc:
         logger.warning("[prompt_ablation] 状态字段解析失败，视为全启用: %s", exc)
-        return {"disabled_layers": set(), "perception_block_disabled": False}
+        return {"disabled_layers": char_layers, "perception_block_disabled": False}
 
 
 def set_state(disabled: list[str], perception_block_disabled: bool) -> dict:

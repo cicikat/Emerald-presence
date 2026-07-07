@@ -43,6 +43,12 @@ class Character:
     post_history_instructions: str = ""   # 酒馆 Post-History Instructions
     post_history_extra: str = ""          # 常驻 after 型世界书条目（折叠存储）
     alternate_greetings: list[str] = field(default_factory=list)  # 备用开场白
+    # per-char 兼容钩子（Brief 29 · "本我"模式）。缺失/字段类型不对 = 全默认 = 现有角色零行为变化。
+    # disabled_layers: list[str]   — 与全局消融开关取并集（core/prompt_ablation.py）
+    # model_routing:   str | None  — 路由 profile 名，存在于 routing_profiles 才生效（core/model_registry.py）
+    # tool_categories: list[str] | None — tool loop 暴露面覆盖（core/pipeline.py run_agentic_loop）
+    # proactive:       "full"（默认）| "off" — 主动发言总闸（core/scheduler/gating.py）
+    presence_ext: dict = field(default_factory=dict)
 
 
 def load(filename_or_id: str) -> Character:
@@ -105,6 +111,7 @@ def load(filename_or_id: str) -> Character:
         post_history_instructions=data.get("post_history_instructions") or "",
         post_history_extra=data.get("post_history_extra") or "",
         alternate_greetings=data.get("alternate_greetings") or [],
+        presence_ext=data.get("presence_ext") if isinstance(data.get("presence_ext"), dict) else {},
     )
     for field_name in ("system_prompt", "description", "personality", "scenario",
                        "post_history_instructions", "post_history_extra"):
@@ -114,6 +121,26 @@ def load(filename_or_id: str) -> Character:
 
     logger.info(f"[character_loader] 角色 '{char.name}' 加载成功")
     return char
+
+
+def is_proactive_disabled(char_id: str | None = None) -> bool:
+    """presence_ext.proactive == "off" 判定（Brief 29 · 3.3 scheduler 发言闸门）。
+
+    char_id 显式传入时按 id 加载；未传时读当前活跃角色（pipeline_registry）。
+    全 fail-soft：加载失败/未注册/字段缺失 → False，绝不阻断发言（安全默认）。
+    """
+    try:
+        if char_id is not None:
+            char = load(char_id)
+        else:
+            from core import pipeline_registry
+            pl = pipeline_registry.get()
+            char = pl.character if pl is not None else None
+        if char is None:
+            return False
+        return (char.presence_ext or {}).get("proactive") == "off"
+    except Exception:
+        return False
 
 
 async def consistency_check(character: Character, last_reply: str) -> dict:

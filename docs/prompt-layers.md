@@ -720,6 +720,23 @@ PUT /prompt-ablation    body: {"disabled_layers": [...], "perception_block_disab
 `known_layers` 来源：`core/prompt_builder.py::KNOWN_LAYERS`（`[(层名, 一句话说明), ...]`），覆盖全部
 `build()` 中出现的 `_layer` 字面量；`perception_block` 不在此表内，由独立字段表达。
 
+### per-char 合并（Brief 29 · 3.1）
+
+`prompt_ablation.get_state()` 返回的 `disabled_layers` 是**全局开关文件 ∪ 活跃角色卡
+`presence_ext.disabled_layers`**。角色卡部分不缓存——每次调用都读当前活跃角色（走
+`pipeline_registry`），随角色切换即时生效，无需额外失效逻辑；`ALWAYS_ON`
+（`1_system_prompt` / `12_user_message`）对角色卡来源同样生效，不可被 per-char 配置消融。
+
+管理面板「层级开关」页展示/编辑的仍然是全局开关文件那一份，不包含角色卡贡献的部分——
+角色卡的 `disabled_layers` 只在角色 JSON 里手改，不经过这个 API。
+
+### 与 tool loop 的 `11.5_tool_nudge` 层的区别
+
+`core/pipeline.py::run_agentic_loop()` 注入的 `11.5_tool_nudge`（工具意愿软提示，见
+`docs/tools.md`）**不在这套消融机制的管辖范围内**：它不经过 `prompt_builder.build()`，
+只存在于 loop 的一次性 `loop_msgs` 副本里，因此故意不登记进 `KNOWN_LAYERS`——登记了也不会
+有任何过滤效果，属于两条独立链路。控制它的开关是 `config.tool_loop.nudge_hint`。
+
 ### 前端
 
 管理面板「Prompt 层检视」页新增「层级开关（消融测试）」卡片：勾选即关闭对应层注入，`ALWAYS_ON` 灰

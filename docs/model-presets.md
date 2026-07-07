@@ -87,11 +87,32 @@ model_presets:
       perform:        deepseek-default
 ```
 
+### `tool_call_mode` 取值与 tool loop 的组合行为
+
+| `tool_call_mode` | 单发 FC（`llm_client.chat(tools=)`） | Brief 28 tool loop（`config.tool_loop.enabled=true`） |
+|---|---|---|
+| `function_calling` | 支持，探针/路径A/B 正常调用 | 支持：`chat` preset 为此模式时 `tool_loop_active()` 才可能为真，主生成走 `run_agentic_loop`（多步自主调用） |
+| `xml_fallback` | 支持（`<tool_call>` 标签解析） | 不支持：`tool_loop_active()` 恒为假，即使总开关打开也维持原 `run_llm` 单发生成——小模型没有可靠的多步自主调用能力，这是设计边界，不是遗漏 |
+
+只有 `routing_profiles[active_routing].chat` 指向的 preset 是 `function_calling` 时，
+tool loop 才可能激活；`intent` / `probe` 等轻量 preset 的 `tool_call_mode` 与 tool loop 无关
+（探针在 tool loop 激活时会被跳过，见 `docs/tools.md` 路径C）。
+
 ### 路由解析规则
 
-1. 取 `routing_profiles[active_routing]`。
+0. **per-char 覆盖**（Brief 29 · 3.2）：活跃角色卡 `presence_ext.model_routing` 声明的 profile
+   名若存在于 `routing_profiles` → 替换第 1 步的 `active_routing`；profile 不存在时记 warning
+   并回落全局 `active_routing`（fail-open，不因为角色卡配置错误就打不出字）。这一步对所有
+   `call_category` 都生效，不只是 `chat`——本我挂 Claude 时 probe/summary/consolidation 等杂
+   活类别也会跟着这个 profile 走，是预期行为，卡里自己在 profile 定义里把杂活类别指到便宜
+   preset（参照下方 `claude-main` 样例）。
+1. 取 `routing_profiles[active_routing]`（第 0 步可能已替换）。
 2. 用 `call_category` 查 preset 名；查不到 → 回退到该 profile 的 `chat`；再查不到 → 第一个 preset。
 3. `vision` 不进 routing_profiles：继续用独立的 `vision:` 块。
+
+ModelClient 缓存（`core.model_registry._model_clients`）以**解析出的 preset 名**为 key，不是
+call_category 或 profile 名——每次调用都重新走上面 0~2 步解析 preset 名，天然随角色切换取到
+正确的 client，无需额外失效逻辑。
 
 ---
 

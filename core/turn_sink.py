@@ -176,6 +176,7 @@ async def record_assistant_turn(
     frozen_scope=None,
     char_id: Optional[str] = None,
     web_echo: bool = False,
+    loop_executed: bool = False,
 ) -> TurnResult:
     """
     Record one completed assistant turn and deliver it to the requested channels.
@@ -189,6 +190,7 @@ async def record_assistant_turn(
     经由 post_process 透传到 TTS/sticker side effects 和 scope freeze 链路。
     fanout=[] 时不执行 channel fanout（QQ visible send 由调用方在 adapter 内独立完成）。
     bypass_gate=True 时跳过 conversation_lock（QQ adapter 已在 conversation_lock 内）。
+    loop_executed（Brief 28）：本轮是否走了 tool loop，透传给 post_process → Path B 跳过判断。
     """
     from core.write_envelope import WriteEnvelope
     if envelope is None:
@@ -232,6 +234,7 @@ async def record_assistant_turn(
                 audit_extras=audit_extras,
                 frozen_scope=frozen_scope,
                 web_echo=web_echo,
+                loop_executed=loop_executed,
             )
         else:
             asyncio.create_task(
@@ -247,6 +250,7 @@ async def record_assistant_turn(
                     audit_extras=audit_extras,
                     frozen_scope=frozen_scope,
                     web_echo=web_echo,
+                    loop_executed=loop_executed,
                 )
             )
 

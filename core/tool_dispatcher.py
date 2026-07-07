@@ -964,12 +964,35 @@ def get_probe_prompt(location: str) -> str:
     return "\n".join(lines)
 
 
-_EXECUTE_ALLOWED_ORIGINS: frozenset[str] = frozenset({"user_live", "assistant_intent"})
+_EXECUTE_ALLOWED_ORIGINS: frozenset[str] = frozenset({"user_live", "assistant_intent", "assistant_loop"})
 _OWNER_ONLY_HARDWARE_TOOLS: frozenset[str] = frozenset({
     "toy_vibrate",
     "toy_stop",
     "toy_pattern",
 })
+
+
+def tool_loop_active(uid: str) -> bool:
+    """Brief 28 · Path C 总闸：tool_loop.enabled + owner 真实私聊 + chat preset 为
+    function_calling 模式，三者同时成立才为真。
+
+    群聊 / scheduler trigger / 梦境 / Stage 的调用点在到达这个判断之前就已经走了别的分支
+    （群聊在 main.py 里提前 return），本函数只需要核对 uid 是否为 owner。
+    main.py 与 admin/routers/chat.py 用同一个 helper 判断"是否跳过探针"和"是否走
+    run_agentic_loop"，两处判断必须一致，故抽在这里而不是各自内联。
+    """
+    cfg = get_config().get("tool_loop", {})
+    if not cfg.get("enabled", False):
+        return False
+    owner_id = str(get_config().get("scheduler", {}).get("owner_id") or "")
+    if not owner_id or str(uid) != owner_id:
+        return False
+    from core.model_registry import get_model_client
+    try:
+        mc = get_model_client("chat")
+    except Exception:
+        return False
+    return mc.tool_call_mode == "function_calling"
 
 
 async def execute(
@@ -990,7 +1013,8 @@ async def execute(
     ask_confirm_text: 高危工具等待确认时的询问文字，None 表示无需确认
 
     origin 必填，不在白名单则 fail-closed：返回 (None, None) + 记 warning。
-    白名单：user_live（Path A 用户发起）/ assistant_intent（Path B 意图执行，附加门控）。
+    白名单：user_live（Path A 用户发起）/ assistant_intent（Path B 意图执行，附加门控）/
+    assistant_loop（Path C tool loop 自主多步调用，Brief 28）。
     漏传 → TypeError，杜绝静默绕过。
     char_id: 当前活跃角色桶 id，用于 persist=True 工具的已读指纹检查和 short_term 回写。
     """

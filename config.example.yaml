@@ -242,6 +242,31 @@ action_trace:
   inject_window_hours: 24    # 只注入这个时间窗内的痕迹
   event_log_echo: true       # status=ok 时是否回流一条到 event_log（供日记/往事检索看见）
 
+# Brief 28 · tool loop 多步工具执行器：只在 chat preset 为 function_calling 模式的
+# owner 真实私聊（QQ / desktop）生效，小模型 xml_fallback / 探针路径零改动。
+# enabled: false 即完全回到现状（所有分支都在 tool_loop_active() 判断之后）。
+tool_loop:
+  enabled: false
+  max_steps: 5               # 单轮最多调用工具的步数，前端可调 1-8
+  total_timeout_s: 90        # 整个 loop 墙钟超时，超时按步数耗尽处理
+  categories: ["info", "desktop", "memory"]
+  exclude_tools: ["toy_vibrate", "toy_stop", "toy_pattern", "write_toy_file"]  # 硬件写类默认排除
+  nudge_hint: true           # 首步注入"别凭记忆编造，需要就调工具"的软提示（Brief 29 · 5）
+
+# MCP（Model Context Protocol）外部工具客户端（Brief 29 · 4）。
+# 只接外部工具，不接 resources/prompts、不接外部记忆库——外接记忆会绕过 prompt 层注入
+# 与固化链，裂成两套真相。工具只经 tool loop 暴露：角色卡 presence_ext.tool_categories
+# 含 "mcp" 才看得见这些工具，其余角色扮演场景不受影响。
+mcp_servers:
+  enabled: false
+  servers: []
+    # - name: filesystem
+    #   transport: stdio            # stdio | http（streamable http）
+    #   command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "D:/some/dir"]
+    #   # http 时用: url: https://your-mcp-server.example/mcp
+    #   tool_timeout_s: 30
+    #   allow_tools: []              # 空 = 全部；非空 = 白名单
+
 mode: production
 standalone_mode: false
 data_prefix: "data"

@@ -75,6 +75,15 @@ async def run_owner_chat_turn(
         logger.error("[owner_chat] scope freeze 失败，本轮中止: %s", _scope_err)
         raise HTTPException(status_code=503, detail="active character 状态异常，本轮中止")
 
+    # Brief 28 · Path C 总闸：开关开 + owner（此端点固定 owner）+ chat preset 为
+    # function_calling。为真时跳过探针，主生成走 run_agentic_loop。
+    from core import tool_dispatcher as _td_loop
+    _loop_active = _td_loop.tool_loop_active(user_id)
+    _loop_session_state = None
+    if _loop_active:
+        from core.session_state import get as _get_loop_state
+        _loop_session_state = _get_loop_state(f"user_{user_id}")
+
     _t_start = time.monotonic()
     async with conversation_lock(user_id):
         # probe（探针自读 short_term 最近 4 条，不吃 context）与 fetch_context
@@ -86,7 +95,11 @@ async def run_owner_chat_turn(
         async def _timed_probe():
             nonlocal _t_probe
             _t0 = time.monotonic()
-            result = await _probe_and_execute_tools(_probe_text, user_id, char_id=_frozen_scope.character_id)
+            if _loop_active:
+                # Path C 已激活：工具决策权整体移交主模型，跳过 pre-pipeline 探针。
+                result = None
+            else:
+                result = await _probe_and_execute_tools(_probe_text, user_id, char_id=_frozen_scope.character_id)
             _t_probe = time.monotonic() - _t0
             return result
 
@@ -130,8 +143,15 @@ async def run_owner_chat_turn(
             _chunks: list[str] = []
             _t_stream_launch = time.monotonic()
             _t_first_delta_ts = None
+            if _loop_active:
+                _stream_source = await pipeline.run_agentic_loop(
+                    messages, uid=user_id, char_id=_frozen_scope.character_id,
+                    session_state=_loop_session_state, is_group=False, stream=True,
+                )
+            else:
+                _stream_source = pipeline.run_llm_stream(messages)
             try:
-                async for piece in pipeline.run_llm_stream(messages):
+                async for piece in _stream_source:
                     if _t_first_delta_ts is None:
                         _t_first_delta_ts = time.monotonic()
                         _t_first_delta = _t_first_delta_ts - _t_stream_launch
@@ -145,7 +165,13 @@ async def run_owner_chat_turn(
         else:
             _stream_msg_id = None
             _t0 = time.monotonic()
-            reply = await pipeline.run_llm(messages)
+            if _loop_active:
+                reply = await pipeline.run_agentic_loop(
+                    messages, uid=user_id, char_id=_frozen_scope.character_id,
+                    session_state=_loop_session_state, is_group=False,
+                )
+            else:
+                reply = await pipeline.run_llm(messages)
             _t_llm = time.monotonic() - _t0
         if not reply:
             reply = ""
@@ -183,6 +209,7 @@ async def run_owner_chat_turn(
             envelope=stamp_user_chat(),
             frozen_scope=_frozen_scope,
             web_echo=_web_echo,
+            loop_executed=_loop_active,
         )
         _t_post = time.monotonic() - _t0
 

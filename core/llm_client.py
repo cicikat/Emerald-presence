@@ -8,6 +8,7 @@ Prompt-style 转换（narrative / xml）由 core.prompt_style 管理。
 import json
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -206,6 +207,86 @@ async def chat(
     except Exception as e:
         log_error(f"llm_client.chat[{call_category}]", e)
         raise
+
+
+def _prepare_call(
+    messages: list[dict],
+    call_category: str,
+    max_tokens_override: int | None,
+) -> tuple[ModelClient, list[dict], dict[str, Any]]:
+    """路由/参数合并/超时/prompt_style/sanitize 前处理，供 chat_turn() 复用。
+
+    与 chat() 内联的同一套前处理逻辑保持一致；chat() 本身不改动。
+    """
+    mc: ModelClient = get_model_client(call_category)
+    prepared = apply_prompt_style(messages, mc.prompt_style)
+    prepared = sanitize_messages(prepared)
+
+    gen_kwargs: dict[str, Any] = dict(mc.params)
+    if max_tokens_override is not None:
+        gen_kwargs["max_tokens"] = max_tokens_override
+    gen_kwargs["timeout"] = _CALL_TIMEOUTS.get(call_category, _DEFAULT_CALL_TIMEOUT)
+    return mc, prepared, gen_kwargs
+
+
+@dataclass
+class ChatTurn:
+    """一次 function_calling 主生成的结构化结果，供多步 tool loop 使用。"""
+
+    content: str                # 文本回复（""表示纯工具轮）
+    tool_calls: list[dict]      # [{id, name, arguments}]，空表示自然终止
+    assistant_message: dict     # 原样 API assistant 消息（含 tool_calls），供回填 messages
+
+
+async def chat_turn(
+    messages: list[dict],
+    tools: list[dict],
+    *,
+    call_category: str = "chat",
+    max_tokens_override: int | None = None,
+) -> ChatTurn:
+    """function_calling 模式下的单步调用，保留 tool_call id，供多步 tool loop 回填。
+
+    仅支持 function_calling 模式；preset 不是该模式时抛 ValueError（调用方保证不会发生）。
+    探针等既有 chat(tools=) 调用方继续用哨兵串，不迁移到这个 API。
+    """
+    mc, prepared, gen_kwargs = _prepare_call(messages, call_category, max_tokens_override)
+    if mc.tool_call_mode != "function_calling":
+        raise ValueError(
+            f"[llm_client.chat_turn] preset '{mc.name}' tool_call_mode="
+            f"{mc.tool_call_mode!r}，chat_turn 仅支持 function_calling"
+        )
+
+    try:
+        response = await mc.client.chat.completions.create(
+            model=mc.model,
+            messages=prepared,
+            tools=tools,
+            tool_choice="auto",
+            **gen_kwargs,
+        )
+    except Exception as e:
+        log_error(f"llm_client.chat_turn[{call_category}]", e)
+        raise
+
+    choice = response.choices[0]
+    message = choice.message
+    assistant_message = message.model_dump(exclude_none=True)
+
+    tool_calls: list[dict] = []
+    if choice.finish_reason == "tool_calls" and message.tool_calls:
+        for tc in message.tool_calls:
+            tool_calls.append({
+                "id": tc.id,
+                "name": tc.function.name,
+                "arguments": json.loads(tc.function.arguments),
+            })
+
+    return ChatTurn(
+        content=message.content or "",
+        tool_calls=tool_calls,
+        assistant_message=assistant_message,
+    )
 
 
 async def chat_stream(

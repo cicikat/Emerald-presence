@@ -293,7 +293,8 @@ async def test_execute_unknown_origins_rejected(sandbox, monkeypatch):
         )
 
     # Verify the whitelist is exactly what we expect
-    assert _EXECUTE_ALLOWED_ORIGINS == frozenset({"user_live", "assistant_intent"})
+    # (Brief 28 · Path C adds "assistant_loop" for the tool-loop executor)
+    assert _EXECUTE_ALLOWED_ORIGINS == frozenset({"user_live", "assistant_intent", "assistant_loop"})
 
 
 # ─────────────────────────────────────────────────────────────────────────────

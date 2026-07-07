@@ -25,7 +25,17 @@ def is_live_mode() -> bool:
 
 
 def legacy_tick_should_send(*, force: bool = False) -> bool:
-    return force or not is_live_mode()
+    """force=True（manual_trigger）无条件放行，语义与此前一致，不受 proactive=off 影响。
+
+    force=False 时叠加 Brief 29 · 3.3 proactive 闸门：活跃角色卡 proactive="off" 时
+    legacy speaking 路径同样让路（与 gating._decide 的闸门保持一致）。
+    """
+    if force:
+        return True
+    if is_live_mode():
+        return False
+    from core.character_loader import is_proactive_disabled
+    return not is_proactive_disabled()
 
 
 @dataclass(frozen=True)

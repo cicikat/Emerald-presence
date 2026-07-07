@@ -166,6 +166,17 @@ def _decide(uid: str, proposals: list[TriggerProposal]) -> tuple[Optional[Trigge
     user_active = _user_active_recently()
     dnd_active = is_dnd(uid)
 
+    # ── proactive=off 闸门（Brief 29 · 3.3）：活跃角色卡关闭主动发言时，拒绝全部
+    # 发言类 proposal。维护型扫描（episodic_decay/inner_diary_write/garden 浇水等）
+    # 不经过 gating._decide，不受影响。
+    from core.character_loader import is_proactive_disabled
+    if proposals and is_proactive_disabled():
+        candidates = [
+            _serialize_candidate(p, state, uid=uid, user_active=user_active, dnd_active=dnd_active)
+            for p in proposals
+        ]
+        return None, "proactive_off", candidates
+
     # ── Defer queue: handle expired items before building candidates ─────────
     # scan_expired() removes stale entries and returns names that should be
     # force-sent (bypassing active_window) or dropped (already cleaned up).

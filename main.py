@@ -376,6 +376,10 @@ async def handle_message(message: dict):
         from core.config_loader import get_config
         cfg = get_config()
 
+        # Brief 28 · Path C 总闸：开关开 + owner 私聊 + chat preset 为 function_calling。
+        # 为真时跳过 pre-pipeline 探针（工具决策权整体移交主模型），主生成走 run_agentic_loop。
+        _loop_active = tool_dispatcher.tool_loop_active(user_id)
+
         tool_result_text: str | None = None
 
         from core.memory import user_profile as _up
@@ -414,6 +418,16 @@ async def handle_message(message: dict):
                 "fast_path_risk": tool_dispatcher.tool_fast_path_risk(_fast_tool),
                 "user_message": _trusted_user_text,
                 "tool_calls": list(tool_calls),
+                "channel": "qq",
+            }
+        elif _loop_active:
+            # Brief 28 §3.4：loop 激活时跳过 pre-pipeline 探针，工具决策权整体移交主模型。
+            tool_calls = None
+            _probe_snap = {
+                "is_fast_path": False,
+                "skipped_reason": "tool_loop_active",
+                "user_message": _trusted_user_text,
+                "tool_calls": [],
                 "channel": "qq",
             }
         else:
@@ -536,7 +550,12 @@ async def handle_message(message: dict):
 
         # ── 步骤6：调用主 LLM ────────────────────────────────────────────────
         logger.info("[handle_message] 调用主 LLM...")
-        raw_reply = await _pipeline.run_llm(messages)
+        if _loop_active:
+            raw_reply = await _pipeline.run_agentic_loop(
+                messages, uid=user_id, char_id=_char_id, session_state=state, is_group=is_group,
+            )
+        else:
+            raw_reply = await _pipeline.run_llm(messages)
         try:
             from core.observe.prompt_capture import update_llm_output as _upd_prompt_out
             _upd_prompt_out(user_id, raw_reply)
@@ -561,6 +580,7 @@ async def handle_message(message: dict):
             frozen_scope=_frozen_scope,
             pending_paths=_meta.get("pending_paths", []),
             web_echo=bool(context.get("web_recall_result")),
+            loop_executed=_loop_active,
         )
 
 
@@ -741,6 +761,7 @@ async def _qq_reality_reply_adapter(
     frozen_scope,
     pending_paths: list | None = None,
     web_echo: bool = False,
+    loop_executed: bool = False,
 ) -> None:
     """
     QQ LLM_ASSISTANT_REPLY 统一出口（R1-D: turn_sink 统一链路）。
@@ -757,6 +778,7 @@ async def _qq_reality_reply_adapter(
 
     fanout=[]: visible send 已在 text_output.send 完成，turn_sink 不重复发送。
     bypass_gate=True: adapter 调用方已在 conversation_lock 内，无需重入。
+    loop_executed（Brief 28）：本轮是否走了 tool loop，透传给 record_assistant_turn。
     """
     from core.response_processor import strip_render_tags as _strip_rt
     from core.output import text_output
@@ -805,6 +827,7 @@ async def _qq_reality_reply_adapter(
             frozen_scope=frozen_scope,
             pipeline=_pipeline,
             web_echo=web_echo,
+            loop_executed=loop_executed,
         )
     except Exception as _ts_err:
         _log_error("qq_reality_reply_adapter.turn_sink", _ts_err)
@@ -835,6 +858,10 @@ async def main():
     from core import session_state
     session_state.start_cleanup_task()
     logger.info("会话超时清理任务已启动")
+
+    # MCP 客户端（Brief 29 · 4）：mcp_servers.enabled=false（默认）时零开销直接返回
+    from core import mcp_client
+    await mcp_client.init_mcp_servers()
 
     # slow_queue worker 必须在调度器（可能 enqueue）之前启动
     from core.post_process import slow_queue as _slow_queue
@@ -913,6 +940,7 @@ async def main():
         logger.error(f"主循环异常退出: {e}")
     finally:
         await _slow_queue.shutdown()
+        await mcp_client.shutdown_mcp_servers()
 
 
 if __name__ == "__main__":
