@@ -8,12 +8,14 @@ Prompt-style 转换（narrative / xml）由 core.prompt_style 管理。
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 from openai import AsyncOpenAI
 
+from core import thinking
 from core.config_loader import get_config
 from core.error_handler import log_error
 from core.model_registry import ModelClient, get_model_client, reload_registry
@@ -39,6 +41,7 @@ _CALL_TIMEOUTS: dict[str, float] = {
     "chat":           90.0,
     "vision":         30.0,
     "perform":        10.0,
+    "monologue":      10.0,
 }
 _DEFAULT_CALL_TIMEOUT: float = 90.0
 
@@ -100,6 +103,9 @@ async def chat(
     max_tokens_override: int | None = None,
     use_vision: bool = False,
     call_category: str = "chat",
+    *,
+    char_id: str | None = None,
+    is_proactive: bool = False,
 ) -> str:
     """
     调用 LLM 生成回复
@@ -109,6 +115,8 @@ async def chat(
         tools:    工具定义列表（function_calling 模式时使用）
         use_vision: 使用视觉模型处理图片
         call_category: 路由到对应 preset 的类别名
+        char_id:  显式指定"替谁说话"时传（Brief 30）；None（默认）按活跃角色解析，与现状一致
+        is_proactive: 本次是否 scheduler 主动消息（Brief 32 · thinking.apply_to_proactive 用）
 
     返回:
         模型生成的文本字符串
@@ -135,7 +143,13 @@ async def chat(
                 log_error("llm_client.chat.vision", e)
                 return ""
 
-    mc: ModelClient = get_model_client(call_category)
+    mc: ModelClient = get_model_client(call_category, char_id=char_id)
+
+    # Brief 32：monologue 路线在 prompt_style 转换前注入（作为普通 system 消息一并转换）；
+    # native 路线不改 messages，只影响下面的 extra_body。
+    messages = await thinking.maybe_apply(
+        messages, call_category=call_category, char_id=char_id, is_proactive=is_proactive, mc=mc,
+    )
 
     # Phase 2: apply prompt style BEFORE sanitize so _layer is still available
     messages = apply_prompt_style(messages, mc.prompt_style)
@@ -150,6 +164,9 @@ async def chat(
     if max_tokens_override is not None:
         _gen_kwargs["max_tokens"] = max_tokens_override
     _gen_kwargs["timeout"] = _timeout
+    _gen_kwargs.update(
+        thinking.build_reasoning_kwargs(mc, call_category=call_category, is_proactive=is_proactive)
+    )
 
     try:
         # ── function_calling 模式 ──────────────────────────────────────────
@@ -170,7 +187,7 @@ async def chat(
                         "arguments": json.loads(tc.function.arguments),
                     })
                 return "__TOOL_CALL__:" + json.dumps(tool_calls, ensure_ascii=False)
-            return choice.message.content or ""
+            return thinking.strip_think_tags(choice.message.content) or ""
 
         # ── xml_fallback 模式（不支持 FC 的模型）────────────────────────────
         elif mode == "xml_fallback" and tools:
@@ -193,7 +210,7 @@ async def chat(
                 messages=msgs,
                 **_gen_kwargs,
             )
-            return response.choices[0].message.content or ""
+            return thinking.strip_think_tags(response.choices[0].message.content) or ""
 
         # ── 普通对话（无工具）────────────────────────────────────────────────
         else:
@@ -202,7 +219,7 @@ async def chat(
                 messages=messages,
                 **_gen_kwargs,
             )
-            return response.choices[0].message.content or ""
+            return thinking.strip_think_tags(response.choices[0].message.content) or ""
 
     except Exception as e:
         log_error(f"llm_client.chat[{call_category}]", e)
@@ -213,12 +230,19 @@ def _prepare_call(
     messages: list[dict],
     call_category: str,
     max_tokens_override: int | None,
+    char_id: str | None = None,
+    is_proactive: bool = False,
 ) -> tuple[ModelClient, list[dict], dict[str, Any]]:
     """路由/参数合并/超时/prompt_style/sanitize 前处理，供 chat_turn() 复用。
 
     与 chat() 内联的同一套前处理逻辑保持一致；chat() 本身不改动。
+
+    monologue 注入不在此处做：chat_turn() 被 tool loop 逐步调用，_prepare_call
+    每步都会拿到一份新的临时消息列表（不会把注入结果写回调用方持有的 loop_msgs），
+    在这里注入会导致"每步都独白一次"。monologue 由调用方（pipeline.run_agentic_loop）
+    在进入循环前对 messages 做一次性注入，之后原样带过每一步。
     """
-    mc: ModelClient = get_model_client(call_category)
+    mc: ModelClient = get_model_client(call_category, char_id=char_id)
     prepared = apply_prompt_style(messages, mc.prompt_style)
     prepared = sanitize_messages(prepared)
 
@@ -226,6 +250,9 @@ def _prepare_call(
     if max_tokens_override is not None:
         gen_kwargs["max_tokens"] = max_tokens_override
     gen_kwargs["timeout"] = _CALL_TIMEOUTS.get(call_category, _DEFAULT_CALL_TIMEOUT)
+    gen_kwargs.update(
+        thinking.build_reasoning_kwargs(mc, call_category=call_category, is_proactive=is_proactive)
+    )
     return mc, prepared, gen_kwargs
 
 
@@ -244,13 +271,19 @@ async def chat_turn(
     *,
     call_category: str = "chat",
     max_tokens_override: int | None = None,
+    char_id: str | None = None,
+    is_proactive: bool = False,
 ) -> ChatTurn:
     """function_calling 模式下的单步调用，保留 tool_call id，供多步 tool loop 回填。
 
     仅支持 function_calling 模式；preset 不是该模式时抛 ValueError（调用方保证不会发生）。
     探针等既有 chat(tools=) 调用方继续用哨兵串，不迁移到这个 API。
+    char_id: 显式指定"替谁说话"时传（Brief 30）；None（默认）按活跃角色解析。
+    is_proactive: 本次是否 scheduler 主动消息（Brief 32）。
     """
-    mc, prepared, gen_kwargs = _prepare_call(messages, call_category, max_tokens_override)
+    mc, prepared, gen_kwargs = _prepare_call(
+        messages, call_category, max_tokens_override, char_id=char_id, is_proactive=is_proactive,
+    )
     if mc.tool_call_mode != "function_calling":
         raise ValueError(
             f"[llm_client.chat_turn] preset '{mc.name}' tool_call_mode="
@@ -272,6 +305,12 @@ async def chat_turn(
     choice = response.choices[0]
     message = choice.message
     assistant_message = message.model_dump(exclude_none=True)
+    # 铁律防线：思考内容不得经 assistant_message 混入 loop_msgs / 历史。
+    # reasoning_content 字段（部分网关的原生 reasoning 扩展）整个丢弃；
+    # content 里内联的 <think>/<thinking> 标签剥除。
+    assistant_message.pop("reasoning_content", None)
+    if assistant_message.get("content"):
+        assistant_message["content"] = thinking.strip_think_tags(assistant_message["content"])
 
     tool_calls: list[dict] = []
     if choice.finish_reason == "tool_calls" and message.tool_calls:
@@ -283,25 +322,43 @@ async def chat_turn(
             })
 
     return ChatTurn(
-        content=message.content or "",
+        content=thinking.strip_think_tags(message.content) or "",
         tool_calls=tool_calls,
         assistant_message=assistant_message,
     )
+
+
+_THINK_BUFFER_TIMEOUT_S = 60.0
 
 
 async def chat_stream(
     messages: list[dict],
     max_tokens_override: int | None = None,
     call_category: str = "chat",
+    *,
+    char_id: str | None = None,
+    is_proactive: bool = False,
 ):
     """流式生成，逐 token yield 文本增量（async generator）。
 
     仅用于无工具的主生成（主生成步骤本身无 tools 参数）。
     失败时抛异常，调用方（run_llm_stream）负责降级。
+    char_id: 显式指定"替谁说话"时传（Brief 30）；None（默认）按活跃角色解析。
+    is_proactive: 本次是否 scheduler 主动消息（Brief 32）。
+
+    native reasoning 防线：
+      - delta.reasoning_content 从不读取（只读 delta.content），天然跳过。
+      - 内联 <think>/<thinking>：首个非空 chunk 以其开头则进入缓冲态，直到读到闭合标签
+        才开始对外 yield；缓冲超 60s 或流结束仍未闭合 → fail-open，剥掉已缓冲的开标签
+        前缀后放行剩余部分。
     """
     _timeout = _CALL_TIMEOUTS.get(call_category, _DEFAULT_CALL_TIMEOUT)
 
-    mc: ModelClient = get_model_client(call_category)
+    mc: ModelClient = get_model_client(call_category, char_id=char_id)
+
+    messages = await thinking.maybe_apply(
+        messages, call_category=call_category, char_id=char_id, is_proactive=is_proactive, mc=mc,
+    )
 
     messages = apply_prompt_style(messages, mc.prompt_style)
     messages = sanitize_messages(messages)
@@ -310,6 +367,9 @@ async def chat_stream(
     if max_tokens_override is not None:
         _gen_kwargs["max_tokens"] = max_tokens_override
     _gen_kwargs["timeout"] = _timeout
+    _gen_kwargs.update(
+        thinking.build_reasoning_kwargs(mc, call_category=call_category, is_proactive=is_proactive)
+    )
 
     stream = await mc.client.chat.completions.create(
         model=mc.model,
@@ -317,13 +377,54 @@ async def chat_stream(
         stream=True,
         **_gen_kwargs,
     )
+
+    first_piece_seen = False
+    in_think_buffer = False
+    buf = ""
+    buf_deadline = 0.0
+
     async for chunk in stream:
         if not chunk.choices:
             continue
         delta = chunk.choices[0].delta
         piece = getattr(delta, "content", None)
-        if piece:
-            yield piece
+        if not piece:
+            continue
+
+        if not first_piece_seen:
+            first_piece_seen = True
+            if thinking.THINK_OPEN_RE.match(piece):
+                in_think_buffer = True
+                buf = piece
+                buf_deadline = time.monotonic() + _THINK_BUFFER_TIMEOUT_S
+                continue
+
+        if in_think_buffer:
+            buf += piece
+            m = thinking.THINK_CLOSE_RE.search(buf)
+            if m:
+                in_think_buffer = False
+                remainder = buf[m.end():]
+                buf = ""
+                if remainder:
+                    yield remainder
+                continue
+            if time.monotonic() >= buf_deadline:
+                in_think_buffer = False
+                stripped = thinking.THINK_OPEN_RE.sub("", buf, count=1)
+                buf = ""
+                if stripped:
+                    yield stripped
+                continue
+            continue
+
+        yield piece
+
+    # 流结束但仍在缓冲态（未闭合）→ fail-open，把已缓冲内容剥掉开标签后放行。
+    if in_think_buffer and buf:
+        stripped = thinking.THINK_OPEN_RE.sub("", buf, count=1)
+        if stripped:
+            yield stripped
 
 
 def parse_tool_call_response(response: str) -> list[dict] | None:

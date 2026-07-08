@@ -76,7 +76,7 @@ def _make_fake_pipeline(llm_fn=None):
         def build_prompt(self, uid, content, context, **kw):
             return [{"role": "user", "content": content}], {}
 
-        async def run_llm(self, messages):
+        async def run_llm(self, messages, **kw):
             if llm_fn:
                 return await llm_fn(messages)
             return "test_reply"
@@ -334,7 +334,7 @@ async def test_duplicate_scheduler_event_no_llm_no_post_process(monkeypatch):
         def build_prompt(self, uid, content, context, **kw):
             return [], {}
 
-        async def run_llm(self, messages):
+        async def run_llm(self, messages, **kw):
             return await counting_llm(messages)
 
         async def post_process(self, uid, content, reply, **kwargs):

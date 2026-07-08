@@ -26,7 +26,7 @@ def _patch_now(monkeypatch, time_based, *ymdhms):
 
 
 def _fake_chat_factory(calls):
-    async def fake_chat(*, messages, max_tokens_override=None):
+    async def fake_chat(*, messages, max_tokens_override=None, char_id=None):
         calls.append(messages)
         if len(calls) % 2 == 1:
             return "## 今日事件\n- 14:30 聊了几句"

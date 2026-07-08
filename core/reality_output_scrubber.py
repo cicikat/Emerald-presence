@@ -87,6 +87,10 @@ def scrub_reality_output_text(
     if text is None:
         return None
 
+    # Brief 32 三道防线之三：其余路径漏网的内联 <think>/<thinking> 标签在这里兜底剥除。
+    from core.thinking import strip_think_tags
+    text = strip_think_tags(text)
+
     if segments is not None:
         say_parts = [s["text"] for s in segments if s.get("type") == "say"]
         if say_parts:

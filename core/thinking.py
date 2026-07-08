@@ -1,0 +1,254 @@
+"""
+core/thinking — Brief 32：内部思考链（原生 reasoning + 前置独白，可开关）。
+
+全局开关，默认关。两条路按 preset 能力自动选：
+  - native：preset.reasoning_native=true 时，把 preset.reasoning_extra_body 原样并入
+    请求 extra_body（故意绕过 provider 参数白名单，见 core/model_registry.py）。
+  - monologue：主生成前一次轻量调用产出内心活动，注入当轮 messages 尾部（用户消息之前），
+    用完即弃。
+
+铁律：思考内容永不进 short_term history、永不广播、永不落 event_log；唯一合法去向是
+当轮主调用的 messages。本模块不做任何持久化。
+"""
+from __future__ import annotations
+
+import logging
+import re
+from typing import TYPE_CHECKING, Any
+
+from core.config_loader import get_config
+
+if TYPE_CHECKING:
+    from core.model_registry import ModelClient
+
+logger = logging.getLogger(__name__)
+
+_MONOLOGUE_LAYER = "11.7_inner_monologue"
+# 独白调用的 10s 超时在 core/llm_client.py 的 _CALL_TIMEOUTS["monologue"] 里统一管理。
+_MONOLOGUE_MAX_TOKENS_DEFAULT = 200
+
+# 剥离内联 <think>/<thinking> 标签（含跨行），native 路线三道防线之二。
+_THINK_TAG_RE = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.S | re.I)
+# 公开给 llm_client.chat_stream() 做流式缓冲判断（开标签探测 / 闭标签搜索）。
+THINK_OPEN_RE = re.compile(r"^\s*<think(?:ing)?>", re.I)
+THINK_CLOSE_RE = re.compile(r"</think(?:ing)?>", re.S | re.I)
+
+
+def strip_think_tags(text: str | None) -> str | None:
+    """剥除文本中的 <think>…</think> / <thinking>…</thinking>（含跨行、大小写不敏感）。"""
+    if not text:
+        return text
+    return _THINK_TAG_RE.sub("", text)
+
+
+# ---------------------------------------------------------------------------
+# 配置读取
+# ---------------------------------------------------------------------------
+
+def _cfg() -> dict:
+    return get_config().get("thinking", {}) or {}
+
+
+def is_enabled() -> bool:
+    return bool(_cfg().get("enabled", False))
+
+
+def get_mode() -> str:
+    return _cfg().get("mode", "auto")
+
+
+def get_monologue_max_tokens() -> int:
+    return int(_cfg().get("monologue_max_tokens", _MONOLOGUE_MAX_TOKENS_DEFAULT))
+
+
+def get_apply_to_proactive() -> bool:
+    return bool(_cfg().get("apply_to_proactive", False))
+
+
+# ---------------------------------------------------------------------------
+# 模式解析
+# ---------------------------------------------------------------------------
+
+def resolve_effective_mode(mc: "ModelClient", *, is_proactive: bool = False) -> str | None:
+    """返回本次调用应走的路线："native" | "monologue" | None（不思考）。
+
+    只对主生成（call_category=="chat"）语义有效，call_category 的过滤由调用方
+    （llm_client）负责，本函数只管开关 + mode 语义。
+    """
+    if not is_enabled():
+        return None
+    if is_proactive and not get_apply_to_proactive():
+        return None
+    mode = get_mode()
+    if mode == "native":
+        return "native"
+    if mode == "monologue":
+        return "monologue"
+    # auto
+    return "native" if getattr(mc, "reasoning_native", False) else "monologue"
+
+
+def build_reasoning_kwargs(
+    mc: "ModelClient", *, call_category: str, is_proactive: bool = False
+) -> dict[str, Any]:
+    """native 路线的 extra_body 逃生舱：绕过 provider 参数白名单，原样透传。
+
+    只在主生成（call_category=="chat"）且解析到 native 路线时生效；其余 call_category
+    （intent/probe/summary/...）不受思考开关影响，成本不翻倍。
+    """
+    if call_category != "chat":
+        return {}
+    if resolve_effective_mode(mc, is_proactive=is_proactive) != "native":
+        return {}
+    extra_body = getattr(mc, "reasoning_extra_body", None)
+    if not extra_body:
+        return {}
+    return {"extra_body": extra_body}
+
+
+# ---------------------------------------------------------------------------
+# monologue 路线：前置独白
+# ---------------------------------------------------------------------------
+
+_MONOLOGUE_SYSTEM_TEMPLATE = (
+    "你是{char_name}。看到对方刚说的话，先在心里想一下："
+    "对方想要什么/你此刻的情绪/你打算怎么回。\n"
+    "口语化、跳跃、不成段都行，{max_chars}字以内。只输出内心活动本身，不要输出任何前缀、标签或引号。"
+)
+
+
+def _truncate(s: str, n: int) -> str:
+    s = (s or "").strip()
+    if not s:
+        return ""
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def _last_user_content(messages: list[dict]) -> str:
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            return m.get("content", "") if isinstance(m.get("content"), str) else ""
+    return ""
+
+
+def _recent_history_summary(messages: list[dict], char_name: str) -> str:
+    """从已构建好的 messages 里取 9_history 层最近两轮，拼一句摘要。不发起新的记忆查询。"""
+    hist = [m for m in messages if m.get("_layer") == "9_history"][-4:]
+    lines = []
+    for m in hist:
+        content = m.get("content", "")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        speaker = "对方" if m.get("role") == "user" else char_name
+        lines.append(f"{speaker}：{_truncate(content, 40)}")
+    return "\n".join(lines)
+
+
+def _mood_hint(char_id: str | None) -> str:
+    try:
+        import json
+        from core.data_paths import DEFAULT_CHAR_ID
+        from core.mood_text import get_mood_text
+        from core.sandbox import get_paths
+
+        mood_raw = json.loads(
+            get_paths().mood_state(char_id=char_id or DEFAULT_CHAR_ID).read_text(encoding="utf-8")
+        )
+        return get_mood_text(mood_raw)
+    except Exception:
+        return ""
+
+
+async def _run_monologue_call(messages: list[dict], *, char_id: str | None) -> str | None:
+    """一次轻量调用产出内心活动。失败/超时/空结果 → None（fail-open，调用方跳过注入）。"""
+    from core.config_loader import _char_name
+
+    try:
+        char_name = _char_name()
+        user_msg = _truncate(_last_user_content(messages), 200)
+        mood_hint = _mood_hint(char_id)
+        hist_summary = _recent_history_summary(messages, char_name)
+
+        system = _MONOLOGUE_SYSTEM_TEMPLATE.format(
+            char_name=char_name, max_chars=get_monologue_max_tokens()
+        )
+        user_content = (
+            f"对方刚说：{user_msg}\n你的心情：{mood_hint}\n最近两轮对话：\n{hist_summary}"
+        )
+        mono_messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_content},
+        ]
+
+        from core import llm_client
+
+        reply = await llm_client.chat(
+            mono_messages,
+            call_category="monologue",
+            max_tokens_override=get_monologue_max_tokens(),
+            char_id=char_id,
+        )
+        reply = strip_think_tags(reply) or ""
+        reply = reply.strip()
+        return reply or None
+    except Exception as e:
+        from core.error_handler import log_error
+        log_error("thinking.monologue", e)
+        return None
+
+
+def _inject_monologue_message(messages: list[dict], monologue: str) -> list[dict]:
+    out = list(messages)
+    block = {
+        "role": "system",
+        "content": f"（你此刻的内心活动，不要直接复述：{monologue}）",
+        "_layer": _MONOLOGUE_LAYER,
+    }
+    if out and out[-1].get("role") == "user":
+        out.insert(len(out) - 1, block)
+    else:
+        out.append(block)
+    return out
+
+
+async def maybe_apply(
+    messages: list[dict],
+    *,
+    call_category: str,
+    char_id: str | None = None,
+    is_proactive: bool = False,
+    mc: "ModelClient | None" = None,
+) -> list[dict]:
+    """monologue 路线的唯一入口：条件不满足时原样返回 messages（no-op）。
+
+    - 非 call_category=="chat" → no-op（探针/摘要等杂活不思考）。
+    - 总开关关闭 / apply_to_proactive 不满足 → no-op，且不触碰 model_registry
+      （thinking 关闭是默认状态，不该为了这次判断额外构建一个 ModelClient）。
+    - 已包含 11.7_inner_monologue 层 → no-op（tool loop 多步复用同一份 messages 时防重复注入）。
+    - 解析路线不是 monologue（native / 关闭）→ no-op。
+    - 独白调用失败/超时/空结果 → no-op，fail-open，主生成照常。
+    """
+    if call_category != "chat":
+        return messages
+    if not is_enabled():
+        return messages
+    if is_proactive and not get_apply_to_proactive():
+        return messages
+    if any(m.get("_layer") == _MONOLOGUE_LAYER for m in messages):
+        return messages
+
+    mode = get_mode()
+    if mode == "native":
+        return messages
+    if mode == "auto":
+        if mc is None:
+            from core.model_registry import get_model_client
+            mc = get_model_client(call_category, char_id=char_id)
+        if mc.reasoning_native:
+            return messages
+    # mode == "monologue"，或 auto 落到 monologue 分支
+
+    monologue = await _run_monologue_call(messages, char_id=char_id)
+    if not monologue:
+        return messages
+    return _inject_monologue_message(messages, monologue)

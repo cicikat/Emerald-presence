@@ -34,7 +34,7 @@ class _FakePipeline:
     def build_prompt(self, uid, prompt, context, **kwargs):
         return [{"role": "user", "content": prompt}], {}
 
-    async def run_llm(self, messages):
+    async def run_llm(self, messages, **kwargs):
         return "reply"
 
 

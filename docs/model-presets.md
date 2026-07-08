@@ -114,6 +114,30 @@ ModelClient 缓存（`core.model_registry._model_clients`）以**解析出的 pr
 call_category 或 profile 名——每次调用都重新走上面 0~2 步解析 preset 名，天然随角色切换取到
 正确的 client，无需额外失效逻辑。
 
+### `reasoning_native` / `reasoning_extra_body`（Brief 32 · 内部思考链）
+
+preset 侧可选字段，供 `config.thinking.mode: auto` 判断该 preset 走 native reasoning 还是
+前置独白（`mode: native` / `mode: monologue` 显式指定时忽略这两个字段的自动判定语义，
+但 `reasoning_extra_body` 仍在 `mode: native` 下生效）：
+
+```yaml
+    deepseek-reasoner:
+      provider_kind: deepseek
+      model: deepseek-reasoner
+      tool_call_mode: xml_fallback    # deepseek-reasoner 不支持 function_calling
+      reasoning_native: true          # 声明该 preset 有原生思考
+      reasoning_extra_body: {}        # 原样经 OpenAI client 的 extra_body 透传，绕过参数白名单
+```
+
+- `reasoning_extra_body` 是**逃生舱**：`core/model_registry.py` 的 `PROVIDER_PROFILES` 参数白名单
+  只放行 `temperature`/`top_p`/`max_tokens` 这类通用生成参数，reasoning 类参数（o 系
+  `reasoning_effort`、anthropic 网关的 thinking budget 等）网关方言差异太大，代码不做每家适配
+  （与 Brief 29 §4.3 同一原则）——用户自己按目标网关文档把整个 dict 填进 `reasoning_extra_body`，
+  `llm_client` 在构建请求 kwargs 时原样并入 `extra_body=`（OpenAI python client 支持），不经白名单。
+- `reasoning_extra_body` 只在**主生成**（`call_category=="chat"`）且解析到 native 路线时被注入；
+  `intent`/`probe`/`summary` 等杂活类别不受影响，成本不会因为开了思考而全面翻倍。
+- 详见 `cc-tasks/32-内部思考链.md` 与 `config.thinking` 顶层配置块。
+
 ---
 
 ## provider_kind 适配表

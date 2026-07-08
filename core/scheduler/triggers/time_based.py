@@ -492,6 +492,7 @@ async def _generate_and_store_diary(oid: str, char_id: str) -> None:
     facts_content = await llm_client.chat(
         messages=[{"role": "user", "content": facts_prompt}],
         max_tokens_override=200,
+        char_id=char_id,
     )
 
     # ── 感受层：注入 voice anchor，写有温度的私人日记 ──
@@ -523,6 +524,7 @@ async def _generate_and_store_diary(oid: str, char_id: str) -> None:
     feeling_content = await llm_client.chat(
         messages=[{"role": "user", "content": feeling_prompt}],
         max_tokens_override=450,
+        char_id=char_id,
     )
 
     # ── 事件层规则纠察（感受层不受影响）──

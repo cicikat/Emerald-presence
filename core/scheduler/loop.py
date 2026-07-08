@@ -481,7 +481,7 @@ async def _pipeline_send(
             messages, _ = _pipeline.build_prompt(
                 oid, prompt, context, char_id=_frozen_scope.character_id
             )
-            reply = await _pipeline.run_llm(messages)
+            reply = await _pipeline.run_llm(messages, is_proactive=True)
             if reply:
                 try:
                     from core.observe.prompt_capture import update_llm_output as _upd_prompt_out

@@ -57,7 +57,8 @@ async def test_stage_character_view_uses_explicit_scope_and_prompt_context(sandb
             captured["kwargs"] = kwargs
             return ([{"role": "user", "content": content}], {})
 
-        async def run_llm(self, messages):
+        async def run_llm(self, messages, *, char_id=None):
+            captured["run_llm_char_id"] = char_id
             return "reply"
 
     view = object.__new__(StageCharacterView)
@@ -75,6 +76,7 @@ async def test_stage_character_view_uses_explicit_scope_and_prompt_context(sandb
     assert captured["kwargs"]["char_id"] == "yexuanJ-5412"
     assert captured["kwargs"]["consume_pending_perception"] is False
     assert captured["prompt_content"] != "hello"
+    assert captured["run_llm_char_id"] == "yexuanJ-5412"
 
 
 @pytest.mark.asyncio

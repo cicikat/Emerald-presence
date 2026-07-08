@@ -737,6 +737,23 @@ PUT /prompt-ablation    body: {"disabled_layers": [...], "perception_block_disab
 只存在于 loop 的一次性 `loop_msgs` 副本里，因此故意不登记进 `KNOWN_LAYERS`——登记了也不会
 有任何过滤效果，属于两条独立链路。控制它的开关是 `config.tool_loop.nudge_hint`。
 
+### `11.7_inner_monologue` 层（Brief 32 · 内部思考链，前置独白路线）
+
+`core/thinking.py::maybe_apply()` 在 `llm_client.chat()` / `chat_stream()` 以及
+`pipeline.run_agentic_loop()` 进入循环前注入，同样**不经过 `prompt_builder.build()`**，
+不登记进 `KNOWN_LAYERS`，与 `11.5_tool_nudge` 是同一类"消融机制管辖范围外"的层。
+
+内容是一次轻量 LLM 调用（`call_category="monologue"`）产出的角色内心活动，以
+`（你此刻的内心活动，不要直接复述：{monologue}）` 的 system 消息形式插在 messages
+尾部、用户消息之前。只在 `config.thinking.enabled=true` 且解析到 monologue 路线
+（`mode: monologue`，或 `mode: auto` 且 chat preset 未声明 `reasoning_native`）时注入；
+tool loop 内通过"messages 中已存在该 `_layer` 则跳过"的判断确保多步循环只独白一次
+（首步前），不会每步重复调用。
+
+**铁律**：这条内容永不写入 `short_term` history、不广播、不落 `event_log`——它只存在于
+当轮调用方持有的 messages 副本里，函数返回后随对象一起被丢弃，下一轮 `build_prompt()`
+产出全新的 messages 时不会带着它。
+
 ### 前端
 
 管理面板「Prompt 层检视」页新增「层级开关（消融测试）」卡片：勾选即关闭对应层注入，`ALWAYS_ON` 灰

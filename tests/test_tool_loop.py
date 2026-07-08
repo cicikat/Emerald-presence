@@ -80,7 +80,8 @@ def _script_execute(monkeypatch, results: list[tuple]):
 def _patch_final_chat(monkeypatch, text: str):
     calls: list[list[dict]] = []
 
-    async def _fake(messages, tools=None, max_tokens_override=None, use_vision=False, call_category="chat"):
+    async def _fake(messages, tools=None, max_tokens_override=None, use_vision=False, call_category="chat",
+                     char_id=None, is_proactive=False):
         calls.append([dict(m) for m in messages])
         return text
 
@@ -336,7 +337,8 @@ async def test_stream_tool_step_nonstream_final_streamed(monkeypatch):
 
     stream_calls: list[list[dict]] = []
 
-    async def _fake_chat_stream(messages, max_tokens_override=None, call_category="chat"):
+    async def _fake_chat_stream(messages, max_tokens_override=None, call_category="chat", char_id=None,
+                                 is_proactive=False):
         stream_calls.append([dict(m) for m in messages])
         for piece in ["你", "好", "呀"]:
             yield piece

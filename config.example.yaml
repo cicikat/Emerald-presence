@@ -41,6 +41,17 @@ model_presets:
       tool_call_mode: xml_fallback
       prompt_style: narrative
 
+    deepseek-reasoner:              # 原生 reasoning 示例（Brief 32）；无 function_calling
+      provider_kind: deepseek
+      base_url: https://api.deepseek.com
+      api_key: YOUR_DEEPSEEK_API_KEY
+      model: deepseek-reasoner
+      tool_call_mode: xml_fallback  # deepseek-reasoner 不支持 FC，与 tool loop 天然互斥
+      reasoning_native: true        # 声明该 preset 有原生思考（thinking.mode=auto 时据此选 native）
+      reasoning_extra_body: {}      # 原样经 OpenAI client 的 extra_body 透传，绕过参数白名单（逃生舱）；
+                                     # 网关方言差异（o系 reasoning_effort、anthropic 网关 thinking budget
+                                     # 等）自己按目标网关文档填，代码不做每家适配
+
   routing_profiles:
     default:                       # 全 DeepSeek，等价旧行为
       chat:           deepseek-default
@@ -50,6 +61,8 @@ model_presets:
       detect_emotion: deepseek-default
       consolidation:  deepseek-default
       perform:        deepseek-default   # 句级表演意图映射（仅 performance_mapping.provider=llm 时使用）
+      monologue:      deepseek-default   # 前置独白轻量调用（Brief 32）；显式指到便宜 preset，
+                                          # 缺省会回落 chat 键走主力贵模型
 
     claude-main:                   # 主对话走 Claude，杂活留 DS
       chat:           claude-sonnet
@@ -59,6 +72,7 @@ model_presets:
       detect_emotion: deepseek-default
       consolidation:  deepseek-default
       perform:        deepseek-default
+      monologue:      deepseek-default
 
 # ── Legacy 扁平 llm: 块（向后兼容，无 model_presets 时生效）────────────────
 llm:
@@ -252,6 +266,17 @@ tool_loop:
   categories: ["info", "desktop", "memory"]
   exclude_tools: ["toy_vibrate", "toy_stop", "toy_pattern", "write_toy_file"]  # 硬件写类默认排除
   nudge_hint: true           # 首步注入"别凭记忆编造，需要就调工具"的软提示（Brief 29 · 5）
+
+# Brief 32 · 内部思考链：主生成前一段不输出给用户的内心思考，缓解"不带思考有些生硬"。
+# 两条路按 preset 能力自动选（mode: auto）：preset.reasoning_native=true → native
+# （extra_body 逃生舱直通网关，见 model_presets.presets.deepseek-reasoner 示例）；
+# 否则 → monologue（一次轻量调用产出内心活动，注入当轮 messages 尾部，用完即弃）。
+# 铁律：思考内容永不进 short_term history / 广播 / event_log。
+thinking:
+  enabled: false             # 总开关，默认关
+  mode: auto                 # auto | native | monologue
+  monologue_max_tokens: 200
+  apply_to_proactive: false  # scheduler 主动消息是否也思考（默认省钱不开）
 
 # MCP（Model Context Protocol）外部工具客户端（Brief 29 · 4）。
 # 只接外部工具，不接 resources/prompts、不接外部记忆库——外接记忆会绕过 prompt 层注入

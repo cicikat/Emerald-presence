@@ -9,7 +9,7 @@ Phase 2: prompt_style wiring is done in llm_client.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -56,6 +56,8 @@ class ModelClient:
     prompt_style: str        # "narrative" | "xml"
     params: dict[str, Any]  # merged + whitelist-filtered generation params
     client: AsyncOpenAI
+    reasoning_native: bool = False                       # Brief 32：preset 声明原生 reasoning 支持
+    reasoning_extra_body: dict[str, Any] = field(default_factory=dict)  # 原样透传 extra_body，绕过参数白名单（逃生舱）
 
 
 # preset_name → built ModelClient; cleared on reload_registry()
@@ -164,12 +166,28 @@ def _active_char_model_routing() -> str | None:
         return None
 
 
-def _resolve_preset_name(call_category: str) -> str:
+def _char_model_routing(char_id: str) -> str | None:
+    """指定角色卡（非活跃角色）的 presence_ext.model_routing（Brief 30 · 2.1）。
+
+    显式 char_id 路径：只读该角色自己的卡，不回落到活跃角色的 override。
+    fail-soft：加载失败/字段缺失 → None（回落全局 active_routing）。
+    """
+    try:
+        from core import character_loader
+        char = character_loader.load(char_id)
+        return getattr(char, "presence_ext", {}).get("model_routing") or None
+    except Exception:
+        return None
+
+
+def _resolve_preset_name(call_category: str, char_id: str | None = None) -> str:
     """Map a call_category to a preset name via the active routing profile.
 
-    Routing profile selection (Brief 29 · 3.2):
-      1. 活跃角色卡 presence_ext.model_routing，若该 profile 存在于 routing_profiles → 用它
-      2. 否则回落全局 active_routing（profile 不存在时记 warning）
+    Routing profile selection:
+      1. 显式 char_id 给定（Brief 30）→ 读该角色卡 presence_ext.model_routing；
+         否则活跃角色卡 presence_ext.model_routing（Brief 29 · 3.2）
+      2. 若该 profile 存在于 routing_profiles → 用它，否则回落全局 active_routing
+         （profile 不存在时记 warning）
 
     Fallback chain within the chosen profile:
       1. profile → call_category key
@@ -180,7 +198,7 @@ def _resolve_preset_name(call_category: str) -> str:
     profiles = mp.get("routing_profiles", {})
     active = mp.get("active_routing", "default")
 
-    char_routing = _active_char_model_routing()
+    char_routing = _char_model_routing(char_id) if char_id else _active_char_model_routing()
     if char_routing:
         if char_routing in profiles:
             active = char_routing
@@ -240,12 +258,18 @@ def _build_model_client(preset_name: str) -> ModelClient:
         prompt_style=prompt_style,
         params=params,
         client=oa_client,
+        reasoning_native=bool(preset.get("reasoning_native", False)),
+        reasoning_extra_body=dict(preset.get("reasoning_extra_body") or {}),
     )
 
 
-def get_model_client(call_category: str) -> ModelClient:
-    """Resolve call_category → preset → ModelClient (cached per preset name)."""
-    preset_name = _resolve_preset_name(call_category)
+def get_model_client(call_category: str, *, char_id: str | None = None) -> ModelClient:
+    """Resolve call_category → preset → ModelClient (cached per preset name).
+
+    char_id=None（默认）：按活跃角色解析，与现状完全一致。
+    char_id 给定：按该角色卡自己的 model_routing 解析（Brief 30 · char 维度穿线）。
+    """
+    preset_name = _resolve_preset_name(call_category, char_id=char_id)
     if preset_name not in _model_clients:
         _model_clients[preset_name] = _build_model_client(preset_name)
     return _model_clients[preset_name]

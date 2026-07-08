@@ -612,14 +612,21 @@ class Pipeline:
     # 步骤 3：调用 LLM（含重试）
     # ──────────────────────────────────────────────────────────────────────────
 
-    async def run_llm(self, messages: list[dict]) -> str:
-        """调用 LLM 生成回复，失败自动重试。"""
+    async def run_llm(
+        self, messages: list[dict], *, char_id: str | None = None, is_proactive: bool = False
+    ) -> str:
+        """调用 LLM 生成回复，失败自动重试。
+
+        char_id: 显式指定"替谁说话"时传（Brief 30，如 Stage 群聊非活跃角色）；
+          None（默认）按活跃角色解析，与现状一致。
+        is_proactive: 本次是否 scheduler 主动消息（Brief 32 · thinking.apply_to_proactive 用）。
+        """
         from core import llm_client
         from core.error_handler import with_retry
 
         @with_retry(module_name="pipeline.llm_call")
         async def _call():
-            return await llm_client.chat(messages)
+            return await llm_client.chat(messages, char_id=char_id, is_proactive=is_proactive)
 
         reply = await _call()
         return await self._anti_collapse_prefix_retry(messages, reply)
@@ -668,17 +675,22 @@ class Pipeline:
             log_error("pipeline._anti_collapse_prefix_retry", e)
             return reply
 
-    async def run_llm_stream(self, messages: list[dict]):
+    async def run_llm_stream(
+        self, messages: list[dict], *, char_id: str | None = None, is_proactive: bool = False
+    ):
         """流式生成，逐 token yield。失败（含零产出）时降级为非流式整段 yield 一次。
 
         降级语义：
         - 0 token + 异常 → 非流式 run_llm 兜底（完整输出）。
         - 部分 token + 异常 → 中止，不追加非流式文本（避免重复拼接）。
+
+        char_id: 显式指定"替谁说话"时传（Brief 30）；None（默认）按活跃角色解析。
+        is_proactive: 本次是否 scheduler 主动消息（Brief 32）。
         """
         from core import llm_client
         got_any = False
         try:
-            async for piece in llm_client.chat_stream(messages):
+            async for piece in llm_client.chat_stream(messages, char_id=char_id, is_proactive=is_proactive):
                 got_any = True
                 yield piece
             # 流正常结束
@@ -691,7 +703,7 @@ class Pipeline:
             if got_any:
                 # 已推出部分 token，中止而非追加以免重复
                 return
-        full = await self.run_llm(messages)
+        full = await self.run_llm(messages, char_id=char_id, is_proactive=is_proactive)
         if full:
             yield full
 
@@ -708,6 +720,7 @@ class Pipeline:
         session_state,
         is_group: bool = False,
         stream: bool = False,
+        is_proactive: bool = False,
     ):
         """主生成多步调用工具再回答，只在 tool_dispatcher.tool_loop_active(uid) 为真时被调用。
 
@@ -715,11 +728,18 @@ class Pipeline:
         工具决策步骤全程非流式——chat_turn 需要 tools 参数，与 chat_stream 的既有约束冲突）。
 
         origin 固定传 "assistant_loop"（tool_dispatcher._EXECUTE_ALLOWED_ORIGINS 白名单项）。
+        is_proactive: 本次是否 scheduler 主动消息（Brief 32）。
         """
-        from core import llm_client
+        from core import llm_client, thinking
         from core.config_loader import get_config
         from core.error_handler import log_error
         from core.tool_dispatcher import execute as _execute, get_tools_schema
+
+        # Brief 32：monologue 注入只做一次（首步前），loop 内逐步复用同一份 loop_msgs，
+        # 之后每步的 chat_turn() 不会重复触发（native 路线则每步都在 chat_turn 内部叠加）。
+        messages = await thinking.maybe_apply(
+            messages, call_category="chat", char_id=char_id, is_proactive=is_proactive,
+        )
 
         cfg = get_config().get("tool_loop", {})
         max_steps = int(cfg.get("max_steps", 5))
@@ -752,7 +772,9 @@ class Pipeline:
         async def _run_steps() -> None:
             nonlocal used_tool, outcome
             for _step in range(max_steps):
-                turn = await llm_client.chat_turn(loop_msgs, tools)
+                turn = await llm_client.chat_turn(
+                    loop_msgs, tools, char_id=char_id, is_proactive=is_proactive,
+                )
                 if not turn.tool_calls:
                     outcome = ("natural", turn.content)
                     return
@@ -801,8 +823,8 @@ class Pipeline:
         # natural（用过工具）或 exhausted：强制收尾，注入声音锚定，走不带 tools 的出口。
         loop_msgs.append({"role": "system", "content": _voice_reanchor(char_id)})
         if stream:
-            return self.run_llm_stream(loop_msgs)
-        return await self.run_llm(loop_msgs)
+            return self.run_llm_stream(loop_msgs, is_proactive=is_proactive)
+        return await self.run_llm(loop_msgs, is_proactive=is_proactive)
 
     # ──────────────────────────────────────────────────────────────────────────
     # 步骤 4：异步后处理

@@ -85,7 +85,7 @@ class StageCharacterView:
                 triggered_by,
                 debug.get("token_estimate"),
             )
-        return await self.pipeline.run_llm(messages)
+        return await self.pipeline.run_llm(messages, char_id=self.char_id)
 
 
 class StageViewRegistry:
