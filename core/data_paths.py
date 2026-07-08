@@ -105,6 +105,13 @@ class DataPaths:
             raise ValueError(f"data path escapes sandbox: {target}") from e
         return target
 
+    def root_dir(self) -> Path:
+        """沙盒数据根目录（生产模式 data/，测试模式 data/test_sandbox/{session}/）。
+        供需要判断"是否落在沙盒内"的调用方使用（如 fs_browse 的隐式 deny 判断），
+        不作为业务写入路径的起点——业务路径一律走本类其他具名方法。
+        """
+        return self._base
+
     # ── 桌宠端轮询文件（方案A：前缀同步到 config.yaml 的 data_prefix 字段）──────
     def channel_queue(self) -> Path:
         return self._p("runtime", "channel_queue.json")

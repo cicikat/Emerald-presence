@@ -62,6 +62,8 @@ _ACTION_LABELS: dict[str, str] = {
     "toy_pattern": "换了个玩具模式",
     "read_toy_file": "翻了玩具文件",
     "write_toy_file": "写了玩具文件",
+    "fs_list": "翻了下目录",
+    "fs_read": "看了个文件",
     "minimize_window": "最小化了窗口",
     "open_url": "打开了网页",
     "play_pause": "控制了播放",

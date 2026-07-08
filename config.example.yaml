@@ -267,6 +267,22 @@ mcp_servers:
     #   tool_timeout_s: 30
     #   allow_tools: []              # 空 = 全部；非空 = 白名单
 
+# fs 只读浏览工具（Brief 31）：fs_list / fs_read，只读，范围严格限于 allow_roots。
+# 与 MCP 同策略——只经 tool loop 暴露，角色卡 presence_ext.tool_categories 含 "fs" 才看得见。
+fs_access:
+  enabled: false                  # 总开关，默认关
+  allow_roots: []                  # 只读允许根，绝对路径，用户手填，如 "D:/some/dir"
+  deny_names:                      # 命中即拒（对路径任一段做大小写不敏感子串匹配）
+  - secrets
+  - .env
+  - .git
+  - node_modules
+  - __pycache__
+  - config.yaml
+  - token
+  max_read_chars: 4000            # 单次读取截断
+  max_list_entries: 100           # 单次列目录条数上限
+
 mode: production
 standalone_mode: false
 data_prefix: "data"

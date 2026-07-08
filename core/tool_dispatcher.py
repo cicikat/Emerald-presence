@@ -354,6 +354,16 @@ async def _peek_screen_content_wrapper() -> str:
     return await peek_screen_content()
 
 
+async def _fs_list_wrapper(path: str | None = None, depth: int = 1) -> str:
+    from core.tools.fs_browse import fs_list
+    return fs_list(path=path, depth=depth)
+
+
+async def _fs_read_wrapper(path: str) -> str:
+    from core.tools.fs_browse import fs_read
+    return fs_read(path=path)
+
+
 _TOOL_REGISTRY["get_time"] = {
     "func": _get_current_time,
     "description": "获取当前准确时间，当用户询问时间、日期时调用.不确定时间时优先调用此工具,禁止猜测。",
@@ -823,6 +833,57 @@ _TOOL_REGISTRY["write_toy_file"] = {
     },
     "examples": ["在思考笔记里写一句话", "把这个加到愿望清单", "在涂鸦板上画点文字"],
     "keywords": ["写进思考笔记", "加到愿望清单", "写在涂鸦板"],
+}
+
+_TOOL_REGISTRY["fs_list"] = {
+    "func": _fs_list_wrapper,
+    "description": (
+        "列出 config.fs_access.allow_roots 允许范围内某个目录下的文件和子目录，"
+        "只读。省略 path 时返回允许浏览的入口目录列表。想看文件内容用 fs_read。"
+    ),
+    "dangerous": False,
+    "category": "fs",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "要浏览的绝对路径，省略则返回允许浏览的根目录列表",
+            },
+            "depth": {
+                "type": "integer",
+                "enum": [1, 2],
+                "description": "列出的目录深度，1 或 2，默认 1",
+            },
+        },
+        "required": [],
+    },
+    "examples": ["看看这个目录里有什么", "列一下这个文件夹"],
+    "keywords": ["列目录", "看看目录", "文件夹里有什么"],
+    "trace_args": ["path"],
+}
+
+_TOOL_REGISTRY["fs_read"] = {
+    "func": _fs_read_wrapper,
+    "description": (
+        "读取 config.fs_access.allow_roots 允许范围内的文本文件内容，只读。"
+        "只支持文本类扩展名，超大或二进制文件会返回提示而不是内容。"
+    ),
+    "dangerous": False,
+    "category": "fs",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "要读取的文件绝对路径",
+            },
+        },
+        "required": ["path"],
+    },
+    "examples": ["读一下这个文件", "打开看看这个文档写了什么"],
+    "keywords": ["读文件", "打开这个文件", "看看这个文档"],
+    "trace_args": ["path"],
 }
 
 
