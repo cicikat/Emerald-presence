@@ -128,8 +128,11 @@ class _FakeChannel:
 
 
 class _FakePipeline:
-    async def post_process(self, uid, content, reply, **kwargs):
+    async def post_process_critical(self, uid, content, reply, **kwargs):
         return {"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
+
+    async def post_process_slow(self, uid, content, reply, critical_result, **kwargs):
+        return {"emotion": "neutral", "turn_id": critical_result.get("turn_id")}
 
 
 async def test_fanout_channel_preserves_action_text(monkeypatch):
@@ -505,9 +508,12 @@ async def test_all_action_reply_visible_kept_memory_skipped():
         def __init__(self):
             self.received_reply = None
 
-        async def post_process(self, uid, content, reply, **kwargs):
+        async def post_process_critical(self, uid, content, reply, **kwargs):
             self.received_reply = reply
             return {"turn_id": "t2", "critical_written": False, "emotion": "neutral"}
+
+        async def post_process_slow(self, uid, content, reply, critical_result, **kwargs):
+            return {"emotion": "neutral", "turn_id": critical_result.get("turn_id")}
 
     pl = _FakePipelineWithCapture()
 

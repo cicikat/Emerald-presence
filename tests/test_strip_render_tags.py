@@ -39,9 +39,12 @@ class _CapturePipeline:
     def __init__(self):
         self.captured_reply: str | None = None
 
-    async def post_process(self, uid, content, reply, **kwargs):
+    async def post_process_critical(self, uid, content, reply, **kwargs):
         self.captured_reply = reply
         return {"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
+
+    async def post_process_slow(self, uid, content, reply, critical_result, **kwargs):
+        return {"emotion": "neutral", "turn_id": critical_result.get("turn_id")}
 
 
 async def _reset_channels():

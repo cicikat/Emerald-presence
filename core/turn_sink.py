@@ -181,16 +181,26 @@ async def record_assistant_turn(
     """
     Record one completed assistant turn and deliver it to the requested channels.
 
-    capture_turn still owns disk writes through Pipeline.post_process. source is
-    retained here for validation and future audit; current persistence encodes
-    non-user sources through trigger_name only.
+    capture_turn still owns disk writes through Pipeline.post_process_critical.
+    source is retained here for validation and future audit; current persistence
+    encodes non-user sources through trigger_name only.
     envelope 未传时默认零值（fail-closed）。
 
+    Brief 37：当 await_critical_post_process=True 时，只 await
+    post_process_critical()（毫秒级本地落盘），fanout 完成后再用
+    asyncio.create_task() 调度 post_process_slow()（detect_emotion / mood_state /
+    avatar / profile / slow_queue）——这些都是 LLM/网络往返或非关键写入，绝不能
+    堵住 send。返回的 TurnResult.emotion 因此只是 critical 段的占位值
+    "neutral"，真实情绪要等 post_process_slow 异步跑完才落进 mood_state /
+    mid_term，调用方不应假设它反映本轮真实检测结果。
+
     QQ 路径（R1-D）：传入 target_id / is_group / pending_paths / frozen_scope，
-    经由 post_process 透传到 TTS/sticker side effects 和 scope freeze 链路。
+    经由 post_process_critical/_slow 透传到 TTS/sticker side effects 和 scope
+    freeze 链路。
     fanout=[] 时不执行 channel fanout（QQ visible send 由调用方在 adapter 内独立完成）。
     bypass_gate=True 时跳过 conversation_lock（QQ adapter 已在 conversation_lock 内）。
-    loop_executed（Brief 28）：本轮是否走了 tool loop，透传给 post_process → Path B 跳过判断。
+    loop_executed（Brief 28）：本轮是否走了 tool loop，透传给 post_process_slow →
+    Path B 跳过判断。
     """
     from core.write_envelope import WriteEnvelope
     if envelope is None:
@@ -222,7 +232,10 @@ async def record_assistant_turn(
     post_info: dict | None = None
     async with _maybe_conversation_gate(uid, bypass_gate):
         if await_critical_post_process:
-            post_info = await pipeline.post_process(
+            # Brief 37: send 前只 await 落盘（post_process_critical），不再等
+            # detect_emotion 等 LLM 往返。post_process_slow 在下面 fanout 完成后
+            # 才用 create_task 调度，emotion/mood/slow_queue 全挪到 send 之后。
+            post_info = await pipeline.post_process_critical(
                 uid,
                 memory_input,
                 memory_text,
@@ -233,8 +246,6 @@ async def record_assistant_turn(
                 envelope=envelope,
                 audit_extras=audit_extras,
                 frozen_scope=frozen_scope,
-                web_echo=web_echo,
-                loop_executed=loop_executed,
             )
         else:
             asyncio.create_task(
@@ -276,6 +287,25 @@ async def record_assistant_turn(
         char_id=char_id,
         source=source,
     )
+
+    # Brief 37: send（上面的 fanout）已经完成，慢段（detect_emotion / mood_state /
+    # slow_queue 入队等）现在才调度，绝不 await——否则又把下一条消息的 send 堵住。
+    if await_critical_post_process and post_info is not None:
+        asyncio.create_task(
+            pipeline.post_process_slow(
+                uid,
+                memory_input,
+                memory_text,
+                post_info,
+                target_id=target_id,
+                is_group=is_group,
+                trigger_name=capture_trigger,
+                envelope=envelope,
+                audit_extras=audit_extras,
+                web_echo=web_echo,
+                loop_executed=loop_executed,
+            )
+        )
 
     # Narrative segments: push a parallel message_segments envelope to UI clients
     # (desktop + device) — but only to the ones actually included in this fanout.

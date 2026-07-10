@@ -81,7 +81,10 @@ async def test_critical_writes_complete_before_slow_tasks(sandbox, monkeypatch, 
     assert history[1]["role"] == "assistant"
     assert history[1]["content"] == reply
 
-    # event_log 今日文件应含 user 行 + assistant 行（含 emotion:happy）
+    # event_log 今日文件应含 user 行 + assistant 行。
+    # Brief 37：capture_turn 现在跑在 post_process_critical（send 前的关键段），
+    # 此时 detect_emotion 还没跑完，emotion 字段写死占位值 "neutral"——真实值
+    # "happy" 只进 mood_state（下面的 mood_calls 断言），不回写 event_log 标注。
     from core.sandbox import get_paths
     # S6 新布局：event_log 写到 user_memory_root(uid) / "event_log"
     day_dir = get_paths().user_memory_root(uid) / "event_log"
@@ -89,9 +92,9 @@ async def test_critical_writes_complete_before_slow_tasks(sandbox, monkeypatch, 
     day_files = [f for f in day_dir.glob("*.md") if f.name != "full_log.md"]
     assert day_files, "event_log 今日文件未创建"
     log_text = day_files[0].read_text(encoding="utf-8")
-    assert "你好吗" in log_text,         "user 行缺失"
-    assert reply in log_text,           "assistant 行缺失"
-    assert "emotion:happy" in log_text, "assistant 行 emotion 字段缺失"
+    assert "你好吗" in log_text,          "user 行缺失"
+    assert reply in log_text,            "assistant 行缺失"
+    assert "emotion:neutral" in log_text, "assistant 行 emotion 占位字段缺失"
 
     # mood_state.update 应以 "happy" 为第一参数调用
     assert mood_calls and mood_calls[0] == "happy", \
@@ -132,7 +135,13 @@ async def test_detect_emotion_runs_outside_uid_lock(sandbox, monkeypatch):
 
     monkeypatch.setattr("core.llm_client.detect_emotion", gated_detect)
     monkeypatch.setattr("core.llm_client.chat", AsyncMock(return_value=""))
-    monkeypatch.setattr("core.memory.mood_state.update", lambda *a, **k: None)
+
+    mood_calls: list[str] = []
+
+    def _capture_mood(emotion, *args, **kwargs):
+        mood_calls.append(emotion)
+
+    monkeypatch.setattr("core.memory.mood_state.update", _capture_mood)
 
     sq.register_handler("summarize_to_midterm", AsyncMock())
     sq.register_handler("consistency_check", AsyncMock())
@@ -154,11 +163,17 @@ async def test_detect_emotion_runs_outside_uid_lock(sandbox, monkeypatch):
     release_detect.set()
     await task
 
+    # Brief 37：capture_turn 跑在 post_process_critical（detect_emotion 之前），
+    # event_log 的 emotion 字段是占位值 "neutral"；真实检测结果 "happy" 只进
+    # post_process_slow 里的 mood_state.update，用 mood_calls 断言。
     day_dir = get_paths().user_memory_root(uid) / "event_log"
     day_files = [f for f in day_dir.glob("*.md") if f.name != "full_log.md"]
     assert day_files, "event_log 今日文件未创建"
     log_text = day_files[0].read_text(encoding="utf-8")
-    assert "emotion:happy" in log_text, f"emotion 结果应正确写入 event_log，实际:\n{log_text}"
+    assert "emotion:neutral" in log_text, f"event_log 应写占位值 neutral，实际:\n{log_text}"
+    assert mood_calls and mood_calls[0] == "happy", (
+        f"detect_emotion 的真实结果应正确写入 mood_state，实际: {mood_calls}"
+    )
 
     await sq.drain()
 

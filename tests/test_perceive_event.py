@@ -288,8 +288,11 @@ async def test_fanout_does_not_trigger_additional_llm(monkeypatch):
     llm_call_count: list[int] = [0]
 
     class _FakePipeline:
-        async def post_process(self, uid, content, reply, **kwargs):
+        async def post_process_critical(self, uid, content, reply, **kwargs):
             return {"turn_id": "t-1", "critical_written": True, "emotion": "neutral"}
+
+        async def post_process_slow(self, uid, content, reply, critical_result, **kwargs):
+            return {"emotion": "neutral", "turn_id": critical_result.get("turn_id")}
 
         async def run_llm(self, messages):
             llm_call_count[0] += 1
@@ -434,8 +437,11 @@ async def test_desktop_wake_path_b_uses_perceive_gate(monkeypatch):
             llm_calls[0] += 1
             return "早上好"
 
-        async def post_process(self, uid, content, reply, **kwargs):
+        async def post_process_critical(self, uid, content, reply, **kwargs):
             return {"turn_id": "t-x", "critical_written": True, "emotion": "neutral"}
+
+        async def post_process_slow(self, uid, content, reply, critical_result, **kwargs):
+            return {"emotion": "neutral", "turn_id": critical_result.get("turn_id")}
 
         def _current_reality_scope(self, uid):
             return type("Scope", (), {"character_id": "yexuan"})()

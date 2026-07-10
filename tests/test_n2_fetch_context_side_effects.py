@@ -498,9 +498,12 @@ def test_fetch_context_source_has_no_sleepy_write():
 
 
 def test_post_process_source_calls_maybe_mark_sleepy():
-    """N2-A T4f (静态): post_process 中包含 maybe_mark_sleepy_from_time 调用。"""
+    """N2-A T4f (静态): post_process_critical 中包含 maybe_mark_sleepy_from_time 调用。
+    Brief 37: sleepy 写入本身不含 LLM/网络往返，留在 send 前的关键段（critical）
+    里不影响延迟，因此没有跟着 detect_emotion/mood 一起搬进 post_process_slow。
+    """
     from core.pipeline import Pipeline
-    src = inspect.getsource(Pipeline.post_process)
+    src = inspect.getsource(Pipeline.post_process_critical)
     assert "maybe_mark_sleepy" in src
 
 

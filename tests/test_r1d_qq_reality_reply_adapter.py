@@ -398,7 +398,8 @@ async def test_d9_adapter_passes_raw_text_and_scrub_occurs(sandbox, monkeypatch)
         captured_memory.append(reply)
         return {"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
 
-    fake_pipeline.post_process = spy_pp
+    fake_pipeline.post_process_critical = spy_pp
+    fake_pipeline.post_process_slow = AsyncMock(return_value={"turn_id": "t1", "emotion": "neutral"})
     monkeypatch.setattr(_main, "_pipeline", fake_pipeline)
 
     frozen_scope = MemoryScope.reality_scope("u_test", "yexuan")
@@ -447,7 +448,8 @@ async def test_d9b_adapter_visible_keeps_actions_memory_strips_pure_action_lines
         captured_memory.append(reply)
         return {"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
 
-    fake_pipeline.post_process = spy_pp
+    fake_pipeline.post_process_critical = spy_pp
+    fake_pipeline.post_process_slow = AsyncMock(return_value={"turn_id": "t1", "emotion": "neutral"})
     monkeypatch.setattr(_main, "_pipeline", fake_pipeline)
 
     frozen_scope = MemoryScope.reality_scope("u_test2", "yexuan")
@@ -507,7 +509,8 @@ async def test_d9c_adapter_group_routing_preserved(sandbox, monkeypatch):
         pp_kwargs.append(kwargs)
         return {"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
 
-    fake_pipeline.post_process = spy_pp
+    fake_pipeline.post_process_critical = spy_pp
+    fake_pipeline.post_process_slow = AsyncMock(return_value={"turn_id": "t1", "emotion": "neutral"})
     monkeypatch.setattr(_main, "_pipeline", fake_pipeline)
 
     frozen_scope = MemoryScope.reality_scope("u_grp", "yexuan")
@@ -555,7 +558,8 @@ async def test_d9d_frozen_scope_forwarded_to_post_process(sandbox, monkeypatch):
         pp_kwargs.append(kwargs)
         return {"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
 
-    fake_pipeline.post_process = spy_pp
+    fake_pipeline.post_process_critical = spy_pp
+    fake_pipeline.post_process_slow = AsyncMock(return_value={"turn_id": "t1", "emotion": "neutral"})
     monkeypatch.setattr(_main, "_pipeline", fake_pipeline)
 
     frozen_scope = MemoryScope.reality_scope("u_scope", "yexuan")

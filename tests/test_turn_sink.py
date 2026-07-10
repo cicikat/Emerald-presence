@@ -9,12 +9,17 @@ class _MockCharacter:
 
 
 class _FakePipeline:
+    """Brief 37: record_assistant_turn 现在分别调用 post_process_critical()（send
+    前，conversation_gate 内 await）与 post_process_slow()（send 后 create_task，
+    不 await）。critical 段承担原本 delay/active 计数语义，因为它是唯一被
+    conversation_gate 包住、影响并发串行化断言的部分。"""
+
     def __init__(self, delay: float = 0.0):
         self.delay = delay
         self.active = 0
         self.max_active = 0
 
-    async def post_process(self, uid, content, reply, **kwargs):
+    async def post_process_critical(self, uid, content, reply, **kwargs):
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:
@@ -23,10 +28,17 @@ class _FakePipeline:
             return {
                 "turn_id": f"turn-{content}",
                 "critical_written": True,
-                "emotion": "gentle",
+                "emotion": "neutral",
+                "char_id": "companion",
+                "scope_payload": {},
+                "should_update_profile": False,
+                "profile_recent": [],
             }
         finally:
             self.active -= 1
+
+    async def post_process_slow(self, uid, content, reply, critical_result, **kwargs):
+        return {"emotion": "gentle", "turn_id": critical_result["turn_id"]}
 
 
 class _Channel:
@@ -78,7 +90,9 @@ async def test_record_assistant_turn_sources_success(monkeypatch, source, trigge
     )
 
     assert result.written_to_memory is True
-    assert result.emotion == "gentle"
+    # Brief 37: emotion 字段现在只反映 critical 段的占位值（真实检测结果在
+    # post_process_slow 里异步落进 mood_state，不再同步返回给调用方）。
+    assert result.emotion == "neutral"
     assert result.fanout_targets == ["desktop"]
     assert channel.sent == [("在。", "uid1", None)]
 

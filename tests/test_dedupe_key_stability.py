@@ -310,8 +310,11 @@ async def test_desktop_wake_with_last_seen_in_body_deduped(monkeypatch):
             llm_calls[0] += 1
             return "问候"
 
-        async def post_process(self, uid, content, reply, **kwargs):
+        async def post_process_critical(self, uid, content, reply, **kwargs):
             return {"turn_id": "t-ls", "critical_written": True, "emotion": "neutral"}
+
+        async def post_process_slow(self, uid, content, reply, critical_result, **kwargs):
+            return {"emotion": "neutral", "turn_id": critical_result.get("turn_id")}
 
     import core.pipeline_registry as _preg
     monkeypatch.setattr(_preg, "_pipeline", _FakePipeline())

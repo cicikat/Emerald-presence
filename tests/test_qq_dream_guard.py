@@ -54,7 +54,10 @@ def _patch_pipeline(monkeypatch, uid: str = _OWNER_ID):
     fake.fetch_context = AsyncMock(return_value={})
     fake.build_prompt = MagicMock(return_value=([], {"pending_paths": []}))
     fake.run_llm = AsyncMock(return_value="回复内容")
-    fake.post_process = AsyncMock(return_value={"turn_id": "t1", "critical_written": True, "emotion": "neutral"})
+    # Brief 37: record_assistant_turn calls post_process_critical (awaited) then
+    # post_process_slow (fire-and-forget after send) — both must exist.
+    fake.post_process_critical = AsyncMock(return_value={"turn_id": "t1", "critical_written": True, "emotion": "neutral"})
+    fake.post_process_slow = AsyncMock(return_value={"turn_id": "t1", "emotion": "neutral"})
     monkeypatch.setattr(_main, "_pipeline", fake)
     return fake
 
@@ -138,7 +141,7 @@ async def test_dream_active_rejects_owner_message(sandbox, monkeypatch):
     await _main.handle_message(_make_msg())
 
     fake_pipeline.run_llm.assert_not_called()
-    fake_pipeline.post_process.assert_not_called()
+    fake_pipeline.post_process_critical.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -184,7 +187,7 @@ async def test_dream_guard_no_post_process(sandbox, monkeypatch):
     import main as _main
     await _main.handle_message(_make_msg())
 
-    fake_pipeline.post_process.assert_not_called()
+    fake_pipeline.post_process_critical.assert_not_called()
     st_append.assert_not_called()
     el_append.assert_not_called()
 
@@ -332,7 +335,8 @@ async def test_stamp_qq_used_in_reality_chat(sandbox, monkeypatch):
         captured_envelopes.append(kwargs.get("envelope"))
         return {"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
 
-    fake.post_process = fake_post_process
+    fake.post_process_critical = fake_post_process
+    fake.post_process_slow = AsyncMock(return_value={"turn_id": "t1", "emotion": "neutral"})
     monkeypatch.setattr(_main, "_pipeline", fake)
 
     await _main.handle_message(_make_msg())

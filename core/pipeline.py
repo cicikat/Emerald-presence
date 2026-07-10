@@ -272,6 +272,10 @@ class Pipeline:
         # can do a source-filtered vs.query internally without re-embedding.
         _query_vec: list | None = None
         _semantic_hits: list = []
+        # Brief 36: episodic-scoped top-10 hits, fetched here via query_async (single
+        # worker executor) and handed to episodic.retrieve() as sem_hits — retrieve()
+        # no longer calls the sync vector_store.query() itself (executor 化收尾).
+        _episodic_sem_hits: list = []
         if not _skip_recall:
             try:
                 from core.memory.embedding import embed
@@ -285,6 +289,9 @@ class Pipeline:
                         uid, len(_semantic_hits),
                         [(h[0], round(h[1], 4)) for h in _semantic_hits],
                     )
+                _episodic_sem_hits = await _vs.query_async(
+                    uid, char_id, _query_vec, k=10, sources=["episodic"]
+                )
             except Exception as _ee:
                 logger.debug("[pipeline.fetch_context] embedding/vs.query skip: %s", _ee)
 
@@ -340,6 +347,7 @@ class Pipeline:
                 allow_strengthen=False,
                 return_trace=True,
                 query_vec=_query_vec,
+                sem_hits=_episodic_sem_hits,
             )
         from core.memory.mood_state import get_current as _get_mood
         episodic_result = format_for_prompt(
@@ -830,7 +838,7 @@ class Pipeline:
     # 步骤 4：异步后处理
     # ──────────────────────────────────────────────────────────────────────────
 
-    async def post_process(
+    async def post_process_critical(
         self,
         user_id: str,
         content: str,
@@ -842,29 +850,21 @@ class Pipeline:
         envelope=None,
         audit_extras: dict | None = None,
         frozen_scope: "MemoryScope | None" = None,
-        web_echo: bool = False,
-        loop_executed: bool = False,
-    ):
+    ) -> dict:
         """
-        关键写入在 uid_lock 内同步完成，慢任务（LLM调用）入 slow_queue 异步执行。
-        调用方应 await 此方法，不得用 asyncio.create_task() 丢弃引用（N10）。
+        Brief 37：send 前必须走完的关键路径——只做毫秒级本地落盘（capture_turn），
+        不 await 任何 LLM/网络往返。detect_emotion / mood_state / avatar / profile /
+        slow_queue 全部移到 post_process_slow，由调用方在 send 完成后异步调度
+        （见 core/turn_sink.py record_assistant_turn）。
 
-        关键路径：
-          detect_emotion(timeout=8s，锁外算，只依赖 reply 文本)
-          → uid_lock 内：short_term.append → event_log(user)
-            → global_lock(mood_state): mood_state.update + yandere
-            → event_log(assistant, emotion)
+        emotion 占位：event_log 里这一轮的 emotion 字段写死 "neutral"（真实情绪
+        要等 detect_emotion 完成才知道，那已经在 slow 段）。这只是 event_log 的
+        标注字段，不影响任何下游判断——mid_term eager reflect 的情绪判断消费的是
+        slow 段里 detect 出的真实 emotion，不读 event_log 这份占位值。
 
-        慢队列（uid_lock 释放后入队）：
-          capture_turn_retry（条件） / summarize_to_midterm / consistency_check
-          user_profile_update（条件） / trait_tracker_update（条件） / toy_autogrow（条件）
-
-        side effects（保持 asyncio.create_task）：TTS/表情包 / _parse_and_execute_intent
+        返回值原样传给 post_process_slow(critical_result=...)。
 
         frozen_scope: 如果传入，直接使用该 scope，跳过 _current_reality_scope()（N1）。
-        loop_executed: 本轮是否走了 tool loop（Brief 28 · Path C）。为真时透传给
-          _parse_and_execute_intent，让 Path B 直接 return——loop 里模型已有完整
-          行动机会，不需要再从回复文本里反向解析意图。
         """
         from core.write_envelope import WriteEnvelope
         if envelope is None:
@@ -881,18 +881,18 @@ class Pipeline:
         scope_payload = scope.to_payload()
 
         # N2-A/N2-B: sleepy mood — 从 fetch_context 迁出的显式写操作。
-        # 放在 post_process 开头（uid_lock 外）：保留深夜 sleepy 语义，
+        # 放在关键段开头（uid_lock 外）：保留深夜 sleepy 语义，
         # 但不再污染读路径。覆盖所有调用链（QQ / admin / scheduler），
-        # 因为 record_assistant_turn 最终都走 pipeline.post_process。
+        # 因为 record_assistant_turn 最终都走 pipeline.post_process_critical。
         # N2-B: helper 已升级为 async + global_lock("mood_state")，需 await。
+        # 本身不含 LLM/网络往返，留在关键段不影响 send 延迟。
         try:
             from core.mood_helpers import maybe_mark_sleepy_from_time as _mark_sleepy
             await _mark_sleepy(uid=user_id, char_id=char_id, envelope=envelope)
         except Exception as _sleepy_err:
-            logger.warning("[pipeline.post_process] sleepy mood 写入异常（已忽略）: %s", _sleepy_err)
+            logger.warning("[pipeline.post_process_critical] sleepy mood 写入异常（已忽略）: %s", _sleepy_err)
 
         from core.memory import locks as _locks
-        from core import llm_client
         from core.error_handler import log_error
         from core.post_process import slow_queue
 
@@ -901,15 +901,6 @@ class Pipeline:
         import time as _time
         _turn_id = f"{user_id}_{int(_time.time() * 1000)}"
         _critical_written = False
-
-        # ── detect_emotion（带超时，锁外算：只依赖 reply 文本，不读锁内状态）──
-        try:
-            _emotion = await asyncio.wait_for(
-                llm_client.detect_emotion(reply), timeout=_DETECT_EMOTION_TIMEOUT
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.warning(f"[pipeline.post_process] detect_emotion 降级 neutral: {e}")
-            _emotion = "neutral"
 
         async with _locks.uid_lock(user_id):
             # ── 检查用户画像更新条件（在写入前，读取当前历史长度 +2 估算）────
@@ -925,7 +916,99 @@ class Pipeline:
             except Exception as e:
                 log_error("post_process.check_conditions", e)
 
-            # ── mood_state 更新（全局锁，嵌套在 uid_lock 内；用锁外算好的 _emotion）
+            # ── capture_turn：写 short_term + event_log（含 turn_id 血缘）───
+            try:
+                from core.memory.fixation_pipeline import capture_turn as _capture_turn
+                _turn_id = _capture_turn(user_id, content, reply, "neutral", turn_id=_turn_id, trigger_name=trigger_name, envelope=envelope, char_id=char_id, audit_extras=audit_extras)
+                _critical_written = True
+                logger.debug(f"[pipeline.post_process_critical] capture_turn: {_turn_id}")
+                # 语义索引：event_log 条目异步写入向量库（fail-open）
+                if envelope.can_write_memory:
+                    try:
+                        import time as _time
+                        from core.memory import vector_store as _vs
+                        _el_text = f"{content}\n{reply}".strip()
+                        asyncio.create_task(
+                            _vs.upsert(user_id, char_id, "event_log", _turn_id, _time.time(), _el_text)
+                        )
+                    except Exception as _vs_e:
+                        logger.debug("[pipeline.post_process_critical] vector_store upsert schedule error: %s", _vs_e)
+            except Exception as e:
+                log_error("post_process.capture_turn", e)
+                if envelope.can_write_memory:
+                    slow_queue.enqueue("capture_turn_retry", {
+                        "turn_id": _turn_id,
+                        "uid": user_id,
+                        "user_content": content,
+                        "reply": reply,
+                        "emotion": "neutral",
+                        "trigger_name": trigger_name,
+                        "char_id": char_id,
+                        "scope": scope_payload,
+                    })
+
+        if pending_paths:
+            _pending_perception.confirm_delivered(pending_paths)
+
+        return {
+            "turn_id": _turn_id,
+            "critical_written": _critical_written,
+            "emotion": "neutral",
+            "char_id": char_id,
+            "scope_payload": scope_payload,
+            "should_update_profile": _should_update_profile,
+            "profile_recent": _profile_recent,
+        }
+
+    async def post_process_slow(
+        self,
+        user_id: str,
+        content: str,
+        reply: str,
+        critical_result: dict,
+        target_id: str = "",
+        is_group: bool = False,
+        trigger_name: str = "",
+        envelope=None,
+        audit_extras: dict | None = None,
+        web_echo: bool = False,
+        loop_executed: bool = False,
+    ) -> dict:
+        """
+        Brief 37：send 之后异步执行的慢段——detect_emotion → mood_state → avatar/
+        heart → profile → slow_queue 入队 → TTS/表情包 → 意图解析。调用方（
+        turn_sink.record_assistant_turn）应在 channel fanout 完成后用
+        asyncio.create_task() 调度本方法，不得 await（否则又把 send 堵回去）。
+
+        critical_result: post_process_critical() 的返回值，携带 turn_id /
+        char_id / scope_payload / should_update_profile / profile_recent。
+        """
+        from core.write_envelope import WriteEnvelope
+        if envelope is None:
+            envelope = WriteEnvelope()
+
+        from core.memory import locks as _locks
+        from core import llm_client
+        from core.error_handler import log_error
+        from core.post_process import slow_queue
+
+        char_id = critical_result["char_id"]
+        scope_payload = critical_result["scope_payload"]
+        _turn_id = critical_result["turn_id"]
+        _should_update_profile = critical_result["should_update_profile"]
+        _profile_recent = critical_result["profile_recent"]
+
+        # ── detect_emotion（带超时，只依赖 reply 文本）──
+        try:
+            _emotion = await asyncio.wait_for(
+                llm_client.detect_emotion(reply), timeout=_DETECT_EMOTION_TIMEOUT
+            )
+        except (asyncio.TimeoutError, Exception) as e:
+            logger.warning(f"[pipeline.post_process_slow] detect_emotion 降级 neutral: {e}")
+            _emotion = "neutral"
+
+        async with _locks.uid_lock(user_id):
+            # ── mood_state 更新（全局锁，嵌套在 uid_lock 内；用刚 detect 出的 _emotion）
             _mood_state_after: dict | None = None
             if envelope.can_affect_mood:
                 async with _locks.global_lock("mood_state"):
@@ -952,38 +1035,7 @@ class Pipeline:
                 from core.embodiment.heart import maybe_draw_heart as _maybe_heart
                 asyncio.create_task(_maybe_heart(reply, char_id))
 
-            # ── capture_turn：写 short_term + event_log（含 turn_id 血缘）───
-            try:
-                from core.memory.fixation_pipeline import capture_turn as _capture_turn
-                _turn_id = _capture_turn(user_id, content, reply, _emotion, turn_id=_turn_id, trigger_name=trigger_name, envelope=envelope, char_id=char_id, audit_extras=audit_extras)
-                _critical_written = True
-                logger.debug(f"[pipeline.post_process] capture_turn: {_turn_id}")
-                # 语义索引：event_log 条目异步写入向量库（fail-open）
-                if envelope.can_write_memory:
-                    try:
-                        import time as _time
-                        from core.memory import vector_store as _vs
-                        _el_text = f"{content}\n{reply}".strip()
-                        asyncio.create_task(
-                            _vs.upsert(user_id, char_id, "event_log", _turn_id, _time.time(), _el_text)
-                        )
-                    except Exception as _vs_e:
-                        logger.debug("[pipeline.post_process] vector_store upsert schedule error: %s", _vs_e)
-            except Exception as e:
-                log_error("post_process.capture_turn", e)
-                if envelope.can_write_memory:
-                    slow_queue.enqueue("capture_turn_retry", {
-                        "turn_id": _turn_id,
-                        "uid": user_id,
-                        "user_content": content,
-                        "reply": reply,
-                        "emotion": _emotion,
-                        "trigger_name": trigger_name,
-                        "char_id": char_id,
-                        "scope": scope_payload,
-                    })
-
-        # ── uid_lock 释放，入慢队列 ───────────────────────────────────────────
+        # ── 入慢队列 ───────────────────────────────────────────
         from core.tag_rules import get_tags as _get_tags
         _mt_tags = list(_get_tags(content))
 
@@ -1021,7 +1073,7 @@ class Pipeline:
                 "char_id": char_id,
                 "scope": scope_payload,
             })
-            logger.info(f"[pipeline.post_process] 用户画像更新已入队: {user_id}")
+            logger.info(f"[pipeline.post_process_slow] 用户画像更新已入队: {user_id}")
         if envelope.can_write_memory:
             slow_queue.enqueue("trait_tracker_update", {
                 "uid": user_id,
@@ -1069,13 +1121,54 @@ class Pipeline:
         except Exception as e:
             log_error("pipeline.post_process.intent", e)
 
-        if pending_paths:
-            _pending_perception.confirm_delivered(pending_paths)
-
         return {
             "emotion": _emotion,
             "turn_id": _turn_id,
-            "critical_written": _critical_written,
+        }
+
+    async def post_process(
+        self,
+        user_id: str,
+        content: str,
+        reply: str,
+        target_id: str = "",
+        is_group: bool = False,
+        pending_paths: list[str] | None = None,
+        trigger_name: str = "",
+        envelope=None,
+        audit_extras: dict | None = None,
+        frozen_scope: "MemoryScope | None" = None,
+        web_echo: bool = False,
+        loop_executed: bool = False,
+    ):
+        """
+        Brief 37 拆分前的组合入口：依次 await post_process_critical()（落盘）与
+        post_process_slow()（detect_emotion / mood / slow_queue 等）。
+
+        只给不需要"send 前只等落盘"的调用方用（如 admin/routers/chat.py 的
+        fire-and-forget 桌宠聊天路径，整个 post_process 已经是 asyncio.create_task
+        丢出去的，早于它的 HTTP 响应已经返回，等多久都不影响 send）。
+
+        send 关键路径（core/turn_sink.py record_assistant_turn）请分别 await
+        post_process_critical() 再在 send 完成后 asyncio.create_task()
+        post_process_slow()，不要调用这个组合入口。
+        """
+        critical_result = await self.post_process_critical(
+            user_id, content, reply,
+            target_id=target_id, is_group=is_group, pending_paths=pending_paths,
+            trigger_name=trigger_name, envelope=envelope, audit_extras=audit_extras,
+            frozen_scope=frozen_scope,
+        )
+        slow_result = await self.post_process_slow(
+            user_id, content, reply, critical_result,
+            target_id=target_id, is_group=is_group, trigger_name=trigger_name,
+            envelope=envelope, audit_extras=audit_extras, web_echo=web_echo,
+            loop_executed=loop_executed,
+        )
+        return {
+            "emotion": slow_result["emotion"],
+            "turn_id": critical_result["turn_id"],
+            "critical_written": critical_result["critical_written"],
         }
 
     # _compress_episode 已迁移为模块级 _do_compress_episode，由 slow_queue handler 调用

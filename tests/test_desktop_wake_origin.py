@@ -63,8 +63,11 @@ class _FakePipeline:
     async def run_llm(self, messages):
         return "上线问候内容"
 
-    async def post_process(self, uid, content, reply, **kwargs):
+    async def post_process_critical(self, uid, content, reply, **kwargs):
         return {"turn_id": "t-wake", "critical_written": True, "emotion": "neutral"}
+
+    async def post_process_slow(self, uid, content, reply, critical_result, **kwargs):
+        return {"emotion": "neutral", "turn_id": critical_result.get("turn_id")}
 
 
 def _patch_common(monkeypatch, pipeline=None, rpe_accepted=True):

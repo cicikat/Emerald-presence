@@ -81,8 +81,11 @@ def _make_fake_pipeline(llm_fn=None):
                 return await llm_fn(messages)
             return "test_reply"
 
-        async def post_process(self, uid, content, reply, **kwargs):
+        async def post_process_critical(self, uid, content, reply, **kwargs):
             return {"turn_id": "t-test", "critical_written": True, "emotion": "neutral"}
+
+        async def post_process_slow(self, uid, content, reply, critical_result, **kwargs):
+            return {"emotion": "neutral", "turn_id": critical_result.get("turn_id")}
 
     return _FakePipeline()
 
@@ -337,9 +340,12 @@ async def test_duplicate_scheduler_event_no_llm_no_post_process(monkeypatch):
         async def run_llm(self, messages, **kw):
             return await counting_llm(messages)
 
-        async def post_process(self, uid, content, reply, **kwargs):
+        async def post_process_critical(self, uid, content, reply, **kwargs):
             pp_called[0] += 1
             return {"turn_id": "t", "critical_written": True, "emotion": "neutral"}
+
+        async def post_process_slow(self, uid, content, reply, critical_result, **kwargs):
+            return {"emotion": "neutral", "turn_id": critical_result.get("turn_id")}
 
     fp = _TrackingPipeline()
     _allow_dream_guard(monkeypatch)
@@ -359,7 +365,7 @@ async def test_duplicate_scheduler_event_no_llm_no_post_process(monkeypatch):
     # Stub record_assistant_turn to call post_process so we can observe it
     async def _record_with_pp(**kwargs):
         pipeline = kwargs.get("pipeline") or fp
-        await pipeline.post_process(
+        await pipeline.post_process_critical(
             kwargs.get("uid", ""),
             kwargs.get("trigger_name", ""),
             kwargs.get("assistant_text", ""),

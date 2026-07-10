@@ -159,9 +159,12 @@ async def test_desktop_guard_removes_character_prefix_before_record():
         async def run_llm(self, messages):
             return "Companion：你好"
 
-        async def post_process(self, uid, content, reply, **kwargs):
+        async def post_process_critical(self, uid, content, reply, **kwargs):
             received.append(reply)
             return {"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
+
+        async def post_process_slow(self, uid, content, reply, critical_result, **kwargs):
+            return {"emotion": "neutral", "turn_id": critical_result.get("turn_id")}
 
     from core.reality_output_guard import clean_reality_reply_text
 
@@ -233,8 +236,11 @@ async def test_run_owner_chat_turn_guard_applied(monkeypatch):
         async def run_llm(self, messages):
             return "Companion：今天很开心见到你。"
 
-        async def post_process(self, uid, content, reply, **kwargs):
-            return {"turn_id": "t99", "critical_written": True, "emotion": "happy"}
+        async def post_process_critical(self, uid, content, reply, **kwargs):
+            return {"turn_id": "t99", "critical_written": True, "emotion": "neutral"}
+
+        async def post_process_slow(self, uid, content, reply, critical_result, **kwargs):
+            return {"emotion": "happy", "turn_id": critical_result.get("turn_id")}
 
     async def _fake_record(*, assistant_text, uid, source, **kwargs):
         captured_assistant_text.append(assistant_text)

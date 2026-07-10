@@ -289,6 +289,7 @@ def retrieve(
     allow_strengthen: bool = True,
     return_trace: bool = False,
     query_vec: list | None = None,
+    sem_hits: list | None = None,
 ) -> list | tuple:
     """
     按话题标签+情绪检索最相关的情景记忆，检索后强化strength。
@@ -301,6 +302,13 @@ def retrieve(
 
     return_trace: 若 True，返回 (result, trace_items) 而非单独的 result。
       trace_items: list[dict] — 所有通过 MIN_SCORE 的候选项明细（score, selected 等）。
+
+    query_vec / sem_hits（Brief 36，executor 化收尾）：sem_hits 是调用方已经
+      通过 vector_store.query_async(..., sources=["episodic"]) 异步查询好的
+      (source_id, distance, ts) 列表；query_vec 仅作为"是否启用语义候选扩展"的
+      开关保留。retrieve() 本身不再直接调用同步的 vector_store.query()，所有
+      sqlite IO 都留在调用方的 query_async（单 worker executor），retrieve()
+      保持同步签名。
     """
     try:
         memories = _load_memories(user_id, char_id=char_id)
@@ -367,15 +375,15 @@ def retrieve(
     # ── X2: semantic candidate extension ─────────────────────────────────────
     # Build sem_sim_map {ep_id -> similarity} from vector store hits,
     # then add semantic-only hits (no keyword overlap) to the candidate pool.
+    # Brief 36: hits are pre-fetched by the caller via vector_store.query_async()
+    # (single worker executor) and handed in as sem_hits — retrieve() itself no
+    # longer performs the (blocking, event-loop-thread) sync vector_store.query().
     sem_sim_map: dict[str, float] = {}
     if query_vec is not None:
         try:
-            from core.memory import vector_store as _vs
             from core.memory.vector_store import dist_to_sim as _d2s
-            from core.sandbox import safe_user_id as _safe_uid
-            _sem_hits = _vs.query(_safe_uid(user_id), char_id, query_vec, k=10, sources=["episodic"])
             _mem_by_id = {m["id"]: m for m in memories}
-            for _src_id, _dist, _ts in _sem_hits:
+            for _src_id, _dist, _ts in (sem_hits or []):
                 sem_sim_map[_src_id] = _d2s(_dist)
                 if _src_id not in candidate_ids and _src_id in _mem_by_id:
                     candidate_ids.add(_src_id)

@@ -145,6 +145,13 @@ python run_test.py
    （`from core.data_paths import DEFAULT_CHAR_ID`），不写死 `"yexuan"`。
    守门测试：`tests/test_no_hardcoded_character.py`（字面角色名/用户名 + 协议兼容
    字段白名单）、`tests/test_r3_scope_lint.py`（`char_id="yexuan"` 默认参数）。
+9. **任何要 await 进 send/关键路径的调用，先问它是不是 LLM/网络往返。** 是的话必须
+   挪到 send 之后异步执行（Brief 37 的教训：`detect_emotion` 曾经堵在
+   `post_process` 里，每条消息多付一次 LLM 往返延迟）。`core/pipeline.py` 的
+   `post_process_critical`（send 前，只做毫秒级本地落盘）/ `post_process_slow`
+   （send 后，`asyncio.create_task` 调度，装 detect_emotion / mood_state /
+   slow_queue 等）是这个原则落地的参考实现，见 `core/turn_sink.py`
+   `record_assistant_turn`。
 
    ## 测试（新增）
 - 跑测试用 `pytest -n auto`,不要用不带 -n 的全量单进程跑法

@@ -27,9 +27,12 @@ def _make_fake_pipeline(llm_reply: str = "你好") -> MagicMock:
     fake._active_character_id = "yexuan"
     fake.build_prompt = MagicMock(return_value=([], {"pending_paths": []}))
     fake.run_llm = AsyncMock(return_value=llm_reply)
-    fake.post_process = AsyncMock(
+    # Brief 37: record_assistant_turn calls post_process_critical (awaited) then
+    # post_process_slow (fire-and-forget after send) — both must exist.
+    fake.post_process_critical = AsyncMock(
         return_value={"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
     )
+    fake.post_process_slow = AsyncMock(return_value={"turn_id": "t1", "emotion": "neutral"})
     return fake
 
 
@@ -71,7 +74,7 @@ async def test_post_process_is_called(sandbox, monkeypatch):
     await _main._reply_with_tool_result("tool_data", "u1", "u1", False)
     await asyncio.sleep(0.05)
 
-    fake.post_process.assert_called_once()
+    fake.post_process_critical.assert_called_once()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -99,7 +102,7 @@ async def test_memory_reply_excludes_action_lines(sandbox, monkeypatch):
         captured_replies.append(reply)
         return {"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
 
-    fake.post_process = spy_post_process
+    fake.post_process_critical = spy_post_process
     monkeypatch.setattr(_main, "_pipeline", fake)
 
     await _main._reply_with_tool_result("tool_data", "u1", "u1", False)
@@ -181,7 +184,7 @@ async def test_envelope_is_stamp_qq(sandbox, monkeypatch):
         captured_envelopes.append(kwargs.get("envelope"))
         return {"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
 
-    fake.post_process = spy_post_process
+    fake.post_process_critical = spy_post_process
     monkeypatch.setattr(_main, "_pipeline", fake)
 
     await _main._reply_with_tool_result("tool_data", "u1", "u1", False)
@@ -218,7 +221,7 @@ async def test_llm_error_handled_gracefully(sandbox, monkeypatch):
     await asyncio.sleep(0.05)
 
     assert sent == [], "Nothing should be sent on LLM error"
-    fake.post_process.assert_not_called()
+    fake.post_process_critical.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

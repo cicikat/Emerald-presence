@@ -110,9 +110,12 @@ def _make_pipeline(llm_reply: str = "回复", char_id: str = "yexuan"):
     fake.fetch_context = AsyncMock(return_value={})
     fake.build_prompt = MagicMock(return_value=([], {"pending_paths": []}))
     fake.run_llm = AsyncMock(return_value=llm_reply)
-    fake.post_process = AsyncMock(
+    # Brief 37: record_assistant_turn calls post_process_critical (awaited) then
+    # post_process_slow (fire-and-forget after send) — both must exist.
+    fake.post_process_critical = AsyncMock(
         return_value={"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
     )
+    fake.post_process_slow = AsyncMock(return_value={"turn_id": "t1", "emotion": "neutral"})
     return fake
 
 
@@ -393,7 +396,7 @@ async def test_b1_qq_main_memory_reply_scrubbed(sandbox, monkeypatch):
         captured.append(reply)
         return {"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
 
-    fake.post_process = spy_post_process
+    fake.post_process_critical = spy_post_process
     monkeypatch.setattr(_main, "_pipeline", fake)
 
     await _main.handle_message({
@@ -465,7 +468,7 @@ async def test_b3_tool_reply_memory_scrubbed(sandbox, monkeypatch):
         captured.append(reply)
         return {"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
 
-    fake.post_process = spy_post_process
+    fake.post_process_critical = spy_post_process
     monkeypatch.setattr(_main, "_pipeline", fake)
 
     await _main._reply_with_tool_result("tool_data", "u1", "u1", False)
@@ -495,7 +498,8 @@ async def test_b4_turn_sink_memory_text_scrubbed(sandbox, monkeypatch):
         captured.append(reply)
         return {"turn_id": "t1", "critical_written": True, "emotion": "neutral"}
 
-    fake_pipeline.post_process = spy_post_process
+    fake_pipeline.post_process_critical = spy_post_process
+    fake_pipeline.post_process_slow = AsyncMock(return_value={"turn_id": "t1", "emotion": "neutral"})
     monkeypatch.setattr(_pr, "get", lambda: fake_pipeline)
 
     # Stub fanout and desktop_ws to avoid side effects
