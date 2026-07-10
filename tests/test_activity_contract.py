@@ -19,13 +19,20 @@ Activity Contract Smoke Tests
  D. activity-api.ts contract
     - 每个 tauri command 名称出现在 activity-api.ts 中
 
-注意：
- - C / D 需要前端仓库 ../Emerald-client 可访问；若不存在则 skip。
+跨仓运行前提（C / D，Brief 50 · 工单A）：
+ - 这两组是**跨仓契约测试**，需要能读到前端仓库 Emerald-client 的
+   `src-tauri/src/lib.rs` 和 `src/shared/api/activity-api.ts`。
+ - 路径解析：优先读环境变量 `EMERALD_CLIENT_ROOT`；未设置时回落到相对路径推导
+   `<本仓根目录>/../Emerald-client`（两仓同级 clone 时成立）。
+ - 找不到文件时默认 **fail**（不是 skip）——两仓同机并存是本项目的常态开发环境，
+   silent-skip 会导致换机器/CI 上契约漂移测试永远显示绿但什么都没测。
+ - 仅当显式设置环境变量 `SKIP_CROSS_REPO=1` 时才 skip（例如单仓 CI、无前端仓的场景）。
  - FastAPI 路由检查通过导入个别 router 对象完成，无需启动服务器。
  - /activity/list 内容检查通过 FastAPI TestClient + dependency override 完成。
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -42,7 +49,13 @@ from core.activity.registry import (
 # ── 路径常量 ──────────────────────────────────────────────────────────────────
 
 _PROJECT_ROOT = Path(__file__).parent.parent
-_FRONTEND_ROOT = _PROJECT_ROOT.parent / "Emerald-client"
+_SKIP_CROSS_REPO = os.environ.get("SKIP_CROSS_REPO") == "1"
+_EMERALD_CLIENT_ROOT_ENV = os.environ.get("EMERALD_CLIENT_ROOT")
+_FRONTEND_ROOT = (
+    Path(_EMERALD_CLIENT_ROOT_ENV)
+    if _EMERALD_CLIENT_ROOT_ENV
+    else _PROJECT_ROOT.parent / "Emerald-client"
+)
 _LIB_RS = _FRONTEND_ROOT / "src-tauri" / "src" / "lib.rs"
 _ACTIVITY_API_TS = _FRONTEND_ROOT / "src" / "shared" / "api" / "activity-api.ts"
 
@@ -257,7 +270,14 @@ def test_activity_list_does_not_expose_tauri_commands(activity_list_client):
 @pytest.fixture(scope="module")
 def lib_rs_text():
     if not _LIB_RS.exists():
-        pytest.skip(f"Tauri lib.rs not found: {_LIB_RS}")
+        if _SKIP_CROSS_REPO:
+            pytest.skip(f"SKIP_CROSS_REPO=1: Tauri lib.rs not found: {_LIB_RS}")
+        pytest.fail(
+            f"Tauri lib.rs not found: {_LIB_RS}\n"
+            "这是跨仓契约测试，需要能读到 Emerald-client 前端仓库。设置环境变量 "
+            "EMERALD_CLIENT_ROOT 指向该仓库根目录，或在没有前端仓的场景下设置 "
+            "SKIP_CROSS_REPO=1 显式跳过。"
+        )
     return _LIB_RS.read_text(encoding="utf-8")
 
 
@@ -282,7 +302,14 @@ def test_tauri_command_fn_exists_in_lib_rs(command, lib_rs_text):
 @pytest.fixture(scope="module")
 def activity_api_ts_text():
     if not _ACTIVITY_API_TS.exists():
-        pytest.skip(f"activity-api.ts not found: {_ACTIVITY_API_TS}")
+        if _SKIP_CROSS_REPO:
+            pytest.skip(f"SKIP_CROSS_REPO=1: activity-api.ts not found: {_ACTIVITY_API_TS}")
+        pytest.fail(
+            f"activity-api.ts not found: {_ACTIVITY_API_TS}\n"
+            "这是跨仓契约测试，需要能读到 Emerald-client 前端仓库。设置环境变量 "
+            "EMERALD_CLIENT_ROOT 指向该仓库根目录，或在没有前端仓的场景下设置 "
+            "SKIP_CROSS_REPO=1 显式跳过。"
+        )
     return _ACTIVITY_API_TS.read_text(encoding="utf-8")
 
 
