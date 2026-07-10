@@ -156,12 +156,13 @@ def _apply_style(
         boosted: list[tuple[int, chess.Move]] = []
         for val, move in scored:
             bonus = 0
+            is_cap = board.is_capture(move)  # must check before push — board changes after
             board.push(move)
             if board.is_check():
                 bonus += 200
-            if board.is_capture(move):
-                bonus += 150
             board.pop()
+            if is_cap:
+                bonus += 150
             boosted.append((val + bonus, move))
         boosted.sort(key=lambda t: t[0], reverse=True)
         return boosted[0][1]
