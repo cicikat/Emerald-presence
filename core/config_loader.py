@@ -3,12 +3,14 @@
 全局单例，读取 config.yaml，供所有模块使用
 """
 
+import os
 import yaml
 from pathlib import Path
 
 _config: dict | None = None
 _CONFIG_PATH = Path("config.yaml")
 _config_mtime: float | None = None
+_DATA_PREFIX_ENV = "YEXUAN_DATA_PREFIX"
 
 
 def get_config() -> dict:
@@ -33,7 +35,12 @@ def get_config() -> dict:
 
 
 def reload_config() -> dict:
-    """重新从磁盘读取 config.yaml（admin 修改或磁盘 mtime 变化后调用）"""
+    """重新从磁盘读取 config.yaml（admin 修改或磁盘 mtime 变化后调用）。
+
+    读取顺序 env > config：`YEXUAN_DATA_PREFIX` 存在时覆盖 config.yaml 里的
+    `data_prefix` 字段（不改磁盘文件本身）。测试沙盒（run_test.py）借此声明
+    自己的数据前缀，config.yaml 从此保持只读，不再被运行时脚本改写。
+    """
     global _config, _config_mtime
     try:
         with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -43,6 +50,9 @@ def reload_config() -> dict:
         raise RuntimeError(f"配置文件不存在：{_CONFIG_PATH.absolute()}")
     except yaml.YAMLError as e:
         raise RuntimeError(f"配置文件格式错误：{e}")
+    env_prefix = os.environ.get(_DATA_PREFIX_ENV)
+    if env_prefix:
+        _config["data_prefix"] = env_prefix
     return _config
 
 

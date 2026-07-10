@@ -16,7 +16,7 @@ from pathlib import Path
 
 import yaml
 
-from core.sandbox import get_paths, _TRANSITION_CHARACTER_INNER
+from core.sandbox import get_paths
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +65,6 @@ def _save_state(state: dict, char_id: str = _DEFAULT_CHAR_ID) -> None:
     p = get_paths().activity_state(char_id=char_id)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 旧路径兼容写：只对默认角色保留，非默认角色没有对应的 legacy yexuan_inner 路径语义
-    if _TRANSITION_CHARACTER_INNER and char_id == _DEFAULT_CHAR_ID:
-        old = get_paths()._p("yexuan_inner", "activity_state.json")
-        old.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 def _load_thinking_about(uid: str = "", *, char_id: str = _DEFAULT_CHAR_ID) -> str:
     """

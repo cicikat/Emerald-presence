@@ -24,9 +24,7 @@ import core.activity_manager as am
 
 # ── 1 & 2. _save_state / _load_state / get_current 按角色隔离 ────────────────
 
-def test_save_and_load_state_isolated_per_char(sandbox, monkeypatch):
-    monkeypatch.setattr(am, "_TRANSITION_CHARACTER_INNER", False)
-
+def test_save_and_load_state_isolated_per_char(sandbox):
     am._save_state({"current": "character_a 在写代码", "arc": "afternoon"}, char_id="character_a")
     am._save_state({"current": "character_b 在睡觉", "arc": "deep_night"}, char_id="character_b")
 
@@ -44,15 +42,13 @@ def test_save_and_load_state_isolated_per_char(sandbox, monkeypatch):
     assert json.loads(path_b.read_text(encoding="utf-8"))["current"] == "character_b 在睡觉"
 
 
-def test_load_state_missing_char_returns_empty(sandbox, monkeypatch):
-    monkeypatch.setattr(am, "_TRANSITION_CHARACTER_INNER", False)
+def test_load_state_missing_char_returns_empty(sandbox):
     am._save_state({"current": "只有 character_a 写过状态"}, char_id="character_a")
 
     assert am._load_state(char_id="character_b") == {}
 
 
 def test_get_current_switches_independently_per_char(sandbox, monkeypatch):
-    monkeypatch.setattr(am, "_TRANSITION_CHARACTER_INNER", False)
     monkeypatch.setattr(
         am, "_pick_activity",
         lambda arc, char_id="yexuan": {"text": f"{char_id} 的活动", "id": "x"},

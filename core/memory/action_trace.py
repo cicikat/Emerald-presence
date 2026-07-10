@@ -53,7 +53,6 @@ _ACTION_LABELS: dict[str, str] = {
     "play_song": "点了首歌",
     "get_profile": "看了你的资料",
     "get_episodic": "回忆了往事",
-    "get_growth": "翻了成长记录",
     "exit_yandere": "让自己平静下来",
     "water_garden": "浇了花",
     "peek_screen_content": "看了眼屏幕",

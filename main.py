@@ -166,9 +166,6 @@ def _init_modules():
     register_slow_handlers()
     logger.info("慢任务 handler 已注册")
 
-    from core import scheduler as _scheduler
-    _scheduler.set_pipeline(_pipeline)
-
     from core.memory.pending_perception import cleanup_stale as _cleanup_stale
     _cleanup_stale()
 
@@ -789,14 +786,19 @@ async def _qq_reality_reply_adapter(
     handle_message（普通 LLM 回复）和 _reply_with_tool_result（工具确认 LLM 回复）
     共用此 adapter：
 
-      REALITY_VISIBLE strip → QQ send（text_output.send）
-        → record_assistant_turn（turn_sink 统一链路）
-            → scrub + post_process → capture_turn（REALITY_MEMORY 权威 scrub 点）
+      record_assistant_turn（turn_sink 统一链路）
+        → scrub + post_process → capture_turn（REALITY_MEMORY 权威 scrub 点）
+      → REALITY_VISIBLE strip → QQ send（text_output.send）
+
+    顺序拍板（审计§四/裁定 2026-07-08）：轮次完整性 > 投递确认，先写记忆后发送。
+    宁可"她没看到但角色记得"（发送失败，记忆已写入，下一轮语境自洽），
+    不可"她看到了但我忘了"（原顺序下 send 失败会直接 return，记忆完全不写）。
+    record 失败仍 fail-open（不做补偿删除、不做重发队列），之后照常尝试 send。
 
     只处理 LLM_ASSISTANT_REPLY。Dream guard / SYSTEM_SHORT_TEXT /
     TOOL_CONFIRMATION_PROMPT 等系统短文本继续直发，不经此 adapter，不写 memory。
 
-    fanout=[]: visible send 已在 text_output.send 完成，turn_sink 不重复发送。
+    fanout=[]: visible send 由本函数自己调用 text_output.send，turn_sink 不重复发送。
     bypass_gate=True: adapter 调用方已在 conversation_lock 内，无需重入。
     loop_executed（Brief 28）：本轮是否走了 tool loop，透传给 record_assistant_turn。
     """
@@ -813,24 +815,10 @@ async def _qq_reality_reply_adapter(
         logger.warning("[qq_reality_reply_adapter] 回复 strip 后为空，不发送 uid=%s", user_id)
         return
 
-    logger.info(
-        "[qq_reality_reply_adapter] 发送到 %s%s 共 %d 段",
-        "群" if is_group else "私聊", target_id, len(clean),
-    )
-    try:
-        await text_output.send(target_id, clean, is_group)
-    except Exception as e:
-        _log_error("qq_reality_reply_adapter.send", e)
-        logger.error(
-            "[qq_reality_reply_adapter] 发送异常 uid=%s: %s: %s",
-            user_id, type(e).__name__, e,
-        )
-        return
-
-    # Route memory write through turn_sink unified chain.
+    # Route memory write through turn_sink unified chain — BEFORE visible send.
     # scrub_reality_output_text + capture_turn (authority scrub) live inside
     # record_assistant_turn → pipeline.post_process → capture_turn.
-    # fanout=[] avoids double-send (visible already delivered via text_output.send).
+    # fanout=[] avoids double-send (visible send happens below via text_output.send).
     # bypass_gate=True: already inside conversation_lock from the call site.
     try:
         await _record_turn(
@@ -851,10 +839,26 @@ async def _qq_reality_reply_adapter(
         )
     except Exception as _ts_err:
         _log_error("qq_reality_reply_adapter.turn_sink", _ts_err)
+        from core import silent_failure
+        silent_failure.note("turn_sink.record_assistant_turn", _ts_err)
         logger.error(
-            "[qq_reality_reply_adapter] turn_sink 異常（記憶寫入可能丟失）uid=%s: %s",
+            "[qq_reality_reply_adapter] turn_sink 异常（记忆写入可能丢失）uid=%s: %s",
             user_id, _ts_err,
         )
+
+    logger.info(
+        "[qq_reality_reply_adapter] 发送到 %s%s 共 %d 段",
+        "群" if is_group else "私聊", target_id, len(clean),
+    )
+    try:
+        await text_output.send(target_id, clean, is_group)
+    except Exception as e:
+        _log_error("qq_reality_reply_adapter.send", e)
+        logger.error(
+            "[qq_reality_reply_adapter] 发送异常 uid=%s: %s: %s",
+            user_id, type(e).__name__, e,
+        )
+        return
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

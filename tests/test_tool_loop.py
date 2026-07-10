@@ -302,6 +302,11 @@ def test_tool_loop_active_gating(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_loop_executed_skips_path_b(monkeypatch):
+    # Brief 35: intent_reflex 默认关；本测试验证的是 loop_executed 守卫 (d)
+    # 本身的短路顺序，需强制 enabled=true 才能越过入口的 intent_reflex 闸真正触及守卫 (d)。
+    from core import config_loader
+    monkeypatch.setattr(config_loader, "get_config", lambda: {"intent_reflex": {"enabled": True}})
+
     async def _fail_if_called(*a, **kw):
         raise AssertionError("loop_executed=True 时不应再调用 LLM 解析 Path B 意图")
 

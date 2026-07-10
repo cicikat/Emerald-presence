@@ -25,7 +25,7 @@ from pathlib import Path
 
 from core.config_loader import get_config, _char_name
 from core.error_handler import log_error
-from core.sandbox import get_paths, _TRANSITION_CHARACTER_INNER
+from core.sandbox import get_paths
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +57,6 @@ def save_pet(data: dict):
     try:
         with open(p, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        if _TRANSITION_CHARACTER_INNER:
-            old = get_paths()._p("pet.json")
-            with open(old, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         log_error("pet.save_pet", e)
 

@@ -1,4 +1,4 @@
-from core.sandbox import get_paths, _TRANSITION_CHARACTER_INNER
+from core.sandbox import get_paths
 from core.safe_write import safe_write_json
 from core.scheduler.rhythm import is_quiet_sleep_time
 import time, json
@@ -43,8 +43,6 @@ def update_last_message(user_id: str) -> None:
         data = {}
     data[user_id] = {"last_message_at": time.time()}
     safe_write_json(p, data)
-    if _TRANSITION_CHARACTER_INNER:
-        safe_write_json(get_paths()._p("yexuan_inner", "presence.json"), data)
 
 
 def get_last_seen_text(user_id: str) -> str:

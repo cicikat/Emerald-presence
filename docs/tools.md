@@ -22,19 +22,24 @@
 
   /chat 管理面板冻结入口 → 不走工具探针
 
-路径B：意图解析（pipeline 之后，受限旁路）
+路径B：意图解析（pipeline 之后，受限旁路；Brief 35 起两步降级中，第一步）
   他的回复 → _parse_and_execute_intent()
+             → 入口闸：config.intent_reflex.enabled（默认 false）→ 关闭时直接 return
              → 守卫全部满足才执行：
                (a) trigger_name 为空 → 真实 owner turn（非 scheduler/sensor/watch）
                (b) user_content 非空 → 本轮有真实用户输入
                (c) 意图非 dangerous（device_shutdown/device_sleep 永不经此路径）
+               (d) 本轮未走 tool loop（loop_executed=False，Brief 28）
              → c1: LLM 只在「第一人称、当下要做」时命中；承认/复述/过去式/吐槽回应一律不命中
              → c2: per-uid 同动作幂等窗口 120s（key = uid:action:关键参数）
              → 通过后调 _push_desktop_action，失败写 pending_perception
 ```
 
+> 两步降级节奏见 `docs/known-issues.md` PB4：第一步只加 config 默认关，守卫/测试本步保留；
+> 观察一个月无缺口后第二步整删本路径。
+
 **memory 类工具默认不走探针，路径C（tool loop）激活时才对主 LLM 可见。**
-`read_diary/read_watch/search_diary/get_profile/get_episodic/get_growth` 已注册且 `execute()` 能执行，
+`read_diary/read_watch/search_diary/get_profile/get_episodic` 已注册且 `execute()` 能执行，
 但路径A/B 都没有把 memory 类喂给探针或主生成。Fable R5 已修复与 Author's Note 工具承诺的落差：
 层11 Author's Note 现在是条件分支，有 `tool_result` 时提示已提供，无时明确禁止编造，
 不再承诺主 LLM 可以调用工具。见 `docs/known-issues.md` F11。
@@ -282,11 +287,14 @@ fs_access:
 | `search_diary` | 按关键词搜索最近 30 天日记 | |
 | `get_profile` | 获取用户画像 | profile 已由 fetch_context 自动注入，此工具是第二路径 |
 | `get_episodic` | 召回情景记忆 | episodic 已由 fetch_context 自动召回，此工具是第二路径 |
-| `get_growth` | 获取他对用户的认知 | 读取 legacy `character_growth`；当前主 prompt 不再自动注入 growth |
 
 > 注：`get_profile / get_episodic` 的同类信息已在 `fetch_context` 自动进入 prompt；长期行为模式当前走
-> `user_identity` 层，而不是 `get_growth`。若未来要让他在正式对话中主动再召回 memory 工具，需要在
+> `user_identity` 层。若未来要让他在正式对话中主动再召回 memory 工具，需要在
 > `run_llm()` 或对话循环中接入 tools schema 与工具执行回合。
+>
+> `get_growth` 工具与 `character_growth.load()` 已随 Brief 35 一并删除（确认零其他读者）；
+> 磁盘上的历史 `character_growth/` 文件不再被任何工具读取，仅 `core/memory/path_resolver.py`
+> 的 `LEGACY_ARTIFACTS` 保留只读路径解析用于审计/迁移兼容。
 
 ### 日记工具的三层分工
 

@@ -24,7 +24,7 @@ from admin.auth import require_scopes
 from core.config_loader import get_config
 from core.memory.user_profile import load as _load_profile, save as _save_profile
 from core.memory import realtime_state
-from core.sandbox import get_paths, _TRANSITION_CHARACTER_INNER
+from core.sandbox import get_paths
 
 router = APIRouter()
 
@@ -307,7 +307,4 @@ async def receive_activity_snapshot(payload: dict, auth=Depends(require_scopes("
     p = get_paths().activity_snapshot(char_id=char_id)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    if _TRANSITION_CHARACTER_INNER:
-        old = get_paths()._p("activity_snapshot.json")
-        old.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return {"status": "ok", "char_id": char_id}

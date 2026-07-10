@@ -2,16 +2,17 @@
 tests/test_r7b_scheduler_pipeline_registry.py — Fable R7-B: scheduler pipeline registry unification
 
 Verifies that the scheduler reads its pipeline exclusively from pipeline_registry,
-has no private _pipeline true-value, and that the deprecated set_pipeline shim
-delegates correctly.
+with no private _pipeline true-value.
 
 Coverage:
 1.  _pipeline_send uses the pipeline currently held in pipeline_registry.
 2.  Replacing the registry pipeline causes _pipeline_send to use the new object.
-3.  set_pipeline() (deprecated shim) writes to pipeline_registry, not a local store.
-4.  loop.py has no module-level _pipeline attribute (no private true-value).
-5.  desktop_wake / _pipeline_send still finds the pipeline after hot-swap.
-6.  Existing scheduler active-window tests do not regress.
+3.  loop.py has no module-level _pipeline attribute (no private true-value).
+4.  desktop_wake / _pipeline_send still finds the pipeline after hot-swap.
+5.  Existing scheduler active-window tests do not regress.
+
+（Brief 35：set_pipeline() 兼容壳已删除，原 "3. set_pipeline shim 委托测试" 随之移除；
+ main.py 现直接调用 pipeline_registry.register()。）
 """
 from __future__ import annotations
 
@@ -134,29 +135,7 @@ async def test_hot_swap_registry_pipeline(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 3. set_pipeline shim writes to pipeline_registry, not a local store
-# ---------------------------------------------------------------------------
-
-def test_set_pipeline_delegates_to_registry(monkeypatch):
-    """set_pipeline() must update pipeline_registry._pipeline."""
-    import core.pipeline_registry as _preg
-    from core.scheduler import loop
-
-    original = _preg.get()
-    try:
-        fake = _FakePipeline("via-set-pipeline")
-        loop.set_pipeline(fake)
-
-        assert _preg.get() is fake, (
-            "set_pipeline() must write to pipeline_registry, not a private variable"
-        )
-    finally:
-        # Restore registry state
-        _preg.register(original)
-
-
-# ---------------------------------------------------------------------------
-# 4. loop.py has no module-level _pipeline attribute
+# 3. loop.py has no module-level _pipeline attribute
 # ---------------------------------------------------------------------------
 
 def test_loop_has_no_private_pipeline_attribute():
@@ -170,7 +149,7 @@ def test_loop_has_no_private_pipeline_attribute():
 
 
 # ---------------------------------------------------------------------------
-# 5. _pipeline_send degrades gracefully when registry is empty
+# 4. _pipeline_send degrades gracefully when registry is empty
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -196,7 +175,7 @@ async def test_pipeline_send_degrades_when_registry_empty(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 6. Regression: existing active-window tests still pass
+# 5. Regression: existing active-window tests still pass
 #    (covered by running test_scheduler_active_window.py together)
 # ---------------------------------------------------------------------------
 
@@ -204,9 +183,7 @@ def test_loop_module_imports_cleanly():
     """Sanity: loop module imports without error and exposes expected API."""
     from core.scheduler import loop
 
-    assert callable(loop.set_pipeline)
     assert callable(loop._pipeline_send)
-    assert callable(loop.set_pipeline)
 
 
 # ---------------------------------------------------------------------------

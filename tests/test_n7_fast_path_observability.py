@@ -118,7 +118,6 @@ class TestReadOnlyToolsAreLowRisk:
         "search_diary",
         "get_profile",
         "get_episodic",
-        "get_growth",
     ])
     def test_is_side_effect_false(self, tool_name):
         assert tool_dispatcher.is_side_effect_tool(tool_name) is False, (

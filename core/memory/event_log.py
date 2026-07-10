@@ -270,6 +270,8 @@ def append(
 
     except Exception as e:
         log_error("event_log.append", e)
+        from core import silent_failure
+        silent_failure.note("event_log.append", e)
         return False
 
 
@@ -347,7 +349,7 @@ async def search(
         try:
             from core.memory import vector_store as _vs
             from core.memory.vector_store import dist_to_sim as _d2s
-            _el_hits = _vs.query(user_id, char_id, query_vec, k=1, sources=["event_log"])
+            _el_hits = await _vs.query_async(user_id, char_id, query_vec, k=1, sources=["event_log"])
             if _el_hits:
                 _el_sem_sim = _d2s(_el_hits[0][1])
         except Exception as _se:

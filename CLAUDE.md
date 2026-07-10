@@ -19,21 +19,23 @@ python main.py
 # Test mode (data-isolated sandbox, won't touch production data/)
 python run_test.py
 
-## 测试（新增）
-- 跑测试用 `pytest -n auto`,不要用不带 -n 的全量单进程跑法
-- 只改了部分代码时优先用 `pytest --testmon` 或指定路径跑相关测试,避免每次全量
-
-# Run tests
-pytest
+# Run tests (ALWAYS parallel — see Testing rules below)
+pytest -n auto
+pytest --testmon                     # partial changes: only affected tests
 pytest tests/test_short_term.py -v   # single file
 python tests/run_eval.py             # validate prompt tag/layer activation after tag_rules changes
 ```
 
 No linting or formatting tooling is configured.
 
+## Testing Rules
+
+1. **NEVER run bare `pytest`** (full suite, single process). Always use `pytest -n auto`.
+2. When only part of the code changed, prefer `pytest --testmon` or pass specific test paths instead of the full suite.
+
 ## Architecture
 
-QQ, desktop, and scheduler-triggered messages share one Pipeline. `core/pipeline_registry.py` is the single owner; admin routes, post-process handlers, and the scheduler all read from it via `pipeline_registry.get()`. `scheduler.set_pipeline()` is a deprecated shim that delegates to `pipeline_registry.register()`.
+QQ, desktop, and scheduler-triggered messages share one Pipeline. `core/pipeline_registry.py` is the single owner; admin routes, post-process handlers, and the scheduler all read from it via `pipeline_registry.get()`. `main.py` registers it directly via `pipeline_registry.register()` (the old `scheduler.set_pipeline()` compat shim was removed in Brief 35).
 
 ```
 QQ message      → main.py
@@ -65,7 +67,7 @@ Scheduler       → core/scheduler/loop.py
 | Short-term | `data/runtime/memory/{char_id}/{uid}/history.json` | Every turn (last 20 rounds) |
 | Mid-term | `data/runtime/memory/{char_id}/{uid}/mid_term.json` | LLM compression per turn (12h expiry, 3 time buckets) |
 | Episodic | `data/runtime/memory/{char_id}/{uid}/episodic.json` | mid_term eager/sweep promotion, strength decay, max 200 |
-| User identity | `data/runtime/memory/{char_id}/{uid}/identity.yaml` | fixation pipeline consolidation (active long-term writer; `character_growth` write path retired R8-E2, now read-only legacy surface) |
+| User identity | `data/runtime/memory/{char_id}/{uid}/identity.yaml` | fixation pipeline consolidation (active long-term writer; `character_growth` module + `get_growth` tool removed entirely in Brief 35 — zero other readers of `character_growth.load()` confirmed) |
 | Event log | `data/runtime/memory/{char_id}/{uid}/event_log/{date}.md` | Every turn, daily files, 30-day search window |
 
 **Memory consolidation** runs in the slow queue: `capture_turn → mid_term → episodic → consolidate_to_identity`.
@@ -73,6 +75,14 @@ Scheduler       → core/scheduler/loop.py
 **Tool system**: Tools declared in `_TOOL_REGISTRY` in `core/tool_dispatcher.py`. `info`/`desktop` tools fire via pre-pipeline probe; reply-side desktop intent parsing runs after generation. `memory` tools are registered but are not currently exposed to the main generation call.
 
 **Garden system**: `core/garden/manager.py` maintains five mood-mapped flower slots under `data/garden/`. `garden_water` rolls automatic watering every 30 minutes, `garden_daily` scans harvest/vase state, `water_garden` handles user-prompted watering through the info-tool probe, and `GET /garden/state` exposes admin state. See `docs/garden.md`.
+
+## 协作偏好
+
+1. **用中文回复。**
+2. **默认自主推进、替用户拍板**,不要逐项确认;只在不可逆决策(删数据、改契约、对外发布)时提问。
+3. **不要全仓 grep**,先按 AGENTS.md / 架构文档定位到具体文件再精准搜索。
+4. **交付物一次性批量输出**,多个工单/提示词要标注哪些可并行、哪些有前置依赖,减少一来一回。
+5. **小步 commit**:每完成一个独立修复即 commit(信息一行即可),验收通过的改动当场固化,不留过夜、不攒大坨。
 
 ## Hard Rules
 

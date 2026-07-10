@@ -41,6 +41,21 @@ def _reset_intent_cooldown():
     _pp._INTENT_LAST_ACTION.clear()
 
 
+@pytest.fixture(autouse=True)
+def _intent_reflex_enabled(monkeypatch):
+    """Brief 35: intent_reflex 默认关(config.yaml)。本文件测试 Path B 原有五道守卫
+    行为，需强制 enabled=true 才能触及守卫 (a)-(d)，其余 config 内容透传不变。"""
+    from core import config_loader
+    _real_get_config = config_loader.get_config
+
+    def _patched():
+        cfg = dict(_real_get_config())
+        cfg["intent_reflex"] = {"enabled": True}
+        return cfg
+
+    monkeypatch.setattr("core.config_loader.get_config", _patched)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. probe 无视 history
 # ─────────────────────────────────────────────────────────────────────────────
@@ -598,6 +613,32 @@ def test_read_diary_in_probe_schema(sandbox):
     schema = _td.get_tools_schema(categories=["info", "desktop"])
     names = {entry["function"]["name"] for entry in schema}
     assert "read_diary" in names, "read_diary 必须出现在 info/desktop probe schema"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. Brief 35 · Path B 降级：intent_reflex.enabled=false 时零执行
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_intent_reflex_disabled_skips_everything(sandbox, monkeypatch):
+    """intent_reflex.enabled=false（默认）时，即便其余四道守卫全部会放行，
+    _parse_and_execute_intent 也必须在入口直接 return，不调用 LLM、不执行动作。"""
+    _reset_intent_cooldown()
+
+    from core import config_loader
+    monkeypatch.setattr(config_loader, "get_config", lambda: {"intent_reflex": {"enabled": False}})
+
+    async def _fail_if_called(*a, **kw):
+        raise AssertionError("intent_reflex.enabled=false 时不应调用 LLM 解析意图")
+
+    monkeypatch.setattr("core.llm_client.chat", _fail_if_called)
+
+    pipeline = _make_pipeline()
+    await pipeline._parse_and_execute_intent(
+        "好，我现在就去把游戏窗口关掉。",
+        trigger_name="",
+        user_content="帮我关一下窗口",
+        user_id="u1",
+    )
 
 
 def test_read_diary_probe_prompt_has_examples(sandbox):

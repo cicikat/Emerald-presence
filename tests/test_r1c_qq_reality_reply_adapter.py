@@ -168,10 +168,11 @@ def test_c2e_adapter_strip_before_send():
     )
 
 
-def test_c2f_adapter_send_before_turn_sink():
+def test_c2f_adapter_turn_sink_before_send():
     """
-    C2f (R1-D): text_output.send must appear before record_assistant_turn in the adapter.
-    Visible delivery should happen before the (potentially slow) memory write chain.
+    C2f (Brief 34 §4，2026-07-10 顺序反转): record_assistant_turn must appear before
+    text_output.send in the adapter. 拍板：轮次完整性 > 投递确认——先写记忆，
+    send 失败时记忆已写入，不可"她看到了但我忘了"。
     """
     body = _function_body_text(_src("main.py"), "_qq_reality_reply_adapter")
     send_pos = body.find("text_output.send(")
@@ -180,9 +181,9 @@ def test_c2f_adapter_send_before_turn_sink():
         ts_pos = body.find("record_assistant_turn(")
     assert send_pos != -1, "Adapter missing text_output.send"
     assert ts_pos != -1, "Adapter missing record_assistant_turn/_record_turn"
-    assert send_pos < ts_pos, (
-        "_qq_reality_reply_adapter: text_output.send appears AFTER record_assistant_turn — "
-        "visible delivery should precede memory write"
+    assert ts_pos < send_pos, (
+        "_qq_reality_reply_adapter: record_assistant_turn appears AFTER text_output.send — "
+        "memory write should precede visible delivery"
     )
 
 

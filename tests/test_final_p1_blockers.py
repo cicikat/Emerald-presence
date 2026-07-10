@@ -93,7 +93,6 @@ class TestSensorActivityBearerOnly:
 
         paths, snapshot = activity_paths
         monkeypatch.setattr(sensor, "get_paths", lambda: paths)
-        monkeypatch.setattr(sensor, "_TRANSITION_CHARACTER_INNER", False)
         response = TestClient(auth_app).post(
             "/sensor/activity",
             json={"app": "editor"},

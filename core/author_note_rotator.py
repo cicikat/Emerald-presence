@@ -115,8 +115,6 @@ def get_current_note(paths=None, char_id: str | None = None) -> str:
         from core.sandbox import get_paths
         paths = get_paths()
 
-    from core.sandbox import _TRANSITION_CHARACTER_INNER
-
     _kw = {"char_id": char_id} if char_id is not None else {}
 
     pool_path = paths.author_notes_pool(**_kw)
@@ -152,8 +150,6 @@ def get_current_note(paths=None, char_id: str | None = None) -> str:
         state["history"] = history[:30]
 
         _save_state(write_state_path, state)
-        if _TRANSITION_CHARACTER_INNER and (char_id is None or char_id == "yexuan"):
-            _save_state(paths._p("yexuan_inner", "author_note_state.json"), state)
         logger.info(f"[author_note_rotator] 切换到 note id={chosen['id']}")
         return chosen["content"]
 

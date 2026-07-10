@@ -577,8 +577,8 @@ from core.pipeline_registry import register
 register(pipeline)
 ```
 
-`scheduler.set_pipeline(pipeline)` 已降为 **deprecated** 兼容壳，内部委托到 `pipeline_registry.register()`，
-调度器不再维护自己的 `_pipeline` 副本。
+`scheduler.set_pipeline(pipeline)` 兼容壳已删除（Brief 35）；调用点直接用
+`pipeline_registry.register()`，调度器不维护自己的 `_pipeline` 副本。
 
 注入后，调度器通过 `_pipeline_send()` 走完整四步流程生成回复：
 

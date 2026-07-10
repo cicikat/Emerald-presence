@@ -140,6 +140,15 @@ async def get_data_path(auth=Depends(require_scopes("admin"))):
     return {"data_prefix": prefix}
 
 
+@router.get("/system/health", summary="静默失败计数 + 进程启动时间")
+async def get_health(auth=Depends(require_scopes("state.read"))):
+    from core import silent_failure
+    return {
+        "started_at": silent_failure.process_started_at(),
+        "silent_failures": silent_failure.snapshot(),
+    }
+
+
 @router.get("/system/meta-mode", summary="获取当前安全/危险模式")
 async def get_meta_mode(auth=Depends(require_scopes("state.read"))):
     import json

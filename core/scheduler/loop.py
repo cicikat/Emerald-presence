@@ -15,20 +15,9 @@ from core.sandbox import get_paths, safe_user_id
 
 logger = logging.getLogger(__name__)
 
-# ── Pipeline 注入（deprecated: 统一由 pipeline_registry 持有）────────────────
-# set_pipeline 保留为兼容壳；内部委托到 pipeline_registry，不再维护本地副本。
-# 新代码直接调用 pipeline_registry.register()，不调此函数。
-
-def set_pipeline(p):
-    """[deprecated] 兼容壳：委托到 pipeline_registry.register()。
-    scheduler 不再维护自己的 _pipeline；执行时从 pipeline_registry 读取。
-    """
-    logger.warning(
-        "[scheduler] set_pipeline() is deprecated; "
-        "call pipeline_registry.register() directly and remove this call."
-    )
-    from core.pipeline_registry import register as _reg
-    _reg(p)
+# ── Pipeline 注入：统一由 pipeline_registry 持有 ─────────────────────────────
+# scheduler 不维护自己的 _pipeline；调用方直接用 pipeline_registry.register()。
+# （Brief 35：set_pipeline() 兼容壳已删，main.py 调用点改直用 pipeline_registry.register()。）
 
 
 # ── 冷却时间（秒）────────────────────────────────────────────────────────────

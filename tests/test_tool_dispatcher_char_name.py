@@ -44,7 +44,7 @@ class TestToolRegistryDescriptions:
             "read_diary", "read_watch", "search_diary",
             "desktop_minimize", "desktop_open_url", "desktop_play_pause",
             "desktop_notify", "get_profile", "get_episodic",
-            "get_growth", "exit_yandere", "water_garden",
+            "exit_yandere", "water_garden",
         ]
         for tool_name in char_dependent:
             desc = _TOOL_REGISTRY[tool_name]["description"]

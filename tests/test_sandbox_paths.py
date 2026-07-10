@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -47,6 +48,29 @@ def test_llm_output_validator_writes_debug_to_sandbox(sandbox):
 
 def test_safe_user_id_digits_unchanged():
     assert safe_user_id("1234567890") == "1234567890"
+
+
+def test_init_paths_test_mode_sets_env_not_config_yaml(monkeypatch):
+    """Brief 34 §3：init_paths(mode="test") 通过 YEXUAN_DATA_PREFIX 环境变量声明
+    沙盒前缀，不再改写仓库根目录的 config.yaml（逐字节不变）。"""
+    import core.sandbox as _sandbox
+
+    config_path = Path(__file__).parent.parent / "config.yaml"
+    original_text = config_path.read_text(encoding="utf-8")
+
+    monkeypatch.delenv("YEXUAN_DATA_PREFIX", raising=False)
+    saved_instance = _sandbox._instance
+    try:
+        paths = _sandbox.init_paths(mode="test", test_session_id="unit_env_test")
+        expected_prefix = str(paths._base).replace("\\", "/")
+        assert os.environ.get("YEXUAN_DATA_PREFIX") == expected_prefix
+    finally:
+        _sandbox._instance = saved_instance
+        monkeypatch.delenv("YEXUAN_DATA_PREFIX", raising=False)
+
+    assert config_path.read_text(encoding="utf-8") == original_text, (
+        "init_paths(mode='test') 不应改写 config.yaml"
+    )
 
 
 def test_memory_paths_reject_malicious_uid(sandbox):

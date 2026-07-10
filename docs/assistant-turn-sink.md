@@ -491,7 +491,9 @@ desktop / mobile / scheduler / sensor / wake:
 
 `_qq_reality_reply_adapter` 是 QQ 侧 LLM_ASSISTANT_REPLY 的唯一出口：
 - `handle_message`（普通回复）和 `_reply_with_tool_result`（工具确认回复）均调用此 adapter；
-- adapter 内部：visible strip → QQ send → `record_assistant_turn`（turn_sink）→ `post_process` → `capture_turn`；
+- adapter 内部（Brief 34 §4 顺序反转，2026-07-08）：`record_assistant_turn`（turn_sink）
+  → `post_process` → `capture_turn` **先**完成记忆写入，**再** visible strip → QQ send；
+  拍板：轮次完整性 > 投递确认，send 失败时记忆已写入，不做补偿删除；
 - `main.py` 不再有任何 `_pipeline.post_process` 直接调用；
 - 不存在绕过 adapter 的第三条 LLM 回复出口。
 

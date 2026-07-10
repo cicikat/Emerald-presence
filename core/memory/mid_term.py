@@ -99,6 +99,8 @@ def append(
         safe_write_json(write_path, {"events": events})
     except Exception as e:
         log_error("mid_term.append", e)
+        from core import silent_failure
+        silent_failure.note("mid_term.append", e)
 
 
 def mark_promoted(uid: str, mid_id: str, ep_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> None:

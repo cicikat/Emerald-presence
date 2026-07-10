@@ -32,7 +32,7 @@ from core.garden.constants import (
 )
 from core.data_paths import DEFAULT_CHAR_ID
 from core.safe_write import safe_write_json
-from core.sandbox import get_paths, _TRANSITION_CHARACTER_INNER
+from core.sandbox import get_paths
 
 logger = logging.getLogger(__name__)
 _garden_lock = threading.RLock()
@@ -68,10 +68,6 @@ def _load(path: Path, default):
 def _save(path: Path, data, *, char_id: str = DEFAULT_CHAR_ID) -> None:
     if not safe_write_json(path, data):
         raise OSError(f"failed to write garden state: {path}")
-    if _TRANSITION_CHARACTER_INNER:
-        old_dir = get_paths()._p("garden")
-        old_path = old_dir / path.name
-        safe_write_json(old_path, data)
 
 
 # ── 内部工具函数 ───────────────────────────────────────────────────────────────

@@ -4,19 +4,22 @@ tests/test_r1d_qq_reality_reply_adapter.py — R1-D: QQ turn_sink 统一链路
 Contracts for the R1-D migration that routes QQ LLM_ASSISTANT_REPLY memory writes
 through turn_sink.record_assistant_turn instead of directly calling post_process.
 
-R1-D 路径（当前）:
+R1-D 路径（Brief 34 §4 顺序反转后）:
   handle_message / _reply_with_tool_result
     └─ _qq_reality_reply_adapter
-         ├─ strip_render_tags → text_output.send        (REALITY_VISIBLE)
-         └─ record_assistant_turn(turn_sink)
-               ├─ scrub_reality_output_text + strip_render_tags (defense-in-depth)
-               └─ await pipeline.post_process(frozen_scope, pending_paths, ...)
-                    └─ capture_turn                     (REALITY_MEMORY authority)
+         ├─ record_assistant_turn(turn_sink)             (先写记忆)
+         │     ├─ scrub_reality_output_text + strip_render_tags (defense-in-depth)
+         │     └─ await pipeline.post_process(frozen_scope, pending_paths, ...)
+         │          └─ capture_turn                     (REALITY_MEMORY authority)
+         └─ strip_render_tags → text_output.send        (后发送，REALITY_VISIBLE)
 
 保持不变:
   • Dream guard / cancel / ask_text 直发，不写 memory
   • visible strip 仍在 text_output.send 之前
   • capture_turn 仍是权威 scrub 点
+
+顺序拍板（2026-07-08）：轮次完整性 > 投递确认。send 失败时记忆已写入，接受
+"她没看到但角色记得"；不做补偿删除、不做重发队列。
 
 Naming: D-prefix = R1-D specific guard.
 """
@@ -287,17 +290,22 @@ def test_d6_strip_before_send():
     )
 
 
-def test_d6b_send_before_turn_sink():
-    """D6b: text_output.send must appear before record_assistant_turn call."""
+def test_d6b_turn_sink_before_send():
+    """D6b (Brief 34 §4): record_assistant_turn must appear before text_output.send.
+
+    拍板 2026-07-08：轮次完整性 > 投递确认，先写记忆后发送——send 失败时记忆已写入，
+    不可出现"她看到了但我忘了"。此断言方向在 Brief 34 落地时由
+    test_d6b_send_before_turn_sink 反转而来。
+    """
     body = _function_body_text(_src("main.py"), "_qq_reality_reply_adapter")
     send_pos = body.find("text_output.send(")
     ts_pos = body.find("_record_turn(")
     if ts_pos == -1:
         ts_pos = body.find("record_assistant_turn(")
     assert send_pos != -1 and ts_pos != -1
-    assert send_pos < ts_pos, (
-        "text_output.send appears AFTER record_assistant_turn — "
-        "visible delivery should precede memory write"
+    assert ts_pos < send_pos, (
+        "record_assistant_turn appears AFTER text_output.send — "
+        "memory write should precede visible delivery"
     )
 
 

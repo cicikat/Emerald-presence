@@ -39,18 +39,20 @@ _DEFAULT_CHAR_ID: str = _read_default_char_id()
 # 而不是各自硬编码字面量 "yexuan"。语义不变，值在 import 时冻结自 character.default。
 DEFAULT_CHAR_ID: str = _DEFAULT_CHAR_ID
 
-# ── 多角色布局开关（默认 legacy = 维持旧单角色路径）──────────────────────────────
+# ── 多角色布局开关（三者均已翻至 v1，legacy 分支已删除，见下方断言）───────────────
 # S5 将 character_inner 类翻至 v1（global → per_char）；
 # S6 将 reality 类翻至 v1（per_user → per_char_user）：
 #     新布局 data/memory/{char_id}/{uid}/ 内存放各类型文件；dream 类另定。
-# 各开关独立，可逐类翻转，不影响其他类。
 _LAYOUT_CHARACTER_INNER: str = "v1"   # S5: global → characters/{char_id}/inner/
 _LAYOUT_REALITY: str         = "v1"   # S6: per_user → memory/{char_id}/{uid}/
 _LAYOUT_DREAM: str           = "v1"
 
-# 迁移过渡标志：True 时写新路径的同时镜像写旧路径，默认不镜像。
-_TRANSITION_CHARACTER_INNER: bool = False
-_TRANSITION_REALITY: bool = False  # 无外部 caller，备用
+# Brief 35：三个开关的 legacy 分支已删除（全部长期跑在 v1），开关常量本身保留但收窄为
+# 启动断言——下个大版本再删常量本体。若看到这个 AssertionError，说明有人把值改回了
+# "legacy"，但对应的 legacy 路径分支已经不存在了。
+assert _LAYOUT_CHARACTER_INNER == "v1", "_LAYOUT_CHARACTER_INNER legacy 分支已删除，只支持 v1"
+assert _LAYOUT_REALITY == "v1", "_LAYOUT_REALITY legacy 分支已删除，只支持 v1"
+assert _LAYOUT_DREAM == "v1", "_LAYOUT_DREAM legacy 分支已删除，只支持 v1"
 
 
 def safe_user_id(value: str | int) -> str:
@@ -146,58 +148,39 @@ class DataPaths:
 
     # ── 记忆根目录 ─────────────────────────────────────────────────────────────
     def character_growth(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return self._p("character_growth")
+        # legacy/dead registered artifact（core/memory/path_resolver.py LEGACY_ARTIFACTS）；
+        # get_growth 工具与 character_growth.py 模块已随 Brief 35 删除，本方法只为
+        # path_resolver 的 legacy 兼容解析与一次性迁移脚本（scripts/migrate_data_v1.py）保留。
         return self._p("runtime", "characters", char_id, "character_growth")
 
     def diary_context(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_REALITY == "legacy":
-            return self._p("diary_context")
         return self._p("chars", char_id, "diary_context")
 
     def pet_file(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return self._p("pet.json")
         return self._p("runtime", "characters", char_id, "pet.json")
 
     def episodic_memory(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_REALITY == "legacy":
-            return self._p("episodic_memory")
         return self._p("chars", char_id, "episodic_memory")
 
     def memory_index(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_REALITY == "legacy":
-            return self._p("memory_index")
         return self._p("chars", char_id, "memory_index")
 
     def event_log(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_REALITY == "legacy":
-            return self._p("event_log")
         return self._p("chars", char_id, "event_log")
 
     def group_context(self) -> Path:
         return self._p("group_context")
 
     def yexuan_inner_diary(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        # "yexuan_inner" path segment below is a legacy on-disk layout name (pre-multi-char),
-        # whitelisted in tests/test_no_hardcoded_character.py — see Brief 25 §3 P1/P3.
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return self._p("yexuan_inner", "diary")
         return self._p("runtime", "characters", char_id, "inner", "diary")
 
     def history(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_REALITY == "legacy":
-            return self._p("history")
         return self._p("chars", char_id, "history")
 
     def profiles(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_REALITY == "legacy":
-            return self._p("profiles")
         return self._p("chars", char_id, "profiles")
 
     def reminders(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_REALITY == "legacy":
-            return self._p("reminders")
         return self._p("chars", char_id, "reminders")
 
     def diary_fallback(self) -> Path:
@@ -209,13 +192,9 @@ class DataPaths:
         return p
 
     def activity_snapshot(self, *, char_id: str) -> Path:
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return self._p("activity_snapshot.json")
         return self._p("runtime", "characters", char_id, "inner", "activity_snapshot.json")
 
     def presence(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return self._p("yexuan_inner", "presence.json")
         return self._p("runtime", "characters", char_id, "inner", "presence.json")
 
     def inbox_dir(self) -> Path:
@@ -229,75 +208,47 @@ class DataPaths:
         return p
 
     def mood_state(self, *, char_id: str) -> Path:
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return self._p("yexuan_inner", "mood_state.json")
         return self._p("runtime", "characters", char_id, "inner", "mood_state.json")
 
     def activity_pool(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return Path("data/yexuan_inner/activity_pool.yaml")
         # S8 will physically move authored files; fall back to legacy yexuan path if new not yet present
         new = Path(f"content/characters/{char_id}/activity_pool.yaml")
         return new if new.exists() else Path("data/yexuan_inner/activity_pool.yaml")
 
     def activity_state(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return self._p("yexuan_inner", "activity_state.json")
         return self._p("runtime", "characters", char_id, "inner", "activity_state.json")
 
     def observations(self, *, char_id: str) -> Path:
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return self._p("yexuan_inner", "observations.jsonl")
         return self._p("runtime", "characters", char_id, "inner", "observations.jsonl")
 
     def mid_term(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_REALITY == "legacy":
-            return self._p("mid_term")
         return self._p("chars", char_id, "mid_term")
 
     def dreams_tmp_dir(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_DREAM == "legacy":
-            return self._p("dreams", "tmp")
         return self._p("runtime", "dreams", char_id, "tmp")
 
     def dreams_archive_dir(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_DREAM == "legacy":
-            return self._p("dreams", "archive")
         return self._p("runtime", "dreams", char_id, "archive")
 
     def dreams_summaries_dir(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_DREAM == "legacy":
-            return self._p("dreams", "summaries")
         return self._p("runtime", "dreams", char_id, "summaries")
 
     def dreams_impressions_dir(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_DREAM == "legacy":
-            return self._p("dreams", "impressions")
         return self._p("runtime", "dreams", char_id, "impressions")
 
     def dream_state_path(self, user_id: str | int, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_DREAM == "legacy":
-            return self._p("dreams", "state", safe_user_id(user_id), "dream_state.json")
         return self._p("runtime", "dreams", char_id, "state", safe_user_id(user_id), "dream_state.json")
 
     def dream_settings_path(self, user_id: str | int, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_DREAM == "legacy":
-            return self._p("dreams", "settings", safe_user_id(user_id) + ".json")
         return self._p("runtime", "dreams", char_id, "settings", safe_user_id(user_id) + ".json")
 
     def dream_hud_state_path(self, user_id: str | int, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_DREAM == "legacy":
-            return self._p("dreams", "state", safe_user_id(user_id), "dream_hud_state.json")
         return self._p("runtime", "dreams", char_id, "state", safe_user_id(user_id), "dream_hud_state.json")
 
     def garden(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return self._p("garden")
         return self._p("runtime", "characters", char_id, "garden")
 
     def author_notes_pool(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return Path("characters/default_author_notes.json")
         # S8 will physically move authored files; fall back to default pool if new not yet present
         new = Path(f"content/characters/{char_id}/{char_id}_author_notes.json")
         legacy = Path(f"characters/{char_id}_author_notes.json")
@@ -444,8 +395,6 @@ class DataPaths:
 
     # ── 只读静态（不偏移，test 与 prod 共享原文件）───────────────────────────
     def yexuan_traits(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return Path("data/yexuan_traits.yaml")
         # S8 will physically move authored files; fall back to legacy if new not yet present
         new = Path(f"content/characters/{char_id}/traits.yaml")
         return new if new.exists() else Path("data/yexuan_traits.yaml")
@@ -455,21 +404,15 @@ class DataPaths:
         return new if new.exists() else Path("data/jailbreak_presets")
 
     def author_note_state(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return self._p("yexuan_inner", "author_note_state.json")
         return self._p("runtime", "characters", char_id, "inner", "author_note_state.json")
 
     def trait_state(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_CHARACTER_INNER == "legacy":
-            return self._p("yexuan_inner", "trait_state.json")
         return self._p("runtime", "characters", char_id, "inner", "trait_state.json")
 
     def dead_letter_queue(self) -> Path:
         return self._p("logs", "dead_letter_queue")
 
     def fixation_state_dir(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_REALITY == "legacy":
-            return self._p("fixation_state")
         return self._p("chars", char_id, "fixation_state")
 
     def fixation_log(self) -> Path:
@@ -488,8 +431,6 @@ class DataPaths:
         return self._p("debug", "llm_output")
 
     def user_identity_dir(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        if _LAYOUT_REALITY == "legacy":
-            return self._p("user_identity")
         return self._p("chars", char_id, "user_identity")
 
     # ── S6: per-user memory 新布局 ────────────────────────────────────────────

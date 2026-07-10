@@ -612,6 +612,8 @@ def delete_episode(user_id: str, ep_id: str, *, char_id: str = DEFAULT_CHAR_ID) 
         _vs.delete(_safe_uid(user_id), char_id, "episodic", ep_id)
     except Exception as e:
         logger.warning("[episodic] vector cascade delete failed ep_id=%s: %s", ep_id, e)
+        from core import silent_failure
+        silent_failure.note("episodic.vector_cascade_delete", e)
 
     # provenance
     try:

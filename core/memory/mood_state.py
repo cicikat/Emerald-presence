@@ -8,7 +8,7 @@ import logging
 import time
 from pathlib import Path
 
-from core.sandbox import get_paths, _TRANSITION_CHARACTER_INNER
+from core.sandbox import get_paths
 from core.safe_write import safe_write_json
 from core.llm_output_validator import record_failure, is_paused, reset
 from core.data_paths import DEFAULT_CHAR_ID
@@ -79,8 +79,6 @@ def save(state: dict, *, char_id: str = DEFAULT_CHAR_ID) -> None:
         return
 
     safe_write_json(_write_path(char_id), state)
-    if _TRANSITION_CHARACTER_INNER:
-        safe_write_json(get_paths()._p("runtime", "characters", char_id, "inner", "mood_state.json"), state)
     reset("mood_state")
 
 

@@ -20,7 +20,7 @@ _paths = init_paths(mode="test")
 print("=" * 60)
 print(f"[TEST] session_id  : {_paths.test_session_id}")
 print(f"[TEST] 数据根目录   : {_paths._base.resolve()}")
-print(f"[TEST] config.yaml 已写入 data_prefix 字段（供 Emerald-desktop （该前端已废弃，现在Emerald-client）同步）")
+print(f"[TEST] data_prefix 已通过环境变量 YEXUAN_DATA_PREFIX 声明，config.yaml 保持只读")
 print("=" * 60)
 print()
 
@@ -44,11 +44,3 @@ if __name__ == "__main__":
             print("[TEST] 沙盒已清理")
         else:
             print(f"[TEST] 沙盒保留在 {_paths._base.resolve()}")
-
-        # 无论是否清理沙盒目录，测试会话结束后 config.yaml 都不应再指向它，
-        # 否则下次以 production 模式启动会读到 test_sandbox 路径（P0-1 已排查的阻断项）。
-        from core.sandbox import _CONFIG_PATH
-        lines = _CONFIG_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
-        lines = [l for l in lines if not l.startswith("data_prefix:")]
-        _CONFIG_PATH.write_text("".join(lines), encoding="utf-8")
-        print("[TEST] config.yaml data_prefix 已重置")

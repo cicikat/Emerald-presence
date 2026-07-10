@@ -189,6 +189,64 @@ async def test_rebuild_clears_old_db(tmp_path):
     assert all(r[0] != "old_ep" for r in new_results)
 
 
+@pytest.mark.skipif(not HAS_SQLITE_VEC, reason="sqlite_vec extension not installed")
+async def test_query_async_matches_sync_query(tmp_path):
+    """query_async（executor 包装）结果与同步 query 一致（Brief 34 §2）。"""
+    from core.memory.vector_store import upsert, query, query_async
+
+    patches = _patch_env(tmp_path)
+    for p in patches:
+        p.start()
+    try:
+        await upsert(_UID, _CHAR, "episodic", "ep_async", time.time(), "async test text")
+        sync_results = query(_UID, _CHAR, _FAKE_VEC, k=1)
+        async_results = await query_async(_UID, _CHAR, _FAKE_VEC, k=1)
+    finally:
+        for p in patches:
+            p.stop()
+
+    assert async_results == sync_results
+    assert async_results[0][0] == "ep_async"
+
+
+@pytest.mark.skipif(not HAS_SQLITE_VEC, reason="sqlite_vec extension not installed")
+async def test_vector_store_executor_does_not_block_event_loop(tmp_path):
+    """并发 upsert + query_async 交错时，事件循环心跳不被阻塞（Brief 34 §2/§5）。
+
+    单 worker executor 会把 sqlite IO 串行化，但串行化的是"向量库写线程"，
+    不是事件循环本身——主循环应持续能处理别的协程（用心跳计数器验证）。
+    """
+    from core.memory.vector_store import upsert, query_async
+
+    patches = _patch_env(tmp_path)
+    for p in patches:
+        p.start()
+    try:
+        heartbeats = 0
+        stop = False
+
+        async def _heartbeat():
+            nonlocal heartbeats
+            while not stop:
+                await asyncio.sleep(0.01)
+                heartbeats += 1
+
+        async def _io_burst():
+            for i in range(10):
+                await upsert(_UID, _CHAR, "episodic", f"ep_burst_{i}", time.time(), f"text {i}")
+                await query_async(_UID, _CHAR, _FAKE_VEC, k=5)
+
+        hb_task = asyncio.create_task(_heartbeat())
+        await _io_burst()
+        stop = True
+        await hb_task
+    finally:
+        for p in patches:
+            p.stop()
+
+    assert heartbeats > 0, "事件循环心跳应在向量库 IO 期间持续跳动，未被阻塞"
+
+
 async def test_sqlite_vec_not_installed_fail_open(monkeypatch):
     """sqlite_vec 未安装时，upsert/query/rebuild 均不报错。"""
     import sys

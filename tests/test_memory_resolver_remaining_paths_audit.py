@@ -303,25 +303,6 @@ def test_character_growth_not_imported_in_pipeline():
     )
 
 
-def test_get_growth_tool_category_is_memory_not_info():
-    """get_growth must have category='memory', keeping it out of the pre-pipeline probe."""
-    from core.tool_dispatcher import _TOOL_REGISTRY
-    spec = _TOOL_REGISTRY.get("get_growth")
-    assert spec is not None, "get_growth must be registered"
-    assert spec["category"] == "memory", (
-        "get_growth must not be category='info' or 'desktop' (would expose character_growth to probe)"
-    )
-
-
-def test_probe_prompt_does_not_include_get_growth():
-    """Pre-pipeline probe must not expose get_growth (which would activate character_growth path)."""
-    from core.tool_dispatcher import get_probe_prompt
-    probe = get_probe_prompt("home")
-    assert "get_growth" not in probe, (
-        "get_growth must not appear in probe (character_growth path must remain dormant)"
-    )
-
-
 # ---------------------------------------------------------------------------
 # 6. No new production yexuan hardcoded fallback in migrated stores
 # ---------------------------------------------------------------------------

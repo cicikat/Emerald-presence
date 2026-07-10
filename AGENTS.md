@@ -67,7 +67,6 @@
 | Dream snapshot 接入（Phase 4：tag-gated D4.5 只读注入；tag_gate helper；fail-closed） | `core/dream/dream_context.py` + `core/dream/dream_prompt.py` |
 | Dream exit afterglow 回流接线（Phase 6：wire_afterglow_from_summary；tone 推导；fail-closed） | `core/dream/dream_exit_afterglow.py` |
 | Reality prompt afterglow 软提示（Phase 7：_format_afterglow_soft_hint；只读；fail-closed；layer dream_afterglow_soft_hint） | `core/prompt_builder.py` → `_format_afterglow_soft_hint()` + `read_afterglow_residue()` |
-| 角色认知（legacy/兼容） | `core/memory/character_growth.py` |
 | 调度器主循环 | `core/scheduler/loop.py` |
 | 调度器状态机 / gating / proposer | `core/scheduler/state_machine.py` / `core/scheduler/gating.py` / `core/scheduler/proposer_registry.py` |
 | 出梦主动开口触发器 | `core/scheduler/triggers/dream_exit.py` |
@@ -95,7 +94,6 @@
 | 信息固化 pipeline（capture → mid_term → episodic → identity；growth handler legacy） | `core/memory/fixation_pipeline.py` |
 | 元数据规则纠察 | `core/integrity_check.py` |
 | user_identity 文件 | `data/user_identity/{uid}.yaml`（当前 prompt 层6a 主入口） |
-| character_growth 三文件（legacy） | `角色_{uid}.md`（observer源）/ `.fingerprint.txt`（派生，存前150字）/ `.felt.md`（派生；当前主 prompt 不注入） |
 | toy 自主写入（自生长，走 post_process，非探针） | `core/post_process/toy_autogrow.py` → `handler_toy_autogrow`；配置 `toy_autogrow:` |
 | web 搜索沉淀（X3）：结果写入 vector_store source="web" | `core/tools/web_search.py` → `vector_store.upsert`；限频配置 `web_autosearch:` |
 | web 资料召回（X3）：semantic 召回 web 来源，注入 `web_recall` 层 | `core/pipeline.py` `fetch_context()` → `vector_store.query_with_preview(sources=["web"])` → `web_recall_result` → `prompt_builder.build(web_recall_result=)` |
@@ -147,6 +145,21 @@ python run_test.py
    （`from core.data_paths import DEFAULT_CHAR_ID`），不写死 `"yexuan"`。
    守门测试：`tests/test_no_hardcoded_character.py`（字面角色名/用户名 + 协议兼容
    字段白名单）、`tests/test_r3_scope_lint.py`（`char_id="yexuan"` 默认参数）。
+
+   ## 测试（新增）
+- 跑测试用 `pytest -n auto`,不要用不带 -n 的全量单进程跑法
+- 只改了部分代码时优先用 `pytest --testmon` 或指定路径跑相关测试,避免每次全量
+
+
+---
+
+## 工作惯例
+
+**每积累若干个功能 brief，安排一个删除 brief。** 只加法、不做减法会让测试从安全网
+变成防腐层——迁移化石从不拆、legacy 分支越叠越厚。删除 brief 中，测试随功能一起
+删除是合法且必须的：测试是跟随功能的，不是功能的遗产。删除必须连同其守卫、测试、
+文档条目一起删——不留只测已删除代码的"僵尸测试"。（Brief 35 是第一个这样的删除
+brief，采纳审计 `docs/critique-triage-20260708.md` §2.1/§五的精神。）
 
 ---
 

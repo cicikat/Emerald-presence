@@ -85,7 +85,7 @@ def test_yexuan_traits_legacy(dp):
     assert dp.yexuan_traits() == dp.yexuan_traits(char_id="yexuan")
 
 
-# ── character_growth（character_inner per_char_user，v1）──────────────────────
+# ── character_growth（legacy/dead artifact，仅供 path_resolver 兼容解析保留）───────
 
 def test_character_growth_v1(dp, tmp_path):
     assert dp.character_growth(char_id="yexuan") == (

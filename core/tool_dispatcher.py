@@ -141,14 +141,6 @@ async def _get_episodic_wrapper(user_id: str, topic: str = "") -> str:
     return format_for_prompt(memories, char_name=get_active_char_name()) if memories else "暂无相关记忆"
 
 
-async def _get_growth_wrapper(user_id: str) -> str:
-    """召回角色对用户的认知。"""
-    from core.memory import character_growth
-    char_name = get_active_char_name()
-    content = character_growth.load(char_name, user_id)
-    return content[:500] if content else "暂无认知记录"
-
-
 import json as _json
 import time as _time
 from pathlib import Path as _Path
@@ -667,18 +659,6 @@ _TOOL_REGISTRY["get_episodic"] = {
     "trace_args": ["topic"],
 }
 
-_TOOL_REGISTRY["get_growth"] = {
-    "func": _get_growth_wrapper,
-    "description": "读取 {char} 对用户的 legacy growth snapshot（只读历史成长摘要）。不触发写入或更新。如需了解角色历史认知记录时调用。",
-    "dangerous": False,
-    "category": "memory",
-    "parameters": {
-        "type": "object",
-        "properties": {},
-        "required": [],
-    },
-}
-
 _TOOL_REGISTRY["exit_yandere"] = {
     "func": _exit_yandere_wrapper,
     "description": "当{char}决定从病娇状态平静下来时调用，通常是用户说了让她安心的话之后。由{char}自主判断是否调用，不需要用户明确要求。",
@@ -896,7 +876,7 @@ _TOOL_REGISTRY["fs_read"] = {
 #     - 写状态的工具（add_reminder / water_garden / exit_yandere）
 #   低风险 / side_effect=False：
 #     - 纯读类（get_time / weather / web_search / read_diary /
-#               read_watch / search_diary / get_profile / get_episodic / get_growth）
+#               read_watch / search_diary / get_profile / get_episodic）
 
 _SIDE_EFFECT_TOOLS: frozenset[str] = frozenset({
     # desktop 控制类 —— 会向桌宠端推送外部动作
@@ -1170,7 +1150,7 @@ async def execute(
         func = tool_info["func"]
         if tool_name in (
             "add_reminder", "read_diary", "read_watch", "search_diary",
-            "get_profile", "get_episodic", "get_growth",
+            "get_profile", "get_episodic",
         ):
             result = await func(user_id=user_id, **tool_args)
         elif tool_name == "web_search":

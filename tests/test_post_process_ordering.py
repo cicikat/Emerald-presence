@@ -3,8 +3,8 @@ post_process 顺序保证与超时降级测试
 
 测试1 — critical writes 先完成：
   post_process 返回时 short_term / event_log / mood_state.update 已落盘。
-  slow 任务（episodic_compress）被 asyncio.Event 门控住，
-  证明：在 episodic 任务被人为卡住期间，critical 数据已可读。
+  slow 任务（summarize_to_midterm）被 asyncio.Event 门控住，
+  证明：在该任务被人为卡住期间，critical 数据已可读。
 
 测试2 — detect_emotion 超时降级：
   detect_emotion 超过 _DETECT_EMOTION_TIMEOUT 未响应时，
@@ -107,6 +107,63 @@ async def test_critical_writes_complete_before_slow_tasks(sandbox, monkeypatch, 
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 测试1.5（Brief 34 §1）：detect_emotion 在 uid_lock 外执行
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def test_detect_emotion_runs_outside_uid_lock(sandbox, monkeypatch):
+    """detect_emotion 执行期间 uid_lock 不应被持有：用 Event 把 detect_emotion
+    挂住，探测此时 uid_lock(uid).locked() 是否为 False，证明锁外算已生效。
+    emotion 结果仍应正确写入 mood/event_log（在 gate 放行后完成）。
+    """
+    import core.post_process.slow_queue as sq
+    from core.memory import locks as _locks
+    from core.pipeline import Pipeline
+    from core.sandbox import get_paths
+
+    uid = "uid_lock_scope_test"
+
+    detect_started = asyncio.Event()
+    release_detect = asyncio.Event()
+
+    async def gated_detect(*_):
+        detect_started.set()
+        await release_detect.wait()
+        return "happy"
+
+    monkeypatch.setattr("core.llm_client.detect_emotion", gated_detect)
+    monkeypatch.setattr("core.llm_client.chat", AsyncMock(return_value=""))
+    monkeypatch.setattr("core.memory.mood_state.update", lambda *a, **k: None)
+
+    sq.register_handler("summarize_to_midterm", AsyncMock())
+    sq.register_handler("consistency_check", AsyncMock())
+    sq.start_worker()
+
+    from core.write_envelope import stamp_user_chat
+    pipeline = Pipeline(_MockCharacter(), lore_engine=None)
+
+    task = asyncio.create_task(
+        pipeline.post_process(uid, "你好", "hi", target_id="", is_group=False, envelope=stamp_user_chat())
+    )
+
+    await asyncio.wait_for(detect_started.wait(), timeout=2)
+    lock = _locks.uid_lock(uid)
+    assert not lock.locked(), (
+        "detect_emotion 挂起期间 uid_lock 被持有 —— 应挪到锁外算，锁内只做读-改-写"
+    )
+
+    release_detect.set()
+    await task
+
+    day_dir = get_paths().user_memory_root(uid) / "event_log"
+    day_files = [f for f in day_dir.glob("*.md") if f.name != "full_log.md"]
+    assert day_files, "event_log 今日文件未创建"
+    log_text = day_files[0].read_text(encoding="utf-8")
+    assert "emotion:happy" in log_text, f"emotion 结果应正确写入 event_log，实际:\n{log_text}"
+
+    await sq.drain()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 测试2：detect_emotion 超时 → neutral 降级
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -135,8 +192,6 @@ async def test_detect_emotion_timeout_falls_back_to_neutral(sandbox, monkeypatch
 
     monkeypatch.setattr("core.memory.mood_state.update", _capture_mood)
 
-    sq.register_handler("mid_term_append",   AsyncMock())
-    sq.register_handler("episodic_compress", AsyncMock())
     sq.register_handler("consistency_check", AsyncMock())
     sq.start_worker()
 

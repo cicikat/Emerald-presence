@@ -268,8 +268,9 @@ pipeline_registry.register(pipeline)
 pipeline = pipeline_registry.get()
 ```
 
-> `scheduler.set_pipeline()` 已降为 deprecated 兼容壳，内部委托到 `pipeline_registry.register()`。
-> 调度器不再维护自己的 `_pipeline` 副本；`_pipeline_send()` 执行时从 registry 读取当前实例。
+> `scheduler.set_pipeline()` 兼容壳已删除（Brief 35）；`main.py` 直接调用
+> `pipeline_registry.register()`。调度器不维护自己的 `_pipeline` 副本；
+> `_pipeline_send()` 执行时从 registry 读取当前实例。
 
 ---
 

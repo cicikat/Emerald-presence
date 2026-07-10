@@ -9,8 +9,7 @@ Coverage:
 5.  handler 直接执行后写入 trait_state 文件
 6.  author_note_rotator 读取的路径与 handler 写入路径一致
 7.  fetch_context 源码中不含 trait_tracker_update 调用
-8.  legacy handler（mid_term_append / episodic_compress）保持注册
-9.  R3 Rule-1：core/pipeline.py 不引入新 char_id="yexuan" 函数参数默认值
+8.  R3 Rule-1：core/pipeline.py 不引入新 char_id="yexuan" 函数参数默认值
 """
 
 import json
@@ -260,26 +259,6 @@ def test_fetch_context_has_no_trait_tracker_enqueue():
     assert "trait_tracker_update" not in source, (
         "fetch_context must never enqueue trait_tracker_update (pure-read path)"
     )
-
-
-# ── 8. legacy handler 保持注册 ────────────────────────────────────────────────
-
-def test_legacy_handlers_not_deleted(monkeypatch):
-    """mid_term_append and episodic_compress must stay registered (DLQ compat)."""
-    import core.post_process.slow_queue as sq
-    sq._handlers = {}
-
-    async def _stub(_): ...
-    monkeypatch.setattr("core.memory.fixation_pipeline.handler_capture_turn_retry",      _stub, raising=False)
-    monkeypatch.setattr("core.memory.fixation_pipeline.handler_summarize_to_midterm",    _stub, raising=False)
-    monkeypatch.setattr("core.memory.fixation_pipeline.handler_reflect_to_episodic",     _stub, raising=False)
-    monkeypatch.setattr("core.memory.fixation_pipeline.handler_consolidate_to_identity", _stub, raising=False)
-
-    from core.pipeline import register_slow_handlers
-    register_slow_handlers()
-
-    assert "mid_term_append" in sq._handlers,  "mid_term_append must remain registered"
-    assert "episodic_compress" in sq._handlers, "episodic_compress must remain registered"
 
 
 # ── 9. R3 Rule-1：pipeline.py 不引入新 char_id="yexuan" 参数默认值 ────────────

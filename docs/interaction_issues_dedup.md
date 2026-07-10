@@ -572,7 +572,7 @@ harvest 生命周期容器设计未定。
 严重度：P2：文档不一致、维护困难、轻微行为异常
 
 问题描述：  
-`read_diary/read_watch/search_diary/get_profile/get_episodic/get_growth` 已注册，但探针只覆盖 `info + desktop`，主 LLM 没有工具调用回合。Author's Note 中若要求调用 diary/watch 工具，当前没有真实执行通道。
+`read_diary/read_watch/search_diary/get_profile/get_episodic` 已注册（`get_growth` 已随 Brief 35 删除），但探针只覆盖 `info + desktop`，主 LLM 没有工具调用回合。Author's Note 中若要求调用 diary/watch 工具，当前没有真实执行通道。
 
 证据：
 - `<repo-root>\docs\known-issues.md` F11。

@@ -278,7 +278,7 @@ class Pipeline:
                 _q_vecs = await embed([content])
                 _query_vec = _q_vecs[0]
                 from core.memory import vector_store as _vs
-                _semantic_hits = _vs.query(uid, char_id, _query_vec, k=8)
+                _semantic_hits = await _vs.query_async(uid, char_id, _query_vec, k=8)
                 if _semantic_hits:
                     logger.debug(
                         "[pipeline.semantic_recall] uid=%s top-%d: %s",
@@ -424,7 +424,7 @@ class Pipeline:
         if not _skip_recall and _query_vec:
             try:
                 from core.memory import vector_store as _vs_web
-                _web_hits = _vs_web.query_with_preview(
+                _web_hits = await _vs_web.query_with_preview_async(
                     uid, char_id, _query_vec, k=3, sources=["web"]
                 )
                 if _web_hits:
@@ -849,14 +849,15 @@ class Pipeline:
         关键写入在 uid_lock 内同步完成，慢任务（LLM调用）入 slow_queue 异步执行。
         调用方应 await 此方法，不得用 asyncio.create_task() 丢弃引用（N10）。
 
-        关键路径（uid_lock 内，按顺序）：
-          short_term.append → event_log(user) → detect_emotion(timeout=8s)
-          → global_lock(mood_state): mood_state.update + yandere
-          → event_log(assistant, emotion)
+        关键路径：
+          detect_emotion(timeout=8s，锁外算，只依赖 reply 文本)
+          → uid_lock 内：short_term.append → event_log(user)
+            → global_lock(mood_state): mood_state.update + yandere
+            → event_log(assistant, emotion)
 
         慢队列（uid_lock 释放后入队）：
-          mid_term_append / episodic_compress / consistency_check
-          user_profile_update（条件） / character_growth_update（条件）
+          capture_turn_retry（条件） / summarize_to_midterm / consistency_check
+          user_profile_update（条件） / trait_tracker_update（条件） / toy_autogrow（条件）
 
         side effects（保持 asyncio.create_task）：TTS/表情包 / _parse_and_execute_intent
 
@@ -895,12 +896,20 @@ class Pipeline:
         from core.error_handler import log_error
         from core.post_process import slow_queue
 
-        _emotion = "neutral"
         _should_update_profile = False
         _profile_recent: list = []
         import time as _time
         _turn_id = f"{user_id}_{int(_time.time() * 1000)}"
         _critical_written = False
+
+        # ── detect_emotion（带超时，锁外算：只依赖 reply 文本，不读锁内状态）──
+        try:
+            _emotion = await asyncio.wait_for(
+                llm_client.detect_emotion(reply), timeout=_DETECT_EMOTION_TIMEOUT
+            )
+        except (asyncio.TimeoutError, Exception) as e:
+            logger.warning(f"[pipeline.post_process] detect_emotion 降级 neutral: {e}")
+            _emotion = "neutral"
 
         async with _locks.uid_lock(user_id):
             # ── 检查用户画像更新条件（在写入前，读取当前历史长度 +2 估算）────
@@ -916,16 +925,7 @@ class Pipeline:
             except Exception as e:
                 log_error("post_process.check_conditions", e)
 
-            # ── detect_emotion（带超时，绝不拖死 uid_lock）───────────────────
-            try:
-                _emotion = await asyncio.wait_for(
-                    llm_client.detect_emotion(reply), timeout=_DETECT_EMOTION_TIMEOUT
-                )
-            except (asyncio.TimeoutError, Exception) as e:
-                logger.warning(f"[pipeline.post_process] detect_emotion 降级 neutral: {e}")
-                _emotion = "neutral"
-
-            # ── mood_state 更新（全局锁，嵌套在 uid_lock 内）────────────────
+            # ── mood_state 更新（全局锁，嵌套在 uid_lock 内；用锁外算好的 _emotion）
             _mood_state_after: dict | None = None
             if envelope.can_affect_mood:
                 async with _locks.global_lock("mood_state"):
@@ -992,7 +992,6 @@ class Pipeline:
         from core.dream.impression_loader import has_active_impressions as _has_active_imp
         _dream_echo = _has_active_imp(user_id, char_id=char_id)
 
-        # summarize_to_midterm 替代旧的 mid_term_append；
         # 若 emotion 显著，handler 内部会自动入队 reflect_to_episodic（eager）
         if envelope.can_write_memory:
             _mt_payload: dict = {
@@ -1107,7 +1106,15 @@ class Pipeline:
         import re
         import time as _time
         from core import llm_client
+        from core.config_loader import get_config as _cfg
         from core.error_handler import log_error
+
+        # Brief 35 · Path B 两步降级第一步：config 默认关，关闭时直接 return。
+        # 观察期一个月（见 config intent_reflex / docs/known-issues.md），无缺口后
+        # 第二步整删本函数 + 守卫 + c2 幂等窗口。
+        if not _cfg().get("intent_reflex", {}).get("enabled", False):
+            logger.debug("[pipeline.intent] 跳过: intent_reflex.enabled=false（Path B 降级）")
+            return
 
         # guard (d): this turn already went through the tool loop → skip Path B
         if loop_executed:
@@ -1400,31 +1407,6 @@ async def _do_compress_episode(
     reset(_fail_key)
 
 
-async def _handler_mid_term_append(payload: dict) -> None:
-    # 保留旧 handler 供 DLQ 里残留任务重试用，新入队任务已改走 summarize_to_midterm
-    from core.memory import locks as _locks, mid_term as _mid_term
-    from core import llm_client
-    scope = _get_scope_from_payload(payload, "_handler_mid_term_append")
-    uid = scope.uid
-    char_id = scope.character_id
-    async with _locks.uid_lock(uid):
-        summary = await llm_client.summarize_turn(
-            payload["user_content"], payload["reply"], tags=payload.get("tags")
-        )
-        _mid_term.append(uid, summary, tags=payload.get("tags"), char_id=char_id)
-
-
-async def _handler_episodic_compress(payload: dict) -> None:
-    # 保留旧 handler 供 DLQ 里残留任务重试用，新入队任务已改走 reflect_to_episodic
-    scope = _get_scope_from_payload(payload, "_handler_episodic_compress")
-    await _do_compress_episode(
-        user_id=scope.uid,
-        user_content=payload["user_content"],
-        reply=payload["reply"],
-        char_id=scope.character_id,
-    )
-
-
 async def _handler_consistency_check(payload: dict) -> None:
     from core import character_loader
     from core.pipeline_registry import get as _get_pipeline
@@ -1497,8 +1479,6 @@ def register_slow_handlers() -> None:
     slow_queue.register_handler("summarize_to_midterm",     handler_summarize_to_midterm)
     slow_queue.register_handler("reflect_to_episodic",      handler_reflect_to_episodic)
     slow_queue.register_handler("consolidate_to_identity",  handler_consolidate_to_identity)
-    slow_queue.register_handler("mid_term_append",         _handler_mid_term_append)
-    slow_queue.register_handler("episodic_compress",       _handler_episodic_compress)
     slow_queue.register_handler("consistency_check",       _handler_consistency_check)
     slow_queue.register_handler("user_profile_update",     _handler_user_profile_update)
     slow_queue.register_handler("trait_tracker_update",    _handler_trait_tracker_update)

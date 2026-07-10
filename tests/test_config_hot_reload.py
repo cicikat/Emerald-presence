@@ -66,6 +66,30 @@ def test_get_config_does_not_reread_when_mtime_unchanged(_isolated_config, monke
     assert reload_calls == [], "unchanged mtime must not trigger a redundant reload_config() call"
 
 
+def test_env_data_prefix_overrides_config_yaml(_isolated_config, monkeypatch):
+    """Brief 34 §3：YEXUAN_DATA_PREFIX 存在时覆盖 config.yaml 里的 data_prefix 字段，
+    读取顺序 env > config，且不改磁盘文件内容。"""
+    cl, cfg_path = _isolated_config
+    original_text = cfg_path.read_text(encoding="utf-8")
+
+    monkeypatch.setenv("YEXUAN_DATA_PREFIX", "data/test_sandbox/session_env_test")
+    cfg = cl.get_config()
+
+    assert cfg["data_prefix"] == "data/test_sandbox/session_env_test"
+    assert cfg_path.read_text(encoding="utf-8") == original_text, (
+        "env 覆盖不应改写磁盘上的 config.yaml"
+    )
+
+
+def test_no_env_data_prefix_falls_back_to_config(_isolated_config, monkeypatch):
+    """未设置 YEXUAN_DATA_PREFIX 时，data_prefix 缺省（config.yaml 本就没写这个字段）。"""
+    cl, _ = _isolated_config
+    monkeypatch.delenv("YEXUAN_DATA_PREFIX", raising=False)
+
+    cfg = cl.get_config()
+    assert "data_prefix" not in cfg
+
+
 def test_get_config_fail_open_when_stat_raises(_isolated_config, monkeypatch):
     """stat() 失败（如文件被临时替换的极短窗口）时应 fail-open，沿用内存缓存而非抛出。"""
     cl, cfg_path = _isolated_config

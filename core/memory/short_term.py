@@ -457,6 +457,8 @@ def _save(user_id: str, history: list[dict], *, char_id: str = DEFAULT_CHAR_ID) 
         return safe_write_json(path, history)
     except Exception as e:
         log_error("short_term._save", e)
+        from core import silent_failure
+        silent_failure.note("short_term.save", e)
         return False
 
 

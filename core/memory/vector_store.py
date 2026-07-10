@@ -9,12 +9,19 @@ The main reply path is never blocked by vector store failures.
 """
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
 import struct
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# 向量库本就低频，单 worker 把所有 sqlite IO 串行化即可：既避免默认线程池多路并发
+# 写同一 db 文件撞 "database is locked"，又不必额外上 WAL / busy_timeout。
+_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vector_store")
 
 
 # ── internals ────────────────────────────────────────────────────────────────
@@ -107,11 +114,23 @@ async def upsert(
         )
         return
 
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        _executor,
+        functools.partial(_upsert_sync, uid, char_id, source, source_id, ts, text, vec),
+    )
+
+
+def _upsert_sync(
+    uid: str, char_id: str, source: str, source_id: str, ts: float, text: str, vec: list[float]
+) -> None:
+    """Blocking sqlite write. Runs inside the single-worker executor — never call directly
+    from the event loop thread."""
     db = _open_db(uid, char_id)
     if db is None:
         return
     try:
-        _ensure_tables(db, dim)
+        _ensure_tables(db, len(vec))
         row = db.execute(
             "SELECT rowid FROM vec_meta WHERE source=? AND source_id=?",
             (source, source_id),
@@ -397,6 +416,66 @@ def list_entries(uid: str, char_id: str, *, source: str | None = None,
         return []
     finally:
         db.close()
+
+
+# ── async wrappers (executor-backed) ─────────────────────────────────────────
+# 同步函数保留原样供非 async 调用方（如 episodic_memory.retrieve、admin 调试路由）
+# 直接调用；以下包装仅供已在事件循环内的热路径（fetch_context / event_log.search）
+# 使用，把阻塞 sqlite 调用挪到单 worker 线程池，不占用事件循环。
+
+async def query_async(
+    uid: str,
+    char_id: str,
+    query_vec: list[float],
+    k: int,
+    *,
+    sources: Optional[list[str]] = None,
+    since_ts: Optional[float] = None,
+) -> list[tuple[str, float, float]]:
+    """Async wrapper for query(): same fail-open contract, runs off the event loop thread."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _executor,
+        functools.partial(query, uid, char_id, query_vec, k, sources=sources, since_ts=since_ts),
+    )
+
+
+async def query_with_preview_async(
+    uid: str,
+    char_id: str,
+    query_vec: list[float],
+    k: int,
+    *,
+    sources: Optional[list[str]] = None,
+) -> list[tuple[str, str, float]]:
+    """Async wrapper for query_with_preview()."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _executor,
+        functools.partial(query_with_preview, uid, char_id, query_vec, k, sources=sources),
+    )
+
+
+async def delete_async(uid: str, char_id: str, source: str, source_id: str) -> bool:
+    """Async wrapper for delete()."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, delete, uid, char_id, source, source_id)
+
+
+async def stats_async(uid: str, char_id: str) -> dict:
+    """Async wrapper for stats()."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, stats, uid, char_id)
+
+
+async def list_entries_async(uid: str, char_id: str, *, source: str | None = None,
+                              limit: int = 100, offset: int = 0) -> list[dict]:
+    """Async wrapper for list_entries()."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _executor,
+        functools.partial(list_entries, uid, char_id, source=source, limit=limit, offset=offset),
+    )
 
 
 def dist_to_sim(dist: float) -> float:

@@ -159,7 +159,6 @@
 | 中期记忆 | `data/runtime/memory/{char_id}/{uid}/mid_term.json` | 每轮慢队列压缩 | `mid_term` |
 | 情景记忆 | `data/runtime/memory/{char_id}/{uid}/episodic.json` | mid_term 显著情绪 eager 晋升，或 sweep 老化晋升 | 层6c |
 | 用户稳定行为模式 | `data/runtime/memory/{char_id}/{uid}/identity.yaml` | fixation pipeline 达阈值后固化更新 | 层6a |
-| 角色认知（read-only legacy） | `data/runtime/characters/{char_id}/character_growth/角色_{uid}.md` | **写路径已退役（R8-E2）**；load() 仅供 get_growth 工具只读查询；主链路不自动入队、不注入 prompt | 当前主 prompt 不注入 |
 | 情绪状态 | `data/runtime/characters/{char_id}/inner/mood_state.json` | 每轮 post_process / 工具触发 / 深夜调度 | 层1内嵌软提示 |
 | 用户隐性状态（Phase 6） | `data/runtime/memory/{char_id}/{uid}/hidden_state.json` | Reality-side integrator + WriteEnvelope；调度器 decay/consolidate tick；Dream exit afterglow 已接线（Phase 6：`wire_afterglow_from_summary()`） | Dream D4.5 tag-gated bucket 只读快照（body_intimate / physical_closeness；不含 float） |
 | Afterglow 残差（Phase 6/7） | `data/runtime/memory/{char_id}/{uid}/afterglow_residue.json` | Dream exit 时 `wire_afterglow_from_summary()` 写入（`core/dream/dream_exit_afterglow.py`）；8h TTL | Phase 6 数值层：由 `integrate_afterglow_and_save()` 消费后影响 sensitivity.current / embodied_ease；Reality 文本层先由 summary 提供 0–5h 的 `6f_dream_afterglow`，随后由 residue 提供至 8h 的 `dream_afterglow_soft_hint`；两层互斥、只读、非现实事实；Dream 无直接写权限 |
@@ -169,12 +168,15 @@
 > `data/runtime/memory/{char_id}/{uid}/`。迁移期 `for_read(new, old)` 仍保留在 event_log
 > 相关读取；event_log 还保留近 30 天 union 读。其余主记忆 loader 已直接读新路径。
 
-> **character_growth 只读声明（R8-E2/R8-E3）**：
-> `core/memory/character_growth.py` 是 **read-only legacy compatibility surface**。
-> 写路径（`update()` / `should_update()`）已于 R8-E2 退役删除。
-> 当前长期认知写链为 `consolidate_to_identity`（→ `identity.yaml`）和 `trait_tracker_update` slow_queue task。
-> `character_growth.load()` 仅保留为 `get_growth` 工具的只读兼容面；主链路 prompt 不注入其内容。
-> **禁止**重新引入任何写方法或 import `safe_write_*` 到该模块。
+> **character_growth 已整体删除（Brief 35）**：
+> `core/memory/character_growth.py` 模块与 `get_growth` 工具已于 Brief 35 一并删除——
+> grep 确认 `character_growth.load()` 唯一读者就是 `get_growth` 工具本身，零其他读者。
+> 当前长期认知写链是 `consolidate_to_identity`（→ `identity.yaml`）和 `trait_tracker_update` slow_queue task，
+> 与本次删除无关（该写链早在 R8-E2 就已完全接管）。
+> 磁盘上历史遗留的 `data/runtime/characters/{char_id}/character_growth/角色_{uid}.md` 文件
+> 不会被自动清理，也不再被任何工具读取；`core/data_paths.py::DataPaths.character_growth()`
+> 与 `core/memory/path_resolver.py` 的 `LEGACY_ARTIFACTS` 只读路径解析为审计/迁移脚本
+> （`scripts/migrate_data_v1.py`）保留，**不要**在新代码里以此为由重新引入读写调用。
 
 ---
 
@@ -302,7 +304,7 @@ score = intensity * decay + relevance
 `get_highlights(user_id, days, max_lines)` 是独立函数，
 从最近 N 天日志里提取有情感词的用户发言，供调度器碎碎念触发时参考，不走搜索路径。
 
-**legacy 用途**：`character_growth.update()` 已于 R8-E2 删除。`load()` 保留为 `get_growth` 工具的只读兼容面。
+**legacy 用途**：`character_growth.update()` 已于 R8-E2 删除；模块与 `get_growth` 工具本体已于 Brief 35 整体删除。
 
 ---
 
@@ -622,50 +624,23 @@ episode 反复出现的模式。它写入 YAML 前会备份旧文件为 `.yaml.b
 
 ---
 
-## 四点五、角色认知（character_growth，legacy/兼容）
+## 四点五、角色认知（character_growth）——已于 Brief 35 删除
 
-**文件**：`core/memory/character_growth.py`
+`core/memory/character_growth.py` 模块与 `get_growth` 工具已于 Brief 35 一并删除：
+grep 确认 `character_growth.load()`（模块内唯一读接口）的唯一读者就是 `get_growth` 工具本身，
+无其他调用方，按引用计数原则整体退役。
 
-### 存什么
-
-LLM 生成的结构化 Markdown，客观描述用户特点：
-
-```markdown
-## 用户特点
-- 夜猫子，习惯深夜聊天
-- 有轻度失眠，不愿看医生
-
-## 关键事件
-- 3月15日: 跟朋友吵架，状态很差
-
-## 未跟进话题
-- 找工作: 上次说在准备简历
+写入链早在 R8-E2 就已迁移完毕，与本次删除无关：
 ```
-
-### 当前状态（R8-E2）
-
-`character_growth.update()` 和 `should_update()` 已于 R8-E2 删除。
-`.fingerprint.txt` / `.felt.md` 派生文件仍可能存在（历史遗留），`get_growth` 工具仍可读取 `.md` 主文件。
-
-当前 prompt_builder 不注入 `6a_growth_fingerprint` / `6a_growth_full`，`fetch_context()` 也不固定读取 `character_growth`。
-`character_growth` 现为**只读 legacy 出口**，仅 `get_growth` 工具通过 `load()` 访问。
-
-写入链已迁移：
-```
-trait_state 写入  → trait_tracker_update slow_queue task（R8-B）
+trait_state 写入   → trait_tracker_update slow_queue task（R8-B）
 user identity 写入 → consolidate_to_identity（fixation_pipeline）
 ```
 
-`consolidate_to_growth` 是 pre-S5 遗留名称，R8-E1 已从 `LEGACY_TASK_TYPES` 移除（从未注册 handler，无 enqueue，无 DLQ 文件）。
-
-### 两级读取
-
-| 读取方式 | 内容 | 触发条件 |
-|---|---|---|
-| prompt fingerprint | 从 `.felt.md` 或 `.md` 取前 150 字 | legacy；当前 prompt_builder 不注入 |
-| prompt full | `.felt.md` 或 `.md` 完整内容 | legacy；当前 prompt_builder 不注入 |
-| `load_fingerprint()` | `.fingerprint.txt` 或 `.md` 前 150 字 | 兼容接口，当前 prompt_builder 主路径未调用 |
-| `load()` | `.md` 全文 | `get_growth` 工具 / legacy 调用 |
+磁盘上历史遗留的 `data/runtime/characters/{char_id}/character_growth/角色_{uid}.md`
+（及 `.fingerprint.txt` / `.felt.md` 派生文件）不会被自动清理，也不再被任何工具读取。
+`core/data_paths.py::DataPaths.character_growth()` 与 `core/memory/path_resolver.py` 的
+`LEGACY_ARTIFACTS` 只读路径解析为审计/迁移脚本（`scripts/migrate_data_v1.py`）保留，
+不要以此为由重新引入读写调用。
 
 ---
 
@@ -675,7 +650,8 @@ user identity 写入 → consolidate_to_identity（fixation_pipeline）
 
 trait 统计逻辑（R8-B 起）由独立的 `trait_tracker_update` slow_queue task 承接：每个 `can_write_memory=True` 的有效 assistant turn 后入队，handler 直接写入 `data/runtime/characters/{char_id}/inner/trait_state.json`。统计最近40条对话里各性格特质的关键词命中次数，维护最近5次的滑动窗口，累计命中≤2次的特质标记为 `underrepresented`。
 
-legacy `character_growth.update()` 内的 trait 写路径已于 R8-E2 随函数删除一并消除。
+legacy `character_growth.update()` 内的 trait 写路径已于 R8-E2 随函数删除一并消除；
+`character_growth` 模块本体已于 Brief 35 整体删除。
 
 author_note_rotator 每次选 note 时读取此文件，命中 underrepresented 特质的 note 权重×2，让他近期较少展现的性格侧面更容易出现。
 
@@ -810,8 +786,11 @@ consolidate_to_identity
 ```
 
 自动阈值出口为 `consolidate_to_identity`（写 `user_identity.yaml`）。
-`consolidate_to_growth` 是 pre-S5 遗留名称，从未注册 handler，R8-E1 已从
-`LEGACY_TASK_TYPES` 移除；`character_growth.md` 现仅由 `get_growth` 工具只读访问（R8-E2：`update()` / `should_update()` 已删除，写入链完全迁移）。
+`consolidate_to_growth` 是 pre-S5 遗留名称，从未注册 handler，R8-E1 已从当时的
+`LEGACY_TASK_TYPES` 移除；`LEGACY_TASK_TYPES` frozenset 本体已于 Brief 35 随
+`mid_term_append` / `episodic_compress` legacy handler 一并删除（见 §改动溯源 TD-3）。
+`character_growth.md` 不再被任何工具读取——`get_growth` 工具与 `character_growth` 模块
+已于 Brief 35 一并删除。
 
 ### schema 字段（新增）
 
@@ -888,13 +867,34 @@ HH:MM 发生了什么
 **文件**：`core/memory/locks.py`
 
 per-uid 锁（`uid_lock(uid)`）：保护关键写入和慢队列 handler 中按 uid 分文件的读-改-写操作，
-包括 capture_turn、mid_term、user_profile、user_identity、character_growth、episodic_memory 等。
+包括 capture_turn、mid_term、user_profile、user_identity、episodic_memory 等。
 `fetch_context()` 当前不加 uid_lock，因此用户极短时间连发时仍可能读到上一轮 post_process 尚未写完的旧状态；这是已知低概率竞态，见 `docs/known-issues.md`。
 
 全局锁（`global_lock("mood_state")`）：保护跨 uid 共享的 mood_state 文件。
 
 两种锁均为 asyncio.Lock，在单线程事件循环内安全。
 post_process 进入即获取 uid 锁，单用户连发会后台排队，主流程回复不受影响。
+
+### 路径 × 保护机制对照表（Brief 34 §6，2026-07-10）
+
+裁定书（`docs/critique-triage-20260708.md` §拒绝·§1.5）已驳回"合并 uid_lock 与
+message_queue"的提案：诊断（两套串行机制=认知负债）成立，但合并的回归风险大于收益。
+降级为记录：下表把"哪条路径受哪套机制保护"钉成一页纸，供后续排查竞态时查表，
+不代表要统一它们。
+
+| 机制 | 粒度 | 保护什么 | 覆盖路径 |
+|---|---|---|---|
+| `message_queue`（`core/message_queue.py`） | session_key（私聊=uid，群聊=group_id） | 同一会话的多条**原始消息**严格串行处理，不同会话并行 | QQ 消息入口（`main.py` 收到消息 → `message_queue.enqueue`） |
+| `conversation_lock`（`core/conversation_gate.py`） | uid（不区分 char_id） | 同一用户完整一轮对话（`fetch_context → build_prompt → run_llm → record_assistant_turn`）不被并行第二轮抢跑 | QQ `handle_message` / `_reply_with_tool_result` / `_handle_group_message`；desktop `admin/routers/chat.py`；scheduler `_pipeline_send`；`perceive_event`；stage `projection.py`/`runner.py`；admin dream 路由 |
+| `uid_lock`（`core/memory/locks.py`） | uid | `post_process` 内关键写入的读-改-写（capture_turn / mid_term 条件判断等），以及慢队列 handler 里按 uid 分文件的读-改-写 | `pipeline.post_process` 临界区；慢队列各 handler |
+| `global_lock("mood_state")`（`core/memory/locks.py`） | 全局单键 | 跨 uid 共享的 mood_state 文件（角色级，不分用户） | `post_process` 内 mood_state.update；工具/调度器强制置位 mood 的 helper |
+| vector_store 单 worker executor（Brief 34 §2，2026-07-10） | 进程级单线程 | 同一 sqlite 向量库文件的读写不被默认线程池的多路并发撞 lock（无 WAL，rollback-journal 默认模式） | `vector_store.query_async` / `query_with_preview_async` / `upsert`（`_upsert_sync` 在 executor 内跑）；`fetch_context` 语义召回、`event_log.search` 语义相似度 |
+
+**层次关系**：`message_queue` 串行化的是"消息到达顺序"，`conversation_lock` 串行化的是
+"同一 uid 的完整一轮处理"，二者当前都按 uid/session 分片、职责有重叠但不是同一把锁——
+这正是裁定书认定的认知负债，本表是记录，不是修复。`uid_lock`/`global_lock` 粒度更细，
+只包临界区，嵌套在 `conversation_lock` 内部。vector_store executor 是本次新增的第五种
+机制，保护对象是 sqlite 文件而非内存状态，与前四种锁不是同一维度，不参与嵌套关系。
 
 ## 八、感知暂存（pending_perception）
 
