@@ -269,3 +269,41 @@ async def gomoku_chat(body: ChatRequest, auth=Depends(require_scopes("activity")
         "control": control,
         "grounding": grounding,
     }
+
+
+class CommentRequest(BaseModel):
+    session_id: str
+    uid: str = ""
+
+
+@router.post("/gomoku/comment", summary="主动评论（AI 落子后/终局后由后端裁决是否说话）")
+async def gomoku_comment(body: CommentRequest, auth=Depends(require_scopes("activity"))):
+    """
+    主动评论接口（Brief 43 §D）。
+
+    前端每次 AI 落子后 / 终局后无脑调一次；是否说话完全由后端裁决（关键时刻必评，
+    否则 20% 概率 + 距上次主动评论 >=2 步冷却）。comment=null 表示这步不说话，
+    此时不调用 LLM、不写 transcript。只写 assistant_chat（不写 user_chat）。
+    """
+    char_id = _active_char_id()
+    uid = body.uid.strip() or _default_uid()
+    _validate_session_id(body.session_id)
+
+    session = gomoku_store.load_session(char_id, uid, "gomoku", body.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"session {body.session_id!r} 不存在")
+    if session.status != "active":
+        raise HTTPException(status_code=409, detail=f"session {body.session_id!r} 已关闭，不允许评论")
+
+    comment, grounding = await gomoku_companion.maybe_generate_move_comment(
+        char_id=char_id,
+        uid=uid,
+        session_id=body.session_id,
+        state=session.state,
+    )
+
+    return {
+        "session_id": body.session_id,
+        "comment": comment,
+        "grounding": grounding,
+    }

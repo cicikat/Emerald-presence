@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 
 from core import llm_client as _llm_client
@@ -43,6 +44,8 @@ from core.activity import transcript as _tr
 from core.activity.chess_grounding import build_chess_grounding_facts, format_chess_grounding_for_prompt
 from core.activity.companion_context import (
     MAIN_CHAT_RECALL_HEADER,
+    PROACTIVE_COMMENT_INSTRUCTION,
+    cooldown_satisfied,
     load_main_chat_recall,
     load_persona_brief,
 )
@@ -270,6 +273,99 @@ async def generate_reply(
     }
 
     return reply, control, grounding
+
+
+# ── Proactive move comment (Brief 43 §D) ───────────────────────────────────────
+
+_PROACTIVE_COMMENT_PROBABILITY = 0.2
+_PROACTIVE_COMMENT_COOLDOWN_MOVES = 2
+
+
+def _is_key_moment(facts: dict) -> bool:
+    """Key moments always get a proactive comment (bypassing probability + cooldown).
+
+    captured_piece detection is a piece-count diff (see chess_grounding.py), which
+    already fires for en-passant captures too — no separate en-passant check needed.
+    """
+    if facts.get("is_check"):
+        return True
+    if facts.get("captured_piece"):
+        return True
+    if facts.get("move_hint") in ("王车易位", "升变"):
+        return True
+    if facts.get("status") == "completed":
+        return True
+    return False
+
+
+async def maybe_generate_move_comment(
+    char_id: str,
+    uid: str,
+    session_id: str,
+    state: dict,
+) -> tuple[str | None, dict]:
+    """
+    Decide whether to proactively comment on the current chess position, and if
+    so, generate + write it.
+
+    Policy (Brief 43 §D, user-approved):
+      - Key moments (check / capture / castling / promotion / game over) always
+        comment — bypasses probability and cooldown.
+      - Otherwise: 20% random chance, gated by a >=2-move cooldown since the last
+        proactive comment.
+      - Not triggered -> (None, grounding); no LLM call, no transcript write.
+
+    Writes only an assistant_chat entry (proactive=True, at_move=<move count>) —
+    no user_chat entry, since the user didn't speak. Does NOT modify game state.
+    """
+    facts = build_chess_grounding_facts(state)
+    grounding = {
+        "last_move": facts.get("last_move"),
+        "last_san": facts.get("last_san"),
+        "move_hint": facts.get("move_hint"),
+        "is_check": facts.get("is_check"),
+        "captured_piece": facts.get("captured_piece"),
+        "material_balance_desc": facts.get("material_balance_desc"),
+        "turn": facts.get("turn"),
+    }
+
+    move_count = len(state.get("move_history", []))
+    if not _is_key_moment(facts):
+        if random.random() >= _PROACTIVE_COMMENT_PROBABILITY:
+            return None, grounding
+        if not cooldown_satisfied(
+            char_id, uid, "chess", session_id, move_count, _PROACTIVE_COMMENT_COOLDOWN_MOVES
+        ):
+            return None, grounding
+
+    from core.character_name_provider import get_char_name as _get_char_name
+    char_name = _get_char_name(char_id)
+
+    recent_ctx = _tr.load_recent(char_id, uid, "chess", session_id, limit=_TRANSCRIPT_CONTEXT_LIMIT)
+    persona_brief = load_persona_brief(char_id)
+    main_chat_recall = load_main_chat_recall(uid, char_id)
+    messages = _build_messages(
+        state, recent_ctx, "", facts, char_name=char_name,
+        persona_brief=persona_brief, main_chat_recall=main_chat_recall,
+        proactive_instruction=PROACTIVE_COMMENT_INSTRUCTION,
+    )
+    _capture_prompt(uid, session_id, messages, kind="comment")
+    reply, control = await _call_llm(messages)
+    reply = strip_action_descriptions(reply)
+    _capture_output(uid, reply)
+
+    assistant_entry: dict = {
+        "type": "assistant_chat",
+        "text": reply,
+        "ts": now_iso(),
+        "proactive": True,
+        "at_move": move_count,
+    }
+    if control:
+        assistant_entry["control"] = control
+    _tr.append_entry(char_id, uid, "chess", session_id, assistant_entry)
+
+    return reply, grounding
 
 
 def get_recent_ai_style_tilt(char_id: str, uid: str, session_id: str) -> str | None:

@@ -269,6 +269,43 @@ tilt，用 session 的 `ai_style`）。
 
 ---
 
+## 主动评论（Brief 43 §D）
+
+### `POST /activity/chess/comment`
+
+前端在每次 AI 落子后 / 终局后无脑调一次；**是否说话完全由后端裁决**。
+
+**Body:**
+```json
+{ "session_id": "...", "uid": "" }
+```
+
+**Response:**
+```json
+{
+  "session_id": "...",
+  "comment": "这一步吃得挺干脆。",
+  "grounding": { "last_san": "exd5", "is_check": false, "captured_piece": "兵/卒", ... }
+}
+```
+
+`comment` 为 `null` 时表示这一步不说话（未触发策略，未调用 LLM，未写 transcript）。
+错误语义同 `/chat`：404 session 不存在，409 session 已关闭。
+
+**触发策略：**
+
+| 情形 | 行为 |
+|---|---|
+| 关键时刻：`is_check` / `captured_piece` 非空（含吃过路兵，piece-count diff 天然覆盖）/ `move_hint` 为王车易位或升变 / `status=="completed"` | 必评，跳过概率与冷却 |
+| 非关键时刻 | `random.random() < 0.2` **且**距上次主动评论 `>=2` 步（冷却）才评 |
+| 不满足 | 返回 `(None, grounding)`，不调用 LLM，不写 transcript |
+
+**冷却实现**：主动评论写入的 `assistant_chat` 条目带 `"proactive": true, "at_move": <当时 move_history 长度>`；下次判定时读最近 20 条 transcript，取最后一条 `proactive=true` 条目的 `at_move`，与当前步数比较差值。
+
+**生成方式**：复用 `_build_messages`，把末段的 `用户说：…` 换成系统指令（不判断胜负、不超过 40 字、依据 `<game_facts>`）。**只写** `assistant_chat`（含 `proactive` / `at_move`），不写 `user_chat`。经过与 `/chat` 相同的输出清洗（Brief 43 §A）；observe capture 的 `kind="comment"`（Brief 43 §B）。
+
+---
+
 ## 活动内对话（companion chat + 只读注入 Brief 43 §C）
 
 `POST /activity/chess/chat` — 同 gomoku，只写 activity transcript，不写主记忆
@@ -308,13 +345,14 @@ LLM 输出协议（可选控制块）：
 | `core/activity/chess_companion.py` | 活动内对话 LLM 生成（`generate_reply` / `get_recent_ai_style_tilt`） |
 | `core/activity/companion_context.py` | 只读注入 helper（`load_persona_brief` / `load_main_chat_recall`，Brief 43 §C） |
 | `core/activity/companion_text.py` | 陪聊输出清洗（`strip_action_descriptions`，Brief 43 §A） |
-| `admin/routers/chess.py` | HTTP API 路由，接入 `activity_store` |
+| `admin/routers/chess.py` | HTTP API 路由，接入 `activity_store`（含 /ai_move、/comment） |
 | `core/activity/store.py` | 通用 ActivitySession 持久化层（chess 直接复用） |
 | `tests/test_chess_activity.py` | 24 个验收测试 |
 | `tests/test_chess_companion.py` | companion chat 验收测试 |
 | `tests/test_chess_grounding.py` | grounding 验收测试 |
 | `tests/test_chess_style_tilt.py` | style tilt 验收测试（Brief 43 §E） |
 | `tests/test_chess_ai.py` | chess_ai teaching style 回归测试（Brief 43 §F） |
+| `tests/test_activity_comment.py` | 主动评论触发策略测试（chess + gomoku，Brief 43 §D） |
 
 ---
 

@@ -43,12 +43,15 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 
 from core import llm_client as _llm_client
 from core.activity import transcript as _tr
 from core.activity.companion_context import (
     MAIN_CHAT_RECALL_HEADER,
+    PROACTIVE_COMMENT_INSTRUCTION,
+    cooldown_satisfied,
     load_main_chat_recall,
     load_persona_brief,
 )
@@ -436,6 +439,99 @@ async def generate_reply(
     }
 
     return reply, control, grounding
+
+
+# ── Proactive move comment (Brief 43 §D) ────────────────────────────────────────
+
+_PROACTIVE_COMMENT_PROBABILITY = 0.2
+_PROACTIVE_COMMENT_COOLDOWN_MOVES = 2
+
+
+def _is_key_moment(facts: dict) -> bool:
+    """Key moments always get a proactive comment (bypassing probability + cooldown)."""
+    if facts.get("winner"):
+        return True
+    board_facts = facts.get("board_facts") or {}
+    if board_facts.get("black_has_four") or board_facts.get("white_has_four"):
+        return True
+    if board_facts.get("black_has_open_three") or board_facts.get("white_has_open_three"):
+        return True
+    for move_facts in (facts.get("last_user_move_facts") or {}, facts.get("last_ai_move_facts") or {}):
+        if (move_facts.get("created_chain") or 0) >= 3:
+            return True
+        blocked = move_facts.get("blocked_opponent_chain") or move_facts.get("blocked_user_chain") or 0
+        if blocked >= 3:
+            return True
+    return False
+
+
+async def maybe_generate_move_comment(
+    char_id: str,
+    uid: str,
+    session_id: str,
+    state: dict,
+) -> tuple[str | None, dict]:
+    """
+    Decide whether to proactively comment on the current gomoku position, and if
+    so, generate + write it.
+
+    Policy (Brief 43 §D, user-approved):
+      - Key moments (created/blocked chain >=3, a four, an open three, or a
+        winner) always comment — bypasses probability and cooldown.
+      - Otherwise: 20% random chance, gated by a >=2-move cooldown since the last
+        proactive comment.
+      - Not triggered -> (None, grounding); no LLM call, no transcript write.
+
+    Writes only an assistant_chat entry (proactive=True, at_move=<move count>) —
+    no user_chat entry, since the user didn't speak. Does NOT modify game state.
+    """
+    from core.activity.gomoku import _normalize_opponent
+    state = {**state, "opponent": _normalize_opponent(state.get("opponent", "human"))}
+
+    facts = build_gomoku_grounding_facts(state)
+    grounding = {
+        "last_user_move_facts": facts["last_user_move_facts"],
+        "last_ai_move_facts": facts["last_ai_move_facts"],
+    }
+
+    move_count = len(state.get("move_history", []))
+    if not _is_key_moment(facts):
+        if random.random() >= _PROACTIVE_COMMENT_PROBABILITY:
+            return None, grounding
+        if not cooldown_satisfied(
+            char_id, uid, "gomoku", session_id, move_count, _PROACTIVE_COMMENT_COOLDOWN_MOVES
+        ):
+            return None, grounding
+
+    from core.character_name_provider import get_char_name as _get_char_name
+    char_name = _get_char_name(char_id)
+
+    recent_ctx = _tr.load_recent(char_id, uid, "gomoku", session_id, limit=_TRANSCRIPT_CONTEXT_LIMIT)
+    persona_brief = load_persona_brief(char_id)
+    main_chat_recall = load_main_chat_recall(uid, char_id)
+    messages = _build_messages(
+        state, recent_ctx, "", facts, char_name=char_name,
+        persona_brief=persona_brief, main_chat_recall=main_chat_recall,
+        proactive_instruction=PROACTIVE_COMMENT_INSTRUCTION,
+    )
+    _capture_prompt(uid, session_id, messages, kind="comment")
+    reply, control = await _call_llm(messages)
+    reply = strip_action_descriptions(reply)
+    reply = _filter_holdback_claims(reply, facts)
+    _capture_output(uid, reply)
+
+    assistant_entry: dict = {
+        "type": "assistant_chat",
+        "text": reply,
+        "ts": now_iso(),
+        "proactive": True,
+        "at_move": move_count,
+    }
+    if control:
+        assistant_entry["control"] = control
+    _tr.append_entry(char_id, uid, "gomoku", session_id, assistant_entry)
+
+    return reply, grounding
 
 
 # ── Style tilt reader (for pending AI move) ────────────────────────────────────

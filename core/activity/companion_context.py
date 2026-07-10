@@ -22,6 +22,14 @@ MAIN_CHAT_RECALL_HEADER = (
     "【主线聊天最近对话（只读参考，不要复述，不要把那边的话题强行接过来）】"
 )
 
+# Brief 43 §D: proactive move comment — replaces the "用户说：…" tail of the prompt
+# when the user hasn't spoken and the backend decided (via key-moment/probability/
+# cooldown policy) that a comment is warranted.
+PROACTIVE_COMMENT_INSTRUCTION = (
+    "（系统指令：用户没有说话。请你主动对刚才这一手棋/当前局面说一句话，"
+    "不超过 40 字，只输出说出口的话，依据 <game_facts>，不判断胜负。）"
+)
+
 
 def load_persona_brief(char_id: str) -> str:
     """Short persona summary for read-only grounding.
@@ -70,3 +78,32 @@ def load_main_chat_recall(uid: str, char_id: str, rounds: int = MAIN_CHAT_RECALL
             "[companion_context] load_main_chat_recall failed uid=%s char_id=%s: %s", uid, char_id, e
         )
         return ""
+
+
+def cooldown_satisfied(
+    char_id: str,
+    uid: str,
+    activity_type: str,
+    session_id: str,
+    current_move_count: int,
+    min_gap: int = 2,
+) -> bool:
+    """True when it's been at least *min_gap* moves since the last proactive
+    comment (or none has ever been made). Reads the activity transcript looking
+    for the most recent assistant_chat entry with proactive=True and compares
+    its at_move against current_move_count.
+
+    Fails open to True on any read error — an unreadable transcript should not
+    permanently suppress proactive commentary.
+    """
+    try:
+        from core.activity import transcript as _tr
+        recent = _tr.load_recent(char_id, uid, activity_type, session_id, limit=20)
+        for entry in reversed(recent):
+            if entry.get("type") == "assistant_chat" and entry.get("proactive"):
+                last_at_move = entry.get("at_move", 0)
+                return (current_move_count - last_at_move) >= min_gap
+        return True
+    except Exception as e:
+        logger.warning("[companion_context] cooldown_satisfied check failed: %s", e)
+        return True
