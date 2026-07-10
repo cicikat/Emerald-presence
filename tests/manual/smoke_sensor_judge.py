@@ -1,6 +1,6 @@
 """
 Smoke test for core.scheduler.sensor_judge
-Run from project root: python -X utf8 tests/smoke_sensor_judge.py
+Run from project root: python -X utf8 tests/manual/smoke_sensor_judge.py
 
 场景 A — LONG_FOCUS，40 分钟未聊天，预期 score 偏中高、不 drop
 场景 B — 同上，但 3 分钟前刚主动发过，预期 score <40 / drop
@@ -14,7 +14,7 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import core.scheduler.sensor_judge as sj
 

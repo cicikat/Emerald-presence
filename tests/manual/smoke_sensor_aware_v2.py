@@ -1,6 +1,6 @@
 """
 Smoke test for core.scheduler.triggers.sensor_aware (三层架构版)
-Run from project root: python -X utf8 tests/smoke_sensor_aware_v2.py
+Run from project root: python -X utf8 tests/manual/smoke_sensor_aware_v2.py
 
 场景 A — tick() 返回 [] → 静默 return
 场景 B — score=20 (< passive_speak 阈值 35) → BehaviorPlanner 返回 None，不调 LLM
@@ -15,7 +15,7 @@ import sys
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import core.scheduler.triggers.sensor_aware as sa
 

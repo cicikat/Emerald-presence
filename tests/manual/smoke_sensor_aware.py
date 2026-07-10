@@ -1,6 +1,6 @@
 """
 Smoke test for core.scheduler.triggers.sensor_aware
-Run from project root: python -X utf8 tests/smoke_sensor_aware.py
+Run from project root: python -X utf8 tests/manual/smoke_sensor_aware.py
 
 场景 A — sensor_events.tick() 返回 []
           → handle_tick() 静默返回，_pipeline_send 不被调用
@@ -20,7 +20,7 @@ import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 # 预先 import 被测模块（让 module cache 生效，patch 路径固定）
 import core.scheduler.triggers.sensor_aware as sa

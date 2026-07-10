@@ -1,6 +1,6 @@
 """
 Smoke test for core.scheduler.sensor_events
-Run from project root: python tests/smoke_sensor_events.py
+Run from project root: python tests/manual/smoke_sensor_events.py
 
 场景 A — 无 sensor 数据，tick() 应返回 []
 场景 B — Code.exe active + 高键击率，模拟 26min → LONG_FOCUS
@@ -13,7 +13,7 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 # Monkey-patch activity_manager.get_current 在 sensor_events 被引入前生效，
 # 避免 sandbox / YAML 文件依赖。
