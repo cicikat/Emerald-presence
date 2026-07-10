@@ -1,5 +1,8 @@
 """
-tests/test_dream_v1.py — Dream System v1 contract tests
+tests/test_dream_world_isolation.py — Dream world-package isolation contracts
+
+合并自 test_dream_v1.py（整体保留，改名） + test_dream_v0.py 的两个未被
+v1 覆盖的人称测试（Brief 50 · 工单D）。
 
 Covers:
   ① Identity stability (real packages): each world loaded → Companion persona intact,
@@ -16,6 +19,9 @@ Covers:
      of world setting
   ⑦ Pronoun correctness: each world's D3 mes_example uses single-sided contract —
      Companion=我（first person）, 用户=你, no 她：user lines, no pronoun drift
+  ⑧ mes_example 单侧契约细节（来自 v0，v1 未覆盖）：Companion 用「我」自称、无
+     「Companion：」说话人标签
+  ⑨ D8 导演注记人称正确性（来自 v0，v1 无 D8 相关测试）
 """
 
 import asyncio
@@ -443,3 +449,31 @@ def test_pronoun_correct_in_world_prompt(world_id):
         ), (
             f"[world={world_id}] character speaking lines missing from mes_example"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ⑧ mes_example 单侧契约细节（来自 test_dream_v0.py，reality_derived 专用回归守卫）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_pronoun_first_person_and_no_reality_label_in_mes_example():
+    """
+    梦境示例（单侧契约）：Companion全程第一人称「我」，无「Companion：」说话人标签。
+    这两条是 ⑦ 的参数化测试没有覆盖的细节（⑦ 只检查「你」在、「她：」不在），
+    单独保留作 reality_derived 的回归守卫。
+    """
+    from core.dream.dream_prompt import _get_dream_mes_example
+    example = _get_dream_mes_example("Companion")
+
+    assert "我" in example, "Companion should use first person '我' in single-sided mes_example"
+    assert "Companion：" not in example, "single-sided mes_example should not use 'Companion：' speaker labels"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ⑨ D8 导演注记人称正确性（来自 test_dream_v0.py，v1 无 D8 相关测试）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_pronoun_correctness_in_d8_director():
+    """D8 导演注记中用「你」指用户（单侧契约，不用「她」）。"""
+    from core.dream.dream_prompt import _D8_DREAM_DIRECTOR
+    # User addressed as 你 in D8 (single-sided contract, 她 → 你)
+    assert "你的意志" in _D8_DREAM_DIRECTOR or "你发出" in _D8_DREAM_DIRECTOR
