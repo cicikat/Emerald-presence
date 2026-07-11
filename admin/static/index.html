@@ -302,6 +302,8 @@ textarea { resize: vertical; min-height: 72px; }
       <a data-page="users"     onclick="goto('users')">    <span class="icon">👤</span>用户管理</a>
       <a data-page="logs"      onclick="goto('logs')">     <span class="icon">📋</span>错误日志</a>
       <a data-page="auth-tokens" onclick="goto('auth-tokens')"><span class="icon">🔑</span>Token</a>
+      <a data-page="model-routing" onclick="goto('model-routing')"><span class="icon">🔀</span>模型路由</a>
+      <a data-page="relationship-facts" onclick="goto('relationship-facts')"><span class="icon">📌</span>关系事实</a>
     </div>
 
     <div class="nav-group-header" onclick="toggleNavGroup('state')"><span class="nav-caret" id="caret-state">▾</span>🔬 内部状态</div>
@@ -509,6 +511,87 @@ textarea { resize: vertical; min-height: 72px; }
             <b>OpenAI</b>：付费，需要信用卡，推荐模型 gpt-4o-mini<br>
             <b>自定义</b>：手动填写 Base URL 和模型名
           </div>
+        </div>
+      </div>
+
+      <!-- 屏幕内容查看设置 -->
+      <div class="card">
+        <div class="card-header">
+          <h3>屏幕内容查看</h3>
+          <button class="btn btn-ghost btn-sm" onclick="loadScreenPeekSettings()">刷新</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;max-width:520px">
+          <label class="checkbox-row" style="gap:8px;font-size:14px">
+            <input type="checkbox" id="sp-enabled" style="width:16px;height:16px;accent-color:var(--accent)">
+            <span>启用</span>
+          </label>
+          <label class="field" style="min-width:160px;margin-bottom:0">
+            <span>冷却分钟数</span>
+            <input type="number" id="sp-cooldown" min="5" max="240" value="30">
+          </label>
+          <button class="btn btn-primary btn-sm" onclick="saveScreenPeekSettings()">保存</button>
+        </div>
+      </div>
+
+      <!-- TTS 配置 -->
+      <div class="card">
+        <div class="card-header">
+          <h3>TTS 配置</h3>
+          <button class="btn btn-ghost btn-sm" onclick="loadTtsConfig()">刷新</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+          <label class="checkbox-row" style="gap:8px;font-size:14px">
+            <input type="checkbox" id="tts-enabled" style="width:16px;height:16px;accent-color:var(--accent)">
+            <span>启用</span>
+          </label>
+          <label class="checkbox-row" style="gap:8px;font-size:14px">
+            <input type="checkbox" id="tts-emotion-enabled" style="width:16px;height:16px;accent-color:var(--accent)">
+            <span>情绪分档</span>
+          </label>
+        </div>
+        <div class="form-row" style="max-width:640px">
+          <label class="field">
+            <span>API URL</span>
+            <input type="text" id="tts-api-url" placeholder="http://127.0.0.1:9880">
+          </label>
+          <label class="field">
+            <span>参考音频路径</span>
+            <input type="text" id="tts-ref-audio" placeholder="ref.wav">
+          </label>
+        </div>
+        <div class="form-row col-1" style="max-width:640px">
+          <label class="field">
+            <span>参考文本</span>
+            <input type="text" id="tts-prompt-text" placeholder="参考音频对应文本">
+          </label>
+        </div>
+        <label class="field" style="max-width:300px;margin-bottom:14px">
+          <span>语速 <span id="tts-speed-val" style="color:var(--accent);font-weight:700">1.00</span></span>
+          <input type="range" id="tts-speed" min="0.5" max="2.0" step="0.05" value="1.0"
+            oninput="document.getElementById('tts-speed-val').textContent = parseFloat(this.value).toFixed(2)"
+            style="width:100%;accent-color:var(--accent)">
+        </label>
+        <button class="btn btn-primary btn-sm" onclick="saveTtsConfig()">保存</button>
+      </div>
+
+      <!-- 用户称谓 -->
+      <div class="card">
+        <div class="card-header"><h3>用户称谓</h3></div>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;max-width:560px">
+          <label class="field" style="flex:1;min-width:160px;margin-bottom:0">
+            <span>用户</span>
+            <select id="pn-uid-select" onchange="loadUserPronoun()"></select>
+          </label>
+          <label class="field" style="min-width:120px;margin-bottom:0">
+            <span>称谓</span>
+            <select id="pn-value">
+              <option value="她">她</option>
+              <option value="他">他</option>
+              <option value="TA">TA</option>
+              <option value="它">它</option>
+            </select>
+          </label>
+          <button class="btn btn-primary btn-sm" onclick="saveUserPronoun()" style="margin-top:18px">保存</button>
         </div>
       </div>
     </div>
@@ -867,6 +950,192 @@ textarea { resize: vertical; min-height: 72px; }
           出于安全设计，已有 token 的明文无法再次查看（服务端只存哈希）；丢失请 Rotate。
         </p>
         <div id="at-table-body"><div class="loading">加载中…</div></div>
+      </div>
+    </div>
+
+    <!-- ── 模型路由 ── -->
+    <div class="page" id="page-model-routing">
+      <h1 class="page-title">模型路由</h1>
+
+      <div class="card" id="mr-legacy-banner" style="display:none">
+        <p style="font-size:13px;color:var(--muted);margin:0">
+          当前配置未开启 <code style="font-family:var(--mono)">model_presets</code> 块（legacy 模式，等价合成了单个
+          <code style="font-family:var(--mono)">legacy</code> preset）。请先在 <code style="font-family:var(--mono)">config.yaml</code>
+          里加上 <code style="font-family:var(--mono)">model_presets:</code> 顶层块（参见 <code style="font-family:var(--mono)">config.example.yaml</code>），
+          否则本页新增/切换会返回 400。
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>当前生效路由方案</h3>
+          <button class="btn btn-ghost btn-sm" onclick="loadModelRouting()">刷新</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <select id="mr-active-routing-select" style="min-width:200px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)"></select>
+          <button class="btn btn-primary btn-sm" onclick="switchActiveRouting()">切换</button>
+          <span id="mr-active-routing-current" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Presets</h3>
+          <button class="btn btn-primary btn-sm" onclick="openPresetModal()">+ 新建 Preset</button>
+        </div>
+        <div id="mr-presets-body"><div class="loading">加载中…</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Routing Profiles</h3>
+          <button class="btn btn-primary btn-sm" onclick="openProfileModal()">+ 新建/编辑 Profile</button>
+        </div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">call_category → preset 映射；未声明的 category 会回退到该 profile 的 <code style="font-family:var(--mono)">chat</code>。</p>
+        <div id="mr-profiles-body"><div class="loading">加载中…</div></div>
+      </div>
+    </div>
+
+    <!-- Preset 新建/编辑弹窗 -->
+    <div class="modal-backdrop" id="mr-preset-modal">
+      <div class="modal" style="width:560px">
+        <h3 id="mr-preset-modal-title">新建 Preset</h3>
+        <div class="form-row col-1">
+          <label class="field">
+            <span>名称</span>
+            <input type="text" id="mr-preset-name" placeholder="claude-sonnet">
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="field">
+            <span>provider_kind</span>
+            <select id="mr-preset-kind">
+              <option value="openai">openai</option>
+              <option value="deepseek">deepseek</option>
+              <option value="anthropic_compat">anthropic_compat</option>
+              <option value="local">local</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>tool_call_mode</span>
+            <select id="mr-preset-tool-mode">
+              <option value="function_calling">function_calling</option>
+              <option value="xml_fallback">xml_fallback</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-row col-1">
+          <label class="field">
+            <span>base_url</span>
+            <input type="text" id="mr-preset-base-url" placeholder="https://api.deepseek.com">
+          </label>
+        </div>
+        <div class="form-row col-1">
+          <label class="field">
+            <span>api_key <span style="font-size:11px;color:var(--muted)">（留空=不修改已有值）</span></span>
+            <input type="password" id="mr-preset-api-key" placeholder="sk-...">
+          </label>
+        </div>
+        <div class="form-row col-1">
+          <label class="field">
+            <span>model</span>
+            <input type="text" id="mr-preset-model" placeholder="claude-sonnet-4-6">
+          </label>
+        </div>
+        <div class="form-row col-1">
+          <label class="field">
+            <span>params <span style="font-size:11px;color:var(--muted)">（可选，JSON 对象，如 {"temperature":0.8}）</span></span>
+            <textarea id="mr-preset-params" rows="2" placeholder="{}" style="font-family:var(--mono);font-size:12px"></textarea>
+          </label>
+        </div>
+        <div id="mr-preset-err" style="color:var(--danger);font-size:12px;min-height:16px"></div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closePresetModal()">取消</button>
+          <button class="btn btn-primary" onclick="submitPresetModal()">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Routing Profile 新建/编辑弹窗 -->
+    <div class="modal-backdrop" id="mr-profile-modal">
+      <div class="modal" style="width:480px">
+        <h3>新建/编辑 Routing Profile</h3>
+        <div class="form-row col-1">
+          <label class="field">
+            <span>Profile 名称</span>
+            <input type="text" id="mr-profile-name" placeholder="claude-main">
+          </label>
+        </div>
+        <div id="mr-profile-categories"></div>
+        <div id="mr-profile-err" style="color:var(--danger);font-size:12px;min-height:16px"></div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeProfileModal()">取消</button>
+          <button class="btn btn-primary" onclick="submitProfileModal()">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 关系事实 ── -->
+    <div class="page" id="page-relationship-facts">
+      <h1 class="page-title">关系事实</h1>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label class="field" style="flex:1;min-width:160px;margin-bottom:0">
+            <span>用户</span>
+            <select id="rf-uid-select" onchange="loadRelationshipFacts()"></select>
+          </label>
+          <label class="field" style="flex:1;min-width:120px;margin-bottom:0">
+            <span>状态过滤</span>
+            <select id="rf-status-filter" onchange="loadRelationshipFacts()">
+              <option value="">全部</option>
+              <option value="pending">待审核</option>
+              <option value="confirmed">已确认</option>
+              <option value="archived">已归档</option>
+            </select>
+          </label>
+          <button class="btn btn-ghost btn-sm" onclick="loadRelationshipFacts()" style="margin-top:18px">刷新</button>
+          <button class="btn btn-ghost btn-sm" onclick="runRelationshipFactSuggester()" style="margin-top:18px">运行称呼建议器</button>
+          <button class="btn btn-primary btn-sm" onclick="openFactModal()" style="margin-top:18px">+ 手动添加</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div id="rf-list-body"><div class="empty">选择一个用户后加载</div></div>
+      </div>
+    </div>
+
+    <!-- 关系事实 新建/编辑弹窗 -->
+    <div class="modal-backdrop" id="rf-fact-modal">
+      <div class="modal" style="width:560px">
+        <h3 id="rf-fact-modal-title">添加关系事实</h3>
+        <div class="form-row col-1">
+          <label class="field">
+            <span>关键词 <span style="font-size:11px;color:var(--muted)">（逗号分隔）</span></span>
+            <input type="text" id="rf-fact-keywords" placeholder="姐姐, 亲爱的">
+          </label>
+        </div>
+        <div class="form-row col-1">
+          <label class="field">
+            <span>内容</span>
+            <textarea id="rf-fact-content" rows="3" placeholder="用户喜欢被叫「姐姐」"></textarea>
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="field">
+            <span>confidence</span>
+            <input type="number" id="rf-fact-confidence" min="0" max="1" step="0.05" value="1.0">
+          </label>
+          <label class="field">
+            <span>insertion_order</span>
+            <input type="number" id="rf-fact-order" value="60">
+          </label>
+        </div>
+        <div id="rf-fact-err" style="color:var(--danger);font-size:12px;min-height:16px"></div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="closeFactModal()">取消</button>
+          <button class="btn btn-primary" onclick="submitFactModal()">保存</button>
+        </div>
       </div>
     </div>
 
@@ -1525,6 +1794,8 @@ function goto(page) {
     users:           () => { loadUsers(); loadBlacklist(); },
     logs:            loadLogs,
     'auth-tokens':   loadAuthTokens,
+    'model-routing': loadModelRouting,
+    'relationship-facts': loadRelationshipFactsPage,
     character:       loadCharacterPage,
     lorebook:        () => { loadLorebook(); loadJbEntries(); },
     'dream-settings': loadDreamSettings,
@@ -1605,6 +1876,11 @@ async function loadStatus() {
   loadContextConfig();
   loadLlmParams();
   loadVisionParams();
+  loadScreenPeekSettings();
+  loadTtsConfig();
+  _ensurePronounUidOptions().then(() => {
+    if (document.getElementById('pn-uid-select').value) loadUserPronoun();
+  });
 }
 
 async function reloadConfig() {
@@ -2716,6 +2992,473 @@ function closeAtSuccessModal() {
   document.getElementById('at-success-modal').classList.remove('open');
   _atSuccessToken = '';
   _atSuccessLabel = '';
+}
+
+// ══════════════════════════════════════════════════════════
+//  模型路由（model-presets）
+// ══════════════════════════════════════════════════════════
+let _mrData = { presets: {}, routing_profiles: {}, active_routing: 'default' };
+const MR_CATEGORIES = ['chat', 'intent', 'probe', 'summary', 'detect_emotion', 'consolidation', 'perform'];
+
+async function loadModelRouting() {
+  document.getElementById('mr-presets-body').innerHTML = '<div class="loading">加载中…</div>';
+  document.getElementById('mr-profiles-body').innerHTML = '<div class="loading">加载中…</div>';
+  try {
+    const data = await api('GET', '/model-presets');
+    _mrData = data;
+    document.getElementById('mr-legacy-banner').style.display = data.is_legacy_synth ? '' : 'none';
+
+    const sel = document.getElementById('mr-active-routing-select');
+    sel.innerHTML = Object.keys(data.routing_profiles || {}).map(name =>
+      `<option value="${name}" ${name === data.active_routing ? 'selected' : ''}>${name}</option>`
+    ).join('');
+    document.getElementById('mr-active-routing-current').textContent = `当前: ${data.active_routing}`;
+
+    _renderPresetsTable(data.presets || {});
+    _renderProfilesTable(data.routing_profiles || {}, data.presets || {});
+  } catch (e) {
+    document.getElementById('mr-presets-body').innerHTML = `<div class="empty">加载失败: ${e.message}</div>`;
+    document.getElementById('mr-profiles-body').innerHTML = '';
+  }
+}
+
+async function switchActiveRouting() {
+  const active_routing = document.getElementById('mr-active-routing-select').value;
+  if (!active_routing) return;
+  try {
+    await api('PUT', '/model-presets/active-routing', { active_routing });
+    toast(`已切换到路由方案 '${active_routing}'`, 'ok');
+    loadModelRouting();
+  } catch (e) {
+    toast('切换失败: ' + e.message, 'err');
+  }
+}
+
+function _renderPresetsTable(presets) {
+  const el = document.getElementById('mr-presets-body');
+  const names = Object.keys(presets);
+  if (!names.length) { el.innerHTML = '<div class="empty">暂无 preset</div>'; return; }
+  const rows = names.map(name => {
+    const p = presets[name];
+    return `
+      <tr>
+        <td><strong>${name}</strong></td>
+        <td><span class="badge badge-accent">${p.provider_kind || '?'}</span></td>
+        <td><code style="font-family:var(--mono);font-size:12px">${p.model || ''}</code></td>
+        <td style="font-size:12px;color:var(--muted)">${p.base_url || ''}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" onclick="testPreset('${name}')">测试</button>
+          <button class="btn btn-ghost btn-sm" onclick="openPresetModal('${name}')">编辑</button>
+          <button class="btn btn-ghost btn-sm" onclick="confirmDeletePreset('${name}')">删除</button>
+        </td>
+      </tr>
+      <tr id="mr-test-row-${name}" style="display:none"><td colspan="5" style="font-size:12px" id="mr-test-result-${name}"></td></tr>
+    `;
+  }).join('');
+  el.innerHTML = `<div class="tbl-wrap"><table>
+    <tr><th>名称</th><th>Provider</th><th>Model</th><th>Base URL</th><th></th></tr>
+    ${rows}
+  </table></div>`;
+}
+
+function _renderProfilesTable(profiles, presets) {
+  const el = document.getElementById('mr-profiles-body');
+  const names = Object.keys(profiles);
+  if (!names.length) { el.innerHTML = '<div class="empty">暂无 routing profile</div>'; return; }
+  const rows = names.map(name => {
+    const profile = profiles[name];
+    const chips = Object.entries(profile).map(([cat, preset]) =>
+      `<span class="badge" style="margin:2px">${cat}→${preset}</span>`
+    ).join('');
+    return `
+      <tr>
+        <td><strong>${name}</strong>${name === _mrData.active_routing ? ' <span class="badge badge-success">生效中</span>' : ''}</td>
+        <td>${chips}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="openProfileModal('${name}')">编辑</button></td>
+      </tr>
+    `;
+  }).join('');
+  el.innerHTML = `<div class="tbl-wrap"><table>
+    <tr><th>名称</th><th>映射</th><th></th></tr>
+    ${rows}
+  </table></div>`;
+}
+
+async function testPreset(name) {
+  const row = document.getElementById(`mr-test-row-${name}`);
+  const cell = document.getElementById(`mr-test-result-${name}`);
+  row.style.display = '';
+  cell.textContent = '测试中…';
+  try {
+    const r = await api('POST', `/model-presets/presets/${encodeURIComponent(name)}/test`);
+    if (r.ok) {
+      cell.innerHTML = `<span style="color:var(--success)">✓ 成功</span> 延迟 ${r.latency_ms}ms，model=${r.model}${r.reply_preview ? '，reply="' + r.reply_preview + '"' : ''}`;
+    } else {
+      cell.innerHTML = `<span style="color:var(--danger)">✗ 失败</span>（${r.latency_ms}ms）：${r.error || '未知错误'}`;
+    }
+  } catch (e) {
+    cell.innerHTML = `<span style="color:var(--danger)">✗ 请求失败</span>：${e.message}`;
+  }
+}
+
+function openPresetModal(name) {
+  document.getElementById('mr-preset-err').textContent = '';
+  const nameInput = document.getElementById('mr-preset-name');
+  if (name) {
+    const p = _mrData.presets[name] || {};
+    nameInput.value = name;
+    nameInput.disabled = true;
+    document.getElementById('mr-preset-kind').value = p.provider_kind || 'openai';
+    document.getElementById('mr-preset-tool-mode').value = p.tool_call_mode || 'function_calling';
+    document.getElementById('mr-preset-base-url').value = p.base_url || '';
+    document.getElementById('mr-preset-api-key').value = '';
+    document.getElementById('mr-preset-api-key').placeholder = p.api_key ? `已设置（${p.api_key}），留空不修改` : 'sk-...';
+    document.getElementById('mr-preset-model').value = p.model || '';
+    document.getElementById('mr-preset-params').value = p.params ? JSON.stringify(p.params) : '';
+    document.getElementById('mr-preset-modal-title').textContent = `编辑 Preset: ${name}`;
+  } else {
+    nameInput.value = '';
+    nameInput.disabled = false;
+    document.getElementById('mr-preset-kind').value = 'openai';
+    document.getElementById('mr-preset-tool-mode').value = 'function_calling';
+    document.getElementById('mr-preset-base-url').value = '';
+    document.getElementById('mr-preset-api-key').value = '';
+    document.getElementById('mr-preset-api-key').placeholder = 'sk-...';
+    document.getElementById('mr-preset-model').value = '';
+    document.getElementById('mr-preset-params').value = '';
+    document.getElementById('mr-preset-modal-title').textContent = '新建 Preset';
+  }
+  document.getElementById('mr-preset-modal').classList.add('open');
+}
+function closePresetModal() {
+  document.getElementById('mr-preset-modal').classList.remove('open');
+}
+async function submitPresetModal() {
+  const nameInput = document.getElementById('mr-preset-name');
+  const name = nameInput.value.trim();
+  const isEdit = nameInput.disabled;
+  const errEl = document.getElementById('mr-preset-err');
+  if (!name) { errEl.textContent = '名称不能为空'; return; }
+
+  const body = {
+    provider_kind: document.getElementById('mr-preset-kind').value,
+    tool_call_mode: document.getElementById('mr-preset-tool-mode').value,
+    base_url: document.getElementById('mr-preset-base-url').value.trim(),
+    model: document.getElementById('mr-preset-model').value.trim(),
+  };
+  const apiKey = document.getElementById('mr-preset-api-key').value.trim();
+  if (apiKey) body.api_key = apiKey;
+  const paramsText = document.getElementById('mr-preset-params').value.trim();
+  if (paramsText) {
+    try { body.params = JSON.parse(paramsText); }
+    catch (e) { errEl.textContent = 'params 不是合法 JSON'; return; }
+  }
+  if (isEdit) delete body.provider_kind; // 编辑时不强制改变 kind，除非用户明确改了下拉——保留原选值语义更安全，仍一起提交也无妨；这里直接提交当前下拉值即可
+  body.provider_kind = document.getElementById('mr-preset-kind').value;
+
+  try {
+    await api('PUT', `/model-presets/presets/${encodeURIComponent(name)}`, body);
+    toast(`preset '${name}' 已保存`, 'ok');
+    closePresetModal();
+    loadModelRouting();
+  } catch (e) {
+    errEl.textContent = e.message;
+  }
+}
+
+function confirmDeletePreset(name) {
+  _openAtConfirm(`删除 preset '${name}'`, '若仍被某个 routing profile 引用，或是唯一剩余的 preset，将会被拒绝。', async () => {
+    try {
+      await api('DELETE', `/model-presets/presets/${encodeURIComponent(name)}`);
+      toast(`preset '${name}' 已删除`, 'ok');
+      loadModelRouting();
+    } catch (e) {
+      toast('删除失败: ' + e.message, 'err');
+    }
+  });
+}
+
+function openProfileModal(name) {
+  document.getElementById('mr-profile-err').textContent = '';
+  const nameInput = document.getElementById('mr-profile-name');
+  nameInput.value = name || '';
+  nameInput.disabled = !!name;
+  const existing = (name && _mrData.routing_profiles[name]) || {};
+  const presetNames = Object.keys(_mrData.presets || {});
+  const catsEl = document.getElementById('mr-profile-categories');
+  catsEl.innerHTML = MR_CATEGORIES.map(cat => `
+    <label class="field" style="margin-bottom:8px">
+      <span>${cat}</span>
+      <select id="mr-profile-cat-${cat}">
+        <option value="">（不修改 / 沿用已有）</option>
+        ${presetNames.map(p => `<option value="${p}" ${existing[cat] === p ? 'selected' : ''}>${p}</option>`).join('')}
+      </select>
+    </label>
+  `).join('');
+  document.getElementById('mr-profile-modal').classList.add('open');
+}
+function closeProfileModal() {
+  document.getElementById('mr-profile-modal').classList.remove('open');
+}
+async function submitProfileModal() {
+  const name = document.getElementById('mr-profile-name').value.trim();
+  const errEl = document.getElementById('mr-profile-err');
+  if (!name) { errEl.textContent = '名称不能为空'; return; }
+  const body = {};
+  for (const cat of MR_CATEGORIES) {
+    const v = document.getElementById(`mr-profile-cat-${cat}`).value;
+    if (v) body[cat] = v;
+  }
+  if (!Object.keys(body).length) { errEl.textContent = '至少选择一个 category'; return; }
+  try {
+    await api('PUT', `/model-presets/routing-profiles/${encodeURIComponent(name)}`, body);
+    toast(`routing profile '${name}' 已保存`, 'ok');
+    closeProfileModal();
+    loadModelRouting();
+  } catch (e) {
+    errEl.textContent = e.message;
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  关系事实
+// ══════════════════════════════════════════════════════════
+let _rfFacts = [];
+let _rfEditIndex = null;
+
+async function loadRelationshipFactsPage() {
+  const sel = document.getElementById('rf-uid-select');
+  try {
+    if (!_allUsers || !_allUsers.length) {
+      const d = await api('GET', '/users/');
+      _allUsers = d.users || [];
+    }
+    const current = sel.value;
+    sel.innerHTML = _allUsers.map(u => `<option value="${u}">${u}</option>`).join('');
+    if (current && _allUsers.includes(current)) sel.value = current;
+  } catch (e) {
+    toast('加载用户列表失败: ' + e.message, 'err');
+  }
+  if (sel.value) loadRelationshipFacts();
+}
+
+async function loadRelationshipFacts() {
+  const uid = document.getElementById('rf-uid-select').value;
+  const el = document.getElementById('rf-list-body');
+  if (!uid) { el.innerHTML = '<div class="empty">选择一个用户后加载</div>'; return; }
+  el.innerHTML = '<div class="loading">加载中…</div>';
+  const status = document.getElementById('rf-status-filter').value;
+  try {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    const data = await api('GET', `/relationship-facts/${encodeURIComponent(uid)}${qs}`);
+    _rfFacts = data.facts || [];
+    _renderRelationshipFacts(uid, _rfFacts);
+  } catch (e) {
+    el.innerHTML = `<div class="empty">加载失败: ${e.message}</div>`;
+  }
+}
+
+function _renderRelationshipFacts(uid, facts) {
+  const el = document.getElementById('rf-list-body');
+  if (!facts.length) { el.innerHTML = '<div class="empty">没有符合条件的关系事实</div>'; return; }
+  const statusBadge = (s) => {
+    if (s === 'pending') return '<span class="badge badge-warn">待审核</span>';
+    if (s === 'confirmed') return '<span class="badge badge-success">已确认</span>';
+    if (s === 'archived') return '<span class="badge">已归档</span>';
+    return `<span class="badge">${s}</span>`;
+  };
+  const rows = facts.map((f, i) => `
+    <tr>
+      <td>${(f.keywords || []).map(k => `<span class="badge" style="margin:1px">${k}</span>`).join('')}</td>
+      <td style="max-width:280px">${f.content || ''}</td>
+      <td>${statusBadge(f.status)}</td>
+      <td style="font-size:12px;color:var(--muted)">${(f.confidence ?? 1).toFixed?.(2) ?? f.confidence} / hit ${f.hit_count ?? 0}</td>
+      <td style="white-space:nowrap">
+        ${f.status === 'pending' ? `
+          <button class="btn btn-ghost btn-sm" onclick="confirmRelationshipFact(${i})">确认</button>
+          <button class="btn btn-ghost btn-sm" onclick="rejectRelationshipFact(${i})">拒绝</button>
+        ` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="openFactModal(${i})">编辑</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteRelationshipFact(${i})">删除</button>
+      </td>
+    </tr>
+  `).join('');
+  el.innerHTML = `<div class="tbl-wrap"><table>
+    <tr><th>关键词</th><th>内容</th><th>状态</th><th>置信度/命中</th><th></th></tr>
+    ${rows}
+  </table></div>`;
+}
+
+async function confirmRelationshipFact(index) {
+  const uid = document.getElementById('rf-uid-select').value;
+  try {
+    await api('POST', `/relationship-facts/${encodeURIComponent(uid)}/${index}/confirm`);
+    toast('已确认', 'ok');
+    loadRelationshipFacts();
+  } catch (e) { toast('确认失败: ' + e.message, 'err'); }
+}
+
+function rejectRelationshipFact(index) {
+  _openAtConfirm('拒绝该条关系事实', '拒绝后条目状态变为 archived（不再注入 prompt），不会被物理删除，可追溯。', async () => {
+    const uid = document.getElementById('rf-uid-select').value;
+    try {
+      await api('POST', `/relationship-facts/${encodeURIComponent(uid)}/${index}/reject`);
+      toast('已拒绝', 'ok');
+      loadRelationshipFacts();
+    } catch (e) { toast('拒绝失败: ' + e.message, 'err'); }
+  });
+}
+
+function deleteRelationshipFact(index) {
+  _openAtConfirm('删除该条关系事实', '将从 relationship_facts.yaml 中物理删除，不可恢复。', async () => {
+    const uid = document.getElementById('rf-uid-select').value;
+    try {
+      await api('DELETE', `/relationship-facts/${encodeURIComponent(uid)}/${index}`);
+      toast('已删除', 'ok');
+      loadRelationshipFacts();
+    } catch (e) { toast('删除失败: ' + e.message, 'err'); }
+  });
+}
+
+async function runRelationshipFactSuggester() {
+  const uid = document.getElementById('rf-uid-select').value;
+  if (!uid) { toast('请先选择用户', 'err'); return; }
+  try {
+    const r = await api('POST', `/relationship-facts/${encodeURIComponent(uid)}/run-suggester`);
+    toast(r.message, 'ok');
+    loadRelationshipFacts();
+  } catch (e) { toast('运行失败: ' + e.message, 'err'); }
+}
+
+function openFactModal(index) {
+  document.getElementById('rf-fact-err').textContent = '';
+  _rfEditIndex = (index === undefined) ? null : index;
+  if (_rfEditIndex !== null) {
+    const f = _rfFacts[_rfEditIndex];
+    document.getElementById('rf-fact-keywords').value = (f.keywords || []).join(', ');
+    document.getElementById('rf-fact-content').value = f.content || '';
+    document.getElementById('rf-fact-confidence').value = f.confidence ?? 1.0;
+    document.getElementById('rf-fact-order').value = f.insertion_order ?? 60;
+    document.getElementById('rf-fact-modal-title').textContent = '编辑关系事实';
+  } else {
+    document.getElementById('rf-fact-keywords').value = '';
+    document.getElementById('rf-fact-content').value = '';
+    document.getElementById('rf-fact-confidence').value = 1.0;
+    document.getElementById('rf-fact-order').value = 60;
+    document.getElementById('rf-fact-modal-title').textContent = '添加关系事实';
+  }
+  document.getElementById('rf-fact-modal').classList.add('open');
+}
+function closeFactModal() {
+  document.getElementById('rf-fact-modal').classList.remove('open');
+}
+async function submitFactModal() {
+  const uid = document.getElementById('rf-uid-select').value;
+  const errEl = document.getElementById('rf-fact-err');
+  const keywords = document.getElementById('rf-fact-keywords').value.split(',').map(s => s.trim()).filter(Boolean);
+  const content = document.getElementById('rf-fact-content').value.trim();
+  if (!keywords.length) { errEl.textContent = '至少填一个关键词'; return; }
+  if (!content) { errEl.textContent = '内容不能为空'; return; }
+  const body = {
+    keywords, content,
+    confidence: parseFloat(document.getElementById('rf-fact-confidence').value) || 1.0,
+    insertion_order: parseInt(document.getElementById('rf-fact-order').value, 10) || 60,
+    enabled: true,
+    status: 'confirmed',
+    source: 'manual',
+  };
+  try {
+    if (_rfEditIndex !== null) {
+      await api('PUT', `/relationship-facts/${encodeURIComponent(uid)}/${_rfEditIndex}`, body);
+      toast('已更新', 'ok');
+    } else {
+      await api('POST', `/relationship-facts/${encodeURIComponent(uid)}`, body);
+      toast('已添加', 'ok');
+    }
+    closeFactModal();
+    loadRelationshipFacts();
+  } catch (e) {
+    errEl.textContent = e.message;
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  屏幕内容查看 / TTS / 用户称谓（三个小设置卡片）
+// ══════════════════════════════════════════════════════════
+async function loadScreenPeekSettings() {
+  try {
+    const d = await api('GET', '/settings/screen-peek');
+    document.getElementById('sp-enabled').checked = !!d.enabled;
+    document.getElementById('sp-cooldown').value = d.cooldown_minutes ?? 30;
+  } catch (e) { toast('读取屏幕内容查看配置失败: ' + e.message, 'err'); }
+}
+async function saveScreenPeekSettings() {
+  const body = {
+    enabled: document.getElementById('sp-enabled').checked,
+    cooldown_minutes: parseInt(document.getElementById('sp-cooldown').value, 10),
+  };
+  try {
+    await api('POST', '/settings/screen-peek', body);
+    toast('屏幕内容查看配置已保存', 'ok');
+  } catch (e) { toast('保存失败: ' + e.message, 'err'); }
+}
+
+async function loadTtsConfig() {
+  try {
+    const d = await api('GET', '/tts-config');
+    document.getElementById('tts-enabled').checked = !!d.enabled;
+    document.getElementById('tts-emotion-enabled').checked = !!d.emotion_enabled;
+    document.getElementById('tts-api-url').value = d.api_url || '';
+    document.getElementById('tts-ref-audio').value = d.ref_audio || '';
+    document.getElementById('tts-prompt-text').value = d.prompt_text || '';
+    const speed = parseFloat(d.speed) || 1.0;
+    document.getElementById('tts-speed').value = speed;
+    document.getElementById('tts-speed-val').textContent = speed.toFixed(2);
+  } catch (e) { toast('读取 TTS 配置失败: ' + e.message, 'err'); }
+}
+async function saveTtsConfig() {
+  const body = {
+    enabled: document.getElementById('tts-enabled').checked,
+    emotion_enabled: document.getElementById('tts-emotion-enabled').checked,
+    api_url: document.getElementById('tts-api-url').value.trim(),
+    ref_audio: document.getElementById('tts-ref-audio').value.trim(),
+    prompt_text: document.getElementById('tts-prompt-text').value.trim(),
+    speed: parseFloat(document.getElementById('tts-speed').value),
+  };
+  try {
+    await api('PUT', '/tts-config', body);
+    toast('TTS 配置已保存', 'ok');
+  } catch (e) { toast('保存失败: ' + e.message, 'err'); }
+}
+
+async function _ensurePronounUidOptions() {
+  const sel = document.getElementById('pn-uid-select');
+  if (sel.options.length) return;
+  try {
+    if (!_allUsers || !_allUsers.length) {
+      const d = await api('GET', '/users/');
+      _allUsers = d.users || [];
+    }
+    sel.innerHTML = _allUsers.map(u => `<option value="${u}">${u}</option>`).join('');
+  } catch (e) { /* best-effort */ }
+}
+async function loadUserPronoun() {
+  await _ensurePronounUidOptions();
+  const uid = document.getElementById('pn-uid-select').value;
+  if (!uid) return;
+  try {
+    const d = await api('GET', `/users/${encodeURIComponent(uid)}/pronoun`);
+    document.getElementById('pn-value').value = d.pronoun || '她';
+  } catch (e) { toast('读取称谓失败: ' + e.message, 'err'); }
+}
+async function saveUserPronoun() {
+  const uid = document.getElementById('pn-uid-select').value;
+  if (!uid) { toast('请先选择用户', 'err'); return; }
+  const pronoun = document.getElementById('pn-value').value;
+  try {
+    await api('PATCH', `/users/${encodeURIComponent(uid)}/pronoun`, { pronoun });
+    toast('称谓已保存', 'ok');
+  } catch (e) { toast('保存失败: ' + e.message, 'err'); }
 }
 
 // ══════════════════════════════════════════════════════════
