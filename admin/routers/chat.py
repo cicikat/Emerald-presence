@@ -570,15 +570,6 @@ async def desktop_activate(_auth=Depends(require_scopes("chat"))):
     return {"status": "ok"}
 
 
-@router.post("/desktop/deactivate", summary="桌宠下线停用desktop通道")
-async def desktop_deactivate(_auth=Depends(require_scopes("chat"))):
-    from channels.registry import get as _get_channel
-    channel = _get_channel("desktop")
-    if channel and hasattr(channel, "set_active"):
-        channel.set_active(False)
-    return {"status": "ok"}
-
-
 @router.post("/desktop/wake", summary="桌宠重开问候（仅触发 assistant turn，不写 user 历史）")
 async def desktop_wake(body: dict = Body(default={}), _auth=Depends(require_scopes("chat"))):
     """

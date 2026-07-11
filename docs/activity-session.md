@@ -88,7 +88,7 @@ core/activity/
 ### 定位
 
 - **静态元信息表**，不做 router 自动注册，不做插件系统
-- 用于：活动发现（`/activity/list`）、contract smoke tests、memory policy 声明
+- 用于：contract smoke tests、memory policy 声明
 - 不用于：dynamic import、MCP、前端 component schema、热加载、LLM tool dispatch
 
 ### 关键类型
@@ -134,7 +134,7 @@ class ActivityMeta:
 Registry **不负责** router 注册。`admin/admin_server.py` 手工维护：
 
 ```python
-app.include_router(activity.router, prefix="/activity", ...)  # /activity/list 等
+app.include_router(activity.router, prefix="/activity", ...)  # /activity/current 等
 app.include_router(reading.router,  prefix="/activity", ...)
 app.include_router(gomoku.router,   prefix="/activity", ...)
 app.include_router(chess.router,    prefix="/activity", ...)
@@ -148,7 +148,6 @@ app.include_router(dream_seed.router, prefix="/activity", ...)
 `tests/test_activity_contract.py` 验证：
 - 每个 activity 的 `start` / `state` / `close` 路由在对应 router 对象中存在
 - `has_companion_chat=True` 的 activity 有 `/chat` 路由
-- `GET /activity/list` 返回与 registry 一致的 id / frontend_key / route_prefix
 - registry 声明的每个 tauri command 名称在 `lib.rs` 中有 `async fn` 声明
 - 每个 tauri command 名称在 `activity-api.ts` 中以字符串字面量出现
 

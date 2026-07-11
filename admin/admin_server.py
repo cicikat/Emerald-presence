@@ -35,7 +35,7 @@ from admin.routers import (
     settings_proxy, settings_llm, settings_misc, settings_prompt_assets,
     settings_screen_peek, settings_tool_loop, settings_thinking,
     character, chat,
-    scheduler, watch, agent, sensor,
+    scheduler, watch, sensor,
     garden, mobile, diary, chat_log,
     mood, activity, dream,
     reading, gomoku, chess, dream_seed,
@@ -62,7 +62,6 @@ app.include_router(chat.router,           prefix="",           tags=["对话"])
 app.include_router(scheduler.router,      prefix="",           tags=["调度器"])
 app.include_router(watch.router,          prefix="",           tags=["Watch"])
 app.include_router(jailbreak_entries.router, prefix="",        tags=["破限条目"])
-app.include_router(agent.router,            prefix="",           tags=["Agent"])
 app.include_router(sensor.router, prefix="", tags=["手机传感器"])
 app.include_router(garden.router,   prefix="/garden",   tags=["花园"])
 app.include_router(mood.router,     prefix="/mood",     tags=["情绪状态"])

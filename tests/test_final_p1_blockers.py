@@ -43,85 +43,6 @@ def auth_app():
     return app
 
 
-@pytest.fixture
-def activity_paths(tmp_path):
-    paths = MagicMock()
-    active = tmp_path / "active_prompt_assets.json"
-    active.write_text('{"active_character":"yexuan"}', encoding="utf-8")
-    snapshot = tmp_path / "activity_snapshot.json"
-    paths.active_prompt_assets.return_value = active
-    paths.activity_snapshot.return_value = snapshot
-    paths._p.return_value = tmp_path / "legacy_activity_snapshot.json"
-    return paths, snapshot
-
-
-class TestSensorActivityBearerOnly:
-    def test_no_token_rejected_without_side_effect(
-        self, auth_app, activity_paths, monkeypatch
-    ):
-        import admin.routers.sensor as sensor
-
-        paths, snapshot = activity_paths
-        monkeypatch.setattr(sensor, "get_paths", lambda: paths)
-        response = TestClient(auth_app).post("/sensor/activity", json={"app": "x"})
-
-        assert response.status_code in (401, 403)
-        assert not snapshot.exists()
-        paths.activity_snapshot.assert_not_called()
-
-    def test_wrong_token_rejected_without_side_effect(
-        self, auth_app, activity_paths, monkeypatch
-    ):
-        import admin.routers.sensor as sensor
-
-        paths, snapshot = activity_paths
-        monkeypatch.setattr(sensor, "get_paths", lambda: paths)
-        response = TestClient(auth_app).post(
-            "/sensor/activity",
-            json={"app": "x"},
-            headers={"Authorization": f"Bearer {WRONG_TOKEN}"},
-        )
-
-        assert response.status_code in (401, 403)
-        assert not snapshot.exists()
-        paths.activity_snapshot.assert_not_called()
-
-    def test_correct_bearer_preserves_write_behavior(
-        self, auth_app, activity_paths, monkeypatch
-    ):
-        import admin.routers.sensor as sensor
-
-        paths, snapshot = activity_paths
-        monkeypatch.setattr(sensor, "get_paths", lambda: paths)
-        response = TestClient(auth_app).post(
-            "/sensor/activity",
-            json={"app": "editor"},
-            headers={"Authorization": f"Bearer {VALID_TOKEN}"},
-        )
-
-        assert response.status_code == 200
-        assert response.json()["status"] == "ok"
-        assert snapshot.exists()
-        assert "editor" in snapshot.read_text(encoding="utf-8")
-
-    def test_wrong_token_not_in_response_or_logs(
-        self, auth_app, activity_paths, monkeypatch, caplog
-    ):
-        import admin.routers.sensor as sensor
-
-        paths, _ = activity_paths
-        monkeypatch.setattr(sensor, "get_paths", lambda: paths)
-        caplog.set_level(logging.DEBUG)
-        response = TestClient(auth_app).post(
-            "/sensor/activity",
-            json={"app": "x"},
-            headers={"Authorization": f"Bearer {WRONG_TOKEN}"},
-        )
-
-        assert WRONG_TOKEN not in response.text
-        assert all(WRONG_TOKEN not in record.getMessage() for record in caplog.records)
-
-
 class TestWatchEventBearerOnly:
     def test_no_token_rejected(self, auth_app):
         response = TestClient(auth_app).post(
@@ -359,7 +280,6 @@ class TestFullRouteAuthInventory:
         required = {
             "/desktop/chat",
             "/desktop/activate",
-            "/desktop/deactivate",
             "/desktop/wake",
             "/upload/ingest",
             "/dream/enter",
@@ -367,8 +287,6 @@ class TestFullRouteAuthInventory:
             "/dream/exit",
             "/dream/state",
             "/dream/settings",
-            "/agent/think",
-            "/sensor/activity",
             "/watch/event",
             "/system/data-path",
         }

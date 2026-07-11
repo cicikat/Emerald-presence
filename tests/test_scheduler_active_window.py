@@ -115,25 +115,6 @@ async def test_owner_chat_turn_marks_user_active(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mobile_chat_marks_user_active_before_shared_owner_turn(monkeypatch):
-    _install_fastapi_stub(monkeypatch)
-    from admin.routers import mobile
-    from core.scheduler import loop
-
-    async def fake_run_owner_chat_turn(message, channel_name):
-        return {"reply": "ok", "channel": channel_name}
-
-    monkeypatch.setattr(loop, "_last_user_message_time", 0.0)
-    monkeypatch.setattr(mobile, "_get_mobile_channel", lambda: None)
-    monkeypatch.setattr("admin.routers.chat.run_owner_chat_turn", fake_run_owner_chat_turn)
-
-    result = await mobile.mobile_chat({"message": "hello"}, auth=None)
-
-    assert result == {"reply": "ok", "channel": "mobile"}
-    assert loop._user_active_recently()
-
-
-@pytest.mark.asyncio
 async def test_execute_prompt_blocked_send_does_not_mark_or_after_send(monkeypatch):
     from core.scheduler import execution, loop
 

@@ -9,11 +9,6 @@ Activity Contract Smoke Tests
  A. FastAPI 路由存在性
     - 每个 activity 的 start / state / close 路由存在
     - has_companion_chat=True 的 activity 有 /chat 路由
-    - GET /activity/list 路由存在
- B. /activity/list 端点内容
-    - 返回 enabled activities
-    - id / frontend_key / route_prefix 与 registry 一致
-    - memory_policy 字段存在
  C. Tauri lib.rs contract
     - registry.tauri_commands 里每个名称在 lib.rs 有对应 async fn 声明
  D. activity-api.ts contract
@@ -28,7 +23,6 @@ Activity Contract Smoke Tests
    silent-skip 会导致换机器/CI 上契约漂移测试永远显示绿但什么都没测。
  - 仅当显式设置环境变量 `SKIP_CROSS_REPO=1` 时才 skip（例如单仓 CI、无前端仓的场景）。
  - FastAPI 路由检查通过导入个别 router 对象完成，无需启动服务器。
- - /activity/list 内容检查通过 FastAPI TestClient + dependency override 完成。
 """
 from __future__ import annotations
 
@@ -38,12 +32,10 @@ from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from core.activity.registry import (
     ACTIVITY_REGISTRY,
     get_activity_meta,
-    list_enabled_activities,
 )
 
 # ── 路径常量 ──────────────────────────────────────────────────────────────────
@@ -95,12 +87,6 @@ def chess_routes():
 @pytest.fixture(scope="module")
 def dream_seed_routes():
     from admin.routers.dream_seed import router
-    return _router_route_set(router)
-
-
-@pytest.fixture(scope="module")
-def activity_routes():
-    from admin.routers.activity import router
     return _router_route_set(router)
 
 
@@ -156,11 +142,6 @@ def test_dream_seed_routes(dream_seed_routes):
     assert ("POST", "/dream_seed/close") in dream_seed_routes
 
 
-# /activity/list
-def test_activity_list_route_registered(activity_routes):
-    assert ("GET", "/list") in activity_routes
-
-
 # ── 所有 has_companion_chat=True activity 都有 /chat 路由 ─────────────────────
 # 这个测试会在新增带 companion 的 activity 时自动报错（如果忘记加路由）
 
@@ -176,91 +157,6 @@ def test_companion_chat_activities_have_chat_route(gomoku_routes, dream_seed_rou
             assert ("POST", "/dream_seed/chat") in dream_seed_routes, (
                 f"{meta.id} has_companion_chat=True but /chat route missing"
             )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# B. /activity/list 端点内容
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@pytest.fixture(scope="module")
-def activity_list_client():
-    from admin.routers.activity import router
-
-    app = FastAPI()
-    app.include_router(router, prefix="/activity")
-    for route in router.routes:
-        for dep in route.dependant.dependencies:
-            if hasattr(dep.call, "_required_scopes"):
-                app.dependency_overrides[dep.call] = lambda: "test"
-    return TestClient(app)
-
-
-def test_activity_list_status_200(activity_list_client):
-    resp = activity_list_client.get("/activity/list")
-    assert resp.status_code == 200
-
-
-def test_activity_list_returns_list(activity_list_client):
-    data = activity_list_client.get("/activity/list").json()
-    assert isinstance(data, list)
-
-
-def test_activity_list_contains_enabled_ids(activity_list_client):
-    data = activity_list_client.get("/activity/list").json()
-    returned_ids = {item["id"] for item in data}
-    expected_ids = {m.id for m in list_enabled_activities()}
-    assert returned_ids == expected_ids
-
-
-def test_activity_list_frontend_key_matches_registry(activity_list_client):
-    data = activity_list_client.get("/activity/list").json()
-    for item in data:
-        meta = get_activity_meta(item["id"])
-        assert meta is not None
-        assert item["frontend_key"] == meta.frontend_key
-
-
-def test_activity_list_route_prefix_matches_registry(activity_list_client):
-    data = activity_list_client.get("/activity/list").json()
-    for item in data:
-        meta = get_activity_meta(item["id"])
-        assert item["route_prefix"] == meta.route_prefix
-
-
-def test_activity_list_memory_policy_field_present(activity_list_client):
-    data = activity_list_client.get("/activity/list").json()
-    for item in data:
-        assert "memory_policy" in item
-        policy = item["memory_policy"]
-        assert "transcript" in policy
-        assert "summary_threshold" in policy
-        assert "main_memory" in policy
-
-
-def test_activity_list_gomoku_summary_threshold_12(activity_list_client):
-    data = activity_list_client.get("/activity/list").json()
-    gomoku = next(item for item in data if item["id"] == "gomoku")
-    assert gomoku["memory_policy"]["summary_threshold"] == 12
-
-
-def test_activity_list_reading_summary_threshold_2(activity_list_client):
-    data = activity_list_client.get("/activity/list").json()
-    reading = next(item for item in data if item["id"] == "reading")
-    assert reading["memory_policy"]["summary_threshold"] == 2
-
-
-def test_activity_list_does_not_expose_session_store(activity_list_client):
-    # session_store は内部 Python モジュール名 — 公開 API に含まれてはいけない
-    data = activity_list_client.get("/activity/list").json()
-    for item in data:
-        assert "session_store" not in item
-
-
-def test_activity_list_does_not_expose_tauri_commands(activity_list_client):
-    # tauri_commands は Rust 実装詳細 — 公開 API に含まれてはいけない
-    data = activity_list_client.get("/activity/list").json()
-    for item in data:
-        assert "tauri_commands" not in item
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

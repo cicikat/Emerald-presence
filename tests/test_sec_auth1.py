@@ -4,7 +4,6 @@ tests/test_sec_auth1.py — SEC-AUTH-1: HTTP endpoint Bearer-token auth
 Endpoints protected:
   POST /desktop/wake       (was already protected, tests verify contract)
   POST /desktop/activate
-  POST /desktop/deactivate
   POST /upload/ingest
   POST /dream/enter        (SEC-AUTH-1 fix)
   POST /dream/chat         (SEC-AUTH-1 fix)
@@ -12,7 +11,6 @@ Endpoints protected:
   GET  /dream/state        (SEC-AUTH-1 fix)
   GET  /dream/settings     (SEC-AUTH-1 fix)
   PATCH /dream/settings    (SEC-AUTH-1 fix)
-  POST /agent/think        (SEC-AUTH-1 fix)
   GET  /system/data-path   (SEC-AUTH-1B fix)
 
 Coverage matrix per endpoint:
@@ -37,7 +35,6 @@ from fastapi.testclient import TestClient
 
 from admin.routers.chat import router as chat_router
 from admin.routers.dream import router as dream_router
-from admin.routers.agent import router as agent_router
 from admin.routers.system import router as system_router
 from admin.auth import verify_token
 
@@ -49,7 +46,6 @@ WRONG_TOKEN = "definitely-wrong-token"
 _app = FastAPI()
 _app.include_router(chat_router)
 _app.include_router(dream_router)
-_app.include_router(agent_router)
 _app.include_router(system_router)
 
 
@@ -160,28 +156,6 @@ class TestDesktopActivate:
 
     def test_token_not_in_error_response(self, wrong_token):
         resp = wrong_token.post("/desktop/activate")
-        assert WRONG_TOKEN not in resp.text
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-# /desktop/deactivate
-# ════════════════════════════════════════════════════════════════════════════════
-
-class TestDesktopDeactivate:
-    def test_no_token_rejected(self, no_token):
-        resp = no_token.post("/desktop/deactivate")
-        assert resp.status_code in (401, 403)
-
-    def test_wrong_token_rejected(self, wrong_token):
-        resp = wrong_token.post("/desktop/deactivate")
-        assert resp.status_code in (401, 403)
-
-    def test_correct_token_passes(self, authed):
-        resp = authed.post("/desktop/deactivate")
-        assert resp.status_code == 200
-
-    def test_token_not_in_error_response(self, wrong_token):
-        resp = wrong_token.post("/desktop/deactivate")
         assert WRONG_TOKEN not in resp.text
 
 
@@ -407,40 +381,6 @@ class TestDreamSettingsPatch:
 
     def test_token_not_in_error_response(self, wrong_token):
         resp = wrong_token.patch("/dream/settings", json={"lucid_mode": "lucid_shared"})
-        assert WRONG_TOKEN not in resp.text
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-# POST /agent/think
-# ════════════════════════════════════════════════════════════════════════════════
-
-class TestAgentThink:
-    def test_no_token_rejected(self, no_token):
-        resp = no_token.post("/agent/think", json={"messages": []})
-        assert resp.status_code in (401, 403)
-
-    def test_wrong_token_rejected(self, wrong_token):
-        resp = wrong_token.post("/agent/think", json={"messages": []})
-        assert resp.status_code in (401, 403)
-
-    def test_correct_token_passes_auth(self, authed):
-        with patch("core.llm_client.chat", new_callable=AsyncMock) as mock_chat:
-            mock_chat.return_value = "response"
-            resp = authed.post("/agent/think", json={"messages": []})
-            assert resp.status_code not in (401, 403)
-
-    def test_no_token_does_not_call_llm(self, no_token):
-        with patch("core.llm_client.chat", new_callable=AsyncMock) as mock_chat:
-            no_token.post("/agent/think", json={"messages": []})
-            mock_chat.assert_not_called()
-
-    def test_wrong_token_does_not_call_llm(self, wrong_token):
-        with patch("core.llm_client.chat", new_callable=AsyncMock) as mock_chat:
-            wrong_token.post("/agent/think", json={"messages": []})
-            mock_chat.assert_not_called()
-
-    def test_token_not_in_error_response(self, wrong_token):
-        resp = wrong_token.post("/agent/think", json={"messages": []})
         assert WRONG_TOKEN not in resp.text
 
 

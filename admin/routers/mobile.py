@@ -37,29 +37,6 @@ async def mobile_deactivate(auth=Depends(require_scopes("chat"))):
     return {"ok": True, "active": False}
 
 
-@router.post("/mobile/chat", summary="手机端对话（走 mobile channel 语义）")
-async def mobile_chat(body: dict = Body(...), auth=Depends(require_scopes("chat"))):
-    message = (body.get("message") or "").strip()
-    if not message:
-        raise HTTPException(status_code=422, detail="message 不能为空")
-
-    # Safety net: hard reject reality turns when dream is active
-    from admin.routers.chat import _check_reality_not_in_dream
-    from core.config_loader import get_config as _cfg
-    _uid = str(_cfg().get("scheduler", {}).get("owner_id", "owner"))
-    _check_reality_not_in_dream(_uid)
-
-    mobile = _get_mobile_channel()
-    if mobile is not None:
-        mobile.set_active(True)
-
-    from core.scheduler.loop import mark_user_active
-    from admin.routers.chat import run_owner_chat_turn
-
-    mark_user_active()
-    return await run_owner_chat_turn(message, "mobile")
-
-
 @router.get("/mobile/poll", summary="手机端轮询主动消息")
 async def mobile_poll(
     after: int | None = Query(default=None, ge=0),

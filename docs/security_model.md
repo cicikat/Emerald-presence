@@ -29,13 +29,12 @@ public endpoint。
 
 受保护端点（全量）：
 - `/characters/*` / `/scheduler/*` / `/lorebook/*` / `/jailbreak-entries/*`
-- `/mobile/activate` / `/mobile/chat` / `/mobile/poll` / `/mobile/push`
-- `/desktop/chat` / `/desktop/activate` / `/desktop/deactivate` / `/desktop/wake`
+- `/mobile/activate` / `/mobile/poll` / `/mobile/push`
+- `/desktop/chat` / `/desktop/activate` / `/desktop/wake`
 - `/upload/ingest`
 - `/dream/enter` / `/dream/chat` / `/dream/exit` / `/dream/state` / `/dream/settings`
 - `/activity/*` / `/reading/*` / `/gomoku/*` / `/chess/*`
-- `/agent/think`
-- `/sensor/*`（含 `/sensor/activity`）/ `/watch/*`（含 `/watch/event`）/ `/garden/*` / `/mood/*` / `/diary/*`
+- `/sensor/*` / `/watch/*`（含 `/watch/event`）/ `/garden/*` / `/mood/*` / `/diary/*`
 - `/memory/*` / `/users/*` / `/relations/*`
 - `GET /system/data-path`
 - `GET /system/meta-mode` / `PATCH /system/meta-mode`
@@ -116,7 +115,7 @@ Phase 2 在 Phase 1.5 持久化基础上增加了三个组件，边界如下：
 
 ### Dream Guard 与渲染标签收口（P2.4 fail-closed）
 
-- `DREAM_ACTIVE` / `DREAM_CLOSING` 时 QQ owner 消息、`/desktop/chat`、`/mobile/chat`、
+- `DREAM_ACTIVE` / `DREAM_CLOSING` 时 QQ owner 消息、`/desktop/chat`、
   `/desktop/wake` Path B 均被拒，不进入现实 pipeline，不写 runtime / memory。
 - **Fail-closed**：dream state 文件存在但 JSON 损坏 / 读取异常 / 状态非法时，
   同样拒绝 reality turn（`BLOCK_UNCERTAIN`），记录 `logger.error`。
@@ -137,13 +136,11 @@ Phase 2 在 Phase 1.5 持久化基础上增加了三个组件，边界如下：
 
 **客户端影响**：旧版 Emerald-client 若调用以下端点时未带 `Authorization: Bearer <token>`
 header，将收到 401/403 拒绝：
-- `POST /desktop/activate` / `/desktop/deactivate` / `/desktop/wake`
+- `POST /desktop/activate` / `/desktop/wake`
 - `POST /upload/ingest`
 - `POST /dream/enter` / `/dream/chat` / `/dream/exit`
 - `GET /dream/state` / `/dream/settings`
 - `PATCH /dream/settings`
-- `POST /agent/think`
-- `POST /sensor/activity`
 - `POST /watch/event`
 
 这是预期的 fail-closed 安全变化。所有调用方需补充 `Authorization: Bearer <token>` header。

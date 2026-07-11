@@ -10,7 +10,6 @@ GET /observe/dream-prompt/{uid}   — 最近 N 轮梦境 Prompt 层级快照（D
 GET /observe/dream-prompt         — 有梦境快照的 uid 列表
 GET /observe/trigger-catalog      — 触发器目录：全部 proposer + 最近真实捕获快照（seed prompt / search_query）
 GET /observe/recall/{uid}         — 召回溯源（recall_trace JSONL：episodic/event_log/lore/semantic(X2)/web_recall(X3)）
-GET /observe/vector               — 列出有向量库的 uid
 GET /observe/vector/{uid}         — 向量库统计 + 条目浏览（支持 source 过滤 + 分页）
 GET /observe/vector/{uid}/search  — 向量库语义检索（q= 参数，k 结果数）
 """
@@ -329,12 +328,6 @@ async def get_trigger_catalog(auth=Depends(require_scopes("memory.read"))):
 # ─────────────────────────────────────────────────────────────────────────────
 # /observe/vector  —  向量库只读观测
 # ─────────────────────────────────────────────────────────────────────────────
-
-@router.get("/observe/vector", summary="列出有向量库的 uid", tags=["观测"])
-async def list_vector_uids(auth=Depends(require_scopes("memory.read"))):
-    from admin.routers.users import _get_known_users
-    return {"uids": _get_known_users()}
-
 
 @router.get("/observe/vector/{uid}", summary="向量库统计 + 条目浏览", tags=["观测"])
 async def get_vector_overview(uid: str, source: str = "", limit: int = 100,

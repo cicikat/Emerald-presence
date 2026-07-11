@@ -124,13 +124,6 @@ async def remove_from_blacklist(user_id: str, auth=Depends(require_scopes("admin
 
 # ── 关系配置接口 ──────────────────────────────────────────────────────────────
 
-@router.get("/", summary="获取所有关系配置")
-async def get_relations(auth=Depends(require_scopes("memory.read"))):
-    """读取 relations.yaml 并原样返回所有配置"""
-    relations = _read_relations()
-    return {"relations": relations}
-
-
 @router.get("/{user_id}", summary="获取单用户关系配置")
 async def get_relation(user_id: str, auth=Depends(require_scopes("memory.read"))):
     """

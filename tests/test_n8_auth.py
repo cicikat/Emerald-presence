@@ -1,6 +1,6 @@
 """
 N8 鉴权补洞测试
-验证 /upload/ingest、/desktop/wake、/desktop/activate、/desktop/deactivate
+验证 /upload/ingest、/desktop/wake、/desktop/activate
 在未持 token 时返回 401/403，持正确 token 时通过鉴权层。
 """
 
@@ -97,16 +97,4 @@ def test_desktop_activate_no_token_rejected(client_no_token):
 
 def test_desktop_activate_valid_token_passes(client_authed):
     resp = client_authed.post("/desktop/activate")
-    assert resp.status_code == 200
-
-
-# ── /desktop/deactivate ───────────────────────────────────────────────────────
-
-def test_desktop_deactivate_no_token_rejected(client_no_token):
-    resp = client_no_token.post("/desktop/deactivate")
-    assert resp.status_code in (401, 403)
-
-
-def test_desktop_deactivate_valid_token_passes(client_authed):
-    resp = client_authed.post("/desktop/deactivate")
     assert resp.status_code == 200

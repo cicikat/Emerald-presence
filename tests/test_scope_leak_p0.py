@@ -19,14 +19,6 @@ Scope Leak P0 — 5 真实 D 类风险验收测试
    yexuan + character_b 各自 observations.jsonl 超过 max_raw；
    只存在这两个文件；_all_observation_paths 应返回两个 path；
    compact_observations 对两个独立路径分别调用，互不覆盖。
-
-5. test_sensor_write_scoped
-   设置 active_character="character_b"，调用 receive_activity_snapshot；
-   断言写入 character_b activity_snapshot，yexuan 文件无变化。
-
-6. test_sensor_write_no_active_char_skips
-   active_prompt_assets 中 active_character 为空；
-   断言写入被跳过，没有任何 activity_snapshot 文件被创建。
 """
 
 import asyncio
@@ -242,52 +234,3 @@ def test_all_observation_paths_returns_per_char(sandbox):
     names = {p.parent.parent.name for p in paths_2}  # runtime/characters/{char_id}/inner/obs.jsonl
     assert "yexuan" in names
     assert "character_b" in names
-
-
-# ── 5. sensor write scoped ────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_sensor_write_scoped(sandbox):
-    """POST /sensor/activity with active_character=character_b must write character_b path only."""
-    _write_active(sandbox, "character_b")
-
-    from admin.routers.sensor import receive_activity_snapshot
-
-    payload = {"current": {"category": "coding", "duration_min": 5}, "today_summary": ""}
-    result = await receive_activity_snapshot(payload)
-
-    assert result.get("status") == "ok"
-    assert result.get("char_id") == "character_b"
-
-    character_b_path = sandbox.activity_snapshot(char_id="character_b")
-    yexuan_path  = sandbox.activity_snapshot(char_id="yexuan")
-
-    assert character_b_path.exists(), "character_b activity_snapshot must be written"
-    assert not yexuan_path.exists(), "yexuan activity_snapshot must NOT be written"
-
-    data = json.loads(character_b_path.read_text(encoding="utf-8"))
-    assert data["current"]["category"] == "coding"
-
-
-# ── 6. sensor write skipped when no active char ───────────────────────────────
-
-@pytest.mark.asyncio
-async def test_sensor_write_no_active_char_skips(sandbox):
-    """receive_activity_snapshot must skip write when active_character is empty."""
-    p = sandbox.active_prompt_assets()
-    p.write_text(
-        json.dumps({"active_character": "", "enabled_lorebooks": [], "enabled_jailbreaks": []}),
-        encoding="utf-8",
-    )
-
-    from admin.routers.sensor import receive_activity_snapshot
-
-    payload = {"current": {"category": "gaming"}, "today_summary": ""}
-    result = await receive_activity_snapshot(payload)
-
-    assert result.get("status") == "skipped"
-
-    yexuan_path = sandbox.activity_snapshot(char_id="yexuan")
-    character_b_path = sandbox.activity_snapshot(char_id="character_b")
-    assert not yexuan_path.exists(), "yexuan activity_snapshot must NOT be written on skip"
-    assert not character_b_path.exists(), "character_b activity_snapshot must NOT be written on skip"
