@@ -1,0 +1,15 @@
+id: ext-01-episodic-fact
+category: extraction
+seed:
+  episodic:
+    - id: ep_ext01_coffee_job
+      topic_keywords: ["咖啡厅", "兼职"]
+      raw_facts: ["用户说在咖啡厅找到了一份兼职"]
+      narrative_summary: "用户提到在咖啡厅找到了兼职工作"
+      emotion_peak: happy
+      occurred_days_ago: 10
+      strength: 0.7
+query: "我上次说的在咖啡厅找兼职的事，你还记得吗"
+expect:
+  episodic_must_hit: [ep_ext01_coffee_job]
+  layers_present: [6c_episodic]

@@ -1,0 +1,19 @@
+id: ms-05-episodic-plus-profile
+category: multi_session
+seed:
+  episodic:
+    - id: ep_ms05_cat_adopt
+      topic_keywords: ["猫咪", "领养"]
+      raw_facts: ["用户说领养了一只橘猫"]
+      narrative_summary: "用户提到领养了一只橘猫"
+      emotion_peak: happy
+      occurred_days_ago: 14
+      strength: 0.7
+  profile_facts:
+    - text: "养了一只叫芋圆的橘猫"
+      tag: misc
+query: "我领养橘猫的事，你还记得吗"
+expect:
+  episodic_must_hit: [ep_ms05_cat_adopt]
+  layers_present: [6c_episodic]
+  profile_facts_present: ["芋圆"]

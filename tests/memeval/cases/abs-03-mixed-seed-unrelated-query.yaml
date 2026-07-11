@@ -1,0 +1,20 @@
+id: abs-03-mixed-seed-unrelated-query
+category: abstention
+seed:
+  episodic:
+    - id: ep_abs03_piano
+      topic_keywords: ["钢琴", "考级"]
+      raw_facts: ["用户说在准备钢琴考级"]
+      narrative_summary: "用户提到在准备钢琴考级"
+      occurred_days_ago: 9
+      strength: 0.7
+  event_log:
+    - days_ago: 6
+      lines:
+        - {speaker: user, text: "钢琴老师说我进步很快"}
+        - {speaker: assistant, text: "真厉害", emotion: happy, intensity: 1}
+query: "重庆火锅好吃吗"
+expect:
+  episodic_must_not_hit: [ep_abs03_piano]
+  layers_absent: [6c_episodic, 6b_event_search]
+  event_search_absent: ["钢琴"]

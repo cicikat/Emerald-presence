@@ -1,0 +1,14 @@
+id: abs-01-episodic-no-false-recall
+category: abstention
+seed:
+  episodic:
+    - id: ep_abs01_hiking
+      topic_keywords: ["爬山", "露营"]
+      raw_facts: ["用户说喜欢爬山露营"]
+      narrative_summary: "用户提到喜欢爬山露营"
+      occurred_days_ago: 5
+      strength: 0.7
+query: "我养的狗最近怎么样"
+expect:
+  episodic_must_not_hit: [ep_abs01_hiking]
+  layers_absent: [6c_episodic]

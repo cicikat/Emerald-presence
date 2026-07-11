@@ -1,0 +1,26 @@
+id: tmp-01-last-week-vs-today
+category: temporal
+xfail: true
+xfail_reason: >
+  Brief 48（查询侧时间意图）落地前，episodic_memory.retrieve() 没有 since_ts/until_ts
+  时间过滤参数，"上周" 这类时间意图无法在召回侧生效，今天两条同关键词记忆会一起被召回。
+  Brief 48 落地后（retrieve() 支持时间过滤 + fetch_context 接线 parse_query_time_range）
+  本 case 应自动转绿，无需改动本文件。
+seed:
+  episodic:
+    - id: ep_tmp01_trip_last_week
+      topic_keywords: ["旅行", "计划"]
+      raw_facts: ["用户上周说起旅行计划"]
+      narrative_summary: "用户上周聊到旅行计划"
+      occurred_days_ago: 8
+      strength: 0.7
+    - id: ep_tmp01_trip_today
+      topic_keywords: ["旅行", "计划"]
+      raw_facts: ["用户今天说旅行计划有变化"]
+      narrative_summary: "用户今天说旅行计划有变化"
+      occurred_days_ago: 0
+      strength: 0.7
+query: "上周我们聊的旅行计划是什么来着"
+expect:
+  episodic_must_hit: [ep_tmp01_trip_last_week]
+  episodic_must_not_hit: [ep_tmp01_trip_today]

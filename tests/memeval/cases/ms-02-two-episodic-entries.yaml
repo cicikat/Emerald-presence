@@ -1,0 +1,22 @@
+id: ms-02-two-episodic-entries
+category: multi_session
+seed:
+  episodic:
+    - id: ep_ms02_diet_start
+      topic_keywords: ["减肥", "健身房"]
+      raw_facts: ["用户说开始健身减肥了"]
+      narrative_summary: "用户提到开始去健身房减肥"
+      emotion_peak: happy
+      occurred_days_ago: 18
+      strength: 0.65
+    - id: ep_ms02_diet_progress
+      topic_keywords: ["减肥", "健身房"]
+      raw_facts: ["用户说健身房减肥已经瘦了三斤"]
+      narrative_summary: "用户提到健身减肥已经瘦了三斤"
+      emotion_peak: happy
+      occurred_days_ago: 4
+      strength: 0.7
+query: "我健身房减肥的事，你都记得吗"
+expect:
+  episodic_must_hit: [ep_ms02_diet_start, ep_ms02_diet_progress]
+  layers_present: [6c_episodic]

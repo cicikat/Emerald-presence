@@ -1,0 +1,12 @@
+id: abs-02-event-log-no-false-recall
+category: abstention
+seed:
+  event_log:
+    - days_ago: 4
+      lines:
+        - {speaker: user, text: "今天看了一部很好看的电影"}
+        - {speaker: assistant, text: "是什么电影呀", emotion: happy, intensity: 1}
+query: "我上次说的考试成绩怎么样"
+expect:
+  layers_absent: [6b_event_search]
+  event_search_absent: ["电影"]

@@ -1,0 +1,12 @@
+id: ext-02-event-log-fact
+category: extraction
+seed:
+  event_log:
+    - days_ago: 5
+      lines:
+        - {speaker: user, text: "我养了一只边牧叫豆豆"}
+        - {speaker: assistant, text: "边牧很聪明呢", emotion: happy, intensity: 2}
+query: "边牧叫豆豆"
+expect:
+  layers_present: [6b_event_search]
+  event_search_contains: ["豆豆"]

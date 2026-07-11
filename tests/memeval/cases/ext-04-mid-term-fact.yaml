@@ -1,0 +1,11 @@
+id: ext-04-mid-term-fact
+category: extraction
+seed:
+  mid_term:
+    - summary: "用户说今天下午去看了牙医，医生说要拔智齿"
+      tags: ["health"]
+      occurred_hours_ago: 2
+query: "我今天下午说的看牙医的事"
+expect:
+  layers_present: [mid_term]
+  mid_term_contains: ["牙医"]

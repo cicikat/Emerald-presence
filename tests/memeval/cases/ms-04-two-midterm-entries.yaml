@@ -1,0 +1,14 @@
+id: ms-04-two-midterm-entries
+category: multi_session
+seed:
+  mid_term:
+    - summary: "用户说今天面试了一家新公司"
+      tags: ["status.project"]
+      occurred_hours_ago: 6
+    - summary: "用户说面试结果要等下周才知道"
+      tags: ["status.project"]
+      occurred_hours_ago: 1
+query: "我今天面试的事怎么样了"
+expect:
+  layers_present: [mid_term]
+  mid_term_contains: ["面试", "下周"]

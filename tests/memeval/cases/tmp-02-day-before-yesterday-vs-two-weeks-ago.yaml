@@ -1,0 +1,23 @@
+id: tmp-02-day-before-yesterday-vs-two-weeks-ago
+category: temporal
+xfail: true
+xfail_reason: >
+  同 tmp-01：Brief 48 落地前召回侧无时间过滤，"前天" 无法排除两周前的同关键词记忆。
+seed:
+  episodic:
+    - id: ep_tmp02_recipe_two_weeks_ago
+      topic_keywords: ["食谱", "红烧肉"]
+      raw_facts: ["用户两周前说学了一道红烧肉食谱"]
+      narrative_summary: "用户两周前学了红烧肉食谱"
+      occurred_days_ago: 14
+      strength: 0.7
+    - id: ep_tmp02_recipe_day_before_yesterday
+      topic_keywords: ["食谱", "红烧肉"]
+      raw_facts: ["用户前天说红烧肉做失败了"]
+      narrative_summary: "用户前天说红烧肉食谱做失败了"
+      occurred_days_ago: 2
+      strength: 0.7
+query: "前天说的红烧肉食谱失败是怎么回事"
+expect:
+  episodic_must_hit: [ep_tmp02_recipe_day_before_yesterday]
+  episodic_must_not_hit: [ep_tmp02_recipe_two_weeks_ago]

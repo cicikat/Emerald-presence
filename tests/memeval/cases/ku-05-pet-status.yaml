@@ -1,0 +1,16 @@
+id: ku-05-pet-status
+category: knowledge_update
+xfail: true
+xfail_reason: 同 ku-01：Brief 45 落地前 important_facts 只追加不裁决冲突（长期陈旧事实场景）。
+seed:
+  profile_facts:
+    - text: "养了一只仓鼠叫糯米"
+      tag: misc
+      ts_days_ago: 200
+    - text: "仓鼠糯米去年冬天去世了"
+      tag: misc
+      ts_days_ago: 3
+query: "我养的仓鼠糯米还好吗"
+expect:
+  profile_facts_absent: ["养了一只仓鼠叫糯米"]
+  profile_facts_present: ["仓鼠糯米去年冬天去世了"]

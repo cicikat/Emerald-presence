@@ -1,0 +1,15 @@
+id: ext-03-episodic-exact-keyword
+category: extraction
+seed:
+  episodic:
+    - id: ep_ext03_new_job
+      topic_keywords: ["转正", "新公司"]
+      raw_facts: ["用户说下个月要去新公司转正"]
+      narrative_summary: "用户提到下个月要去新公司转正"
+      emotion_peak: happy
+      occurred_days_ago: 20
+      strength: 0.75
+query: "我之前说的去新公司转正的事，有进展吗"
+expect:
+  episodic_must_hit: [ep_ext03_new_job]
+  layers_present: [6c_episodic]

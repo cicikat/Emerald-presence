@@ -1,0 +1,14 @@
+id: abs-04-episodic-different-domain
+category: abstention
+seed:
+  episodic:
+    - id: ep_abs04_car_repair
+      topic_keywords: ["修车", "4S店"]
+      raw_facts: ["用户说车子送去4S店修理了"]
+      narrative_summary: "用户提到车子送去4S店修理"
+      occurred_days_ago: 7
+      strength: 0.7
+query: "帮我推荐一本历史小说吧"
+expect:
+  episodic_must_not_hit: [ep_abs04_car_repair]
+  layers_absent: [6c_episodic]

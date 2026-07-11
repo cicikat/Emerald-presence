@@ -1,0 +1,20 @@
+id: abs-05-old-and-new-both-unrelated
+category: abstention
+seed:
+  episodic:
+    - id: ep_abs05_old_unrelated
+      topic_keywords: ["攒钱", "旅行基金"]
+      raw_facts: ["用户说在攒钱准备旅行基金"]
+      narrative_summary: "用户提到在攒钱准备旅行基金"
+      occurred_days_ago: 40
+      strength: 0.6
+    - id: ep_abs05_new_unrelated
+      topic_keywords: ["搬家", "打包"]
+      raw_facts: ["用户说这周在打包搬家"]
+      narrative_summary: "用户提到这周在打包搬家"
+      occurred_days_ago: 1
+      strength: 0.7
+query: "帮我出个五子棋残局的招法"
+expect:
+  episodic_must_not_hit: [ep_abs05_old_unrelated, ep_abs05_new_unrelated]
+  layers_absent: [6c_episodic]

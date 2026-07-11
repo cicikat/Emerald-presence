@@ -1,0 +1,20 @@
+id: tmp-04-no-time-word-regression-guard
+category: temporal
+seed:
+  episodic:
+    - id: ep_tmp04_hiking
+      topic_keywords: ["爬山", "露营"]
+      raw_facts: ["用户说周末去爬山露营了"]
+      narrative_summary: "用户提到去爬山露营"
+      occurred_days_ago: 6
+      strength: 0.7
+    - id: ep_tmp04_unrelated_movie
+      topic_keywords: ["电影", "首映"]
+      raw_facts: ["用户说去看了一场电影首映"]
+      narrative_summary: "用户提到去看了电影首映"
+      occurred_days_ago: 3
+      strength: 0.7
+query: "我说过去爬山露营的事，你还记得吗"
+expect:
+  episodic_must_hit: [ep_tmp04_hiking]
+  episodic_must_not_hit: [ep_tmp04_unrelated_movie]

@@ -1,0 +1,21 @@
+id: ms-03-event-log-plus-episodic
+category: multi_session
+seed:
+  event_log:
+    - days_ago: 3
+      lines:
+        - {speaker: user, text: "我开始学吉他了，买了把入门琴"}
+        - {speaker: assistant, text: "真棒，加油练习", emotion: happy, intensity: 2}
+  episodic:
+    - id: ep_ms03_guitar_progress
+      topic_keywords: ["吉他", "练习"]
+      raw_facts: ["用户说吉他已经能弹一首简单的曲子了"]
+      narrative_summary: "用户提到吉他已经能弹一首简单曲子"
+      emotion_peak: happy
+      occurred_days_ago: 5
+      strength: 0.7
+query: "开始学吉他"
+expect:
+  episodic_must_hit: [ep_ms03_guitar_progress]
+  layers_present: [6c_episodic, 6b_event_search]
+  event_search_contains: ["吉他"]

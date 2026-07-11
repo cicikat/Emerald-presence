@@ -1,0 +1,21 @@
+id: ext-05-episodic-and-event-log-combo
+category: extraction
+seed:
+  episodic:
+    - id: ep_ext05_marathon
+      topic_keywords: ["马拉松", "报名"]
+      raw_facts: ["用户说报名了半程马拉松"]
+      narrative_summary: "用户提到报名了半程马拉松"
+      emotion_peak: happy
+      occurred_days_ago: 12
+      strength: 0.7
+  event_log:
+    - days_ago: 3
+      lines:
+        - {speaker: user, text: "马拉松训练计划已经排好了"}
+        - {speaker: assistant, text: "加油", emotion: gentle, intensity: 2}
+query: "马拉松训练计划"
+expect:
+  episodic_must_hit: [ep_ext05_marathon]
+  layers_present: [6c_episodic, 6b_event_search]
+  event_search_contains: ["马拉松"]

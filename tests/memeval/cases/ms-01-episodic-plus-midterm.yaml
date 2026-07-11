@@ -1,0 +1,20 @@
+id: ms-01-episodic-plus-midterm
+category: multi_session
+seed:
+  episodic:
+    - id: ep_ms01_thesis
+      topic_keywords: ["论文", "答辩"]
+      raw_facts: ["用户说论文初稿写完了"]
+      narrative_summary: "用户提到论文初稿写完了"
+      emotion_peak: happy
+      occurred_days_ago: 6
+      strength: 0.7
+  mid_term:
+    - summary: "用户说论文答辩时间定在下周三"
+      tags: ["status.project"]
+      occurred_hours_ago: 3
+query: "我论文答辩的事，进展怎么样了"
+expect:
+  episodic_must_hit: [ep_ms01_thesis]
+  layers_present: [6c_episodic, mid_term]
+  mid_term_contains: ["答辩"]
