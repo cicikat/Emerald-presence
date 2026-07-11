@@ -35,8 +35,15 @@ class DesktopChannel(BaseChannel):
         return self._fallback_active
 
     def set_active(self, active: bool) -> None:
+        # 每条聊天回复发送时都会重新 set_active(True)（见 admin/routers/chat.py），
+        # 桌宠已在线时这是重复电平，不是状态转换；只在真正变化时打 INFO
+        # （Brief 54-C：记边沿，不记电平）。
+        changed = self._fallback_active != active
         self._fallback_active = active
-        logger.info(f"[desktop_channel] fallback 活跃状态: {active}")
+        if changed:
+            logger.info(f"[desktop_channel] fallback 活跃状态: {active}")
+        else:
+            logger.debug(f"[desktop_channel] fallback 活跃状态保持: {active}")
 
     async def send(
         self,

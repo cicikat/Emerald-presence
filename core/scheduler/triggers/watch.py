@@ -237,7 +237,8 @@ async def on_watch_event(event_type: str, data: dict):
 
         # 06-08点跳过，可能晨跑
         if 6 <= now_hour < 8:
-            logger.info(f"[scheduler] 心率数据在早晨，跳过触发 hr={hr}")
+            # 设备可能高频上报心率，晨间每次上报都会命中此跳过分支，降 DEBUG。
+            logger.debug(f"[scheduler] 心率数据在早晨，跳过触发 hr={hr}")
             return
 
         # 深夜(22-06点)降低阈值，>100就关心

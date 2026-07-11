@@ -369,7 +369,8 @@ async def handle_tick() -> None:
             scored.append((ev, result))
 
         if not scored:
-            logger.info("[sensor_aware] candidates=%d 全部裁决失败，放弃", len(candidates))
+            # 电平（本 tick 无有效结果，非状态转换）：降 DEBUG（Brief 54-C）。
+            logger.debug("[sensor_aware] candidates=%d 全部裁决失败，放弃", len(candidates))
             _record_decision(
                 stage="judge_failed",
                 sent=False,
@@ -397,7 +398,8 @@ async def handle_tick() -> None:
         snapshot["candidate_behavior"] = behavior
 
         if behavior is None:
-            logger.info(
+            # 低于主动开口阈值：每 tick 都可能命中此分支，非状态转换，降 DEBUG。
+            logger.debug(
                 "[sensor_aware] candidates=%d picked=%s score=%d tier=%s "
                 "behavior=None sent=false",
                 len(candidates), best_type, best_score, best_tier,
@@ -425,7 +427,8 @@ async def handle_tick() -> None:
 
         _ledger_ok, _ledger_reason = _ledger_can_send("sensor_aware", priority="normal")
         if not _ledger_ok:
-            logger.info(
+            # 全局间隔/预算拦截：持续状态，非转换，降 DEBUG。
+            logger.debug(
                 "[sensor_aware] candidates=%d picked=%s score=%d tier=%s "
                 "level=%s behavior_id=%s %s sent=false",
                 len(candidates), best_type, best_score, best_tier,
@@ -446,7 +449,8 @@ async def handle_tick() -> None:
 
         _dnd_oid = _owner_id()
         if _dnd_oid and is_dnd(_dnd_oid):
-            logger.info(
+            # DND 期间每 tick 都会命中，持续状态非转换，降 DEBUG。
+            logger.debug(
                 "[sensor_aware] candidates=%d picked=%s score=%d tier=%s "
                 "level=%s behavior_id=%s dnd_blocked sent=false",
                 len(candidates), best_type, best_score, best_tier,
@@ -469,7 +473,8 @@ async def handle_tick() -> None:
         last_proactive = sensor_events.get_last_proactive_at()
         if last_proactive is not None and (time.time() - last_proactive) < _PROACTIVE_COOLDOWN_SECS:
             remaining = round(_PROACTIVE_COOLDOWN_SECS - (time.time() - last_proactive))
-            logger.info(
+            # 冷却期内每 tick 都会命中，持续状态非转换，降 DEBUG。
+            logger.debug(
                 "[sensor_aware] candidates=%d picked=%s score=%d tier=%s "
                 "level=%s behavior_id=%s proactive_cooldown=blocked sent=false",
                 len(candidates), best_type, best_score, best_tier,

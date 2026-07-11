@@ -96,14 +96,24 @@ async def _check_diary_inject():
         return
     try:
         from core.tools.diary_reader import read_recent
-        from core.memory.diary_context import save
+        from core.memory.diary_context import save, load
+
+        # 边沿检测：本触发器每 6 小时跑一次，长期"无日记"会连续多轮命中同一
+        # 分支。只在真正发生状态转换时打 INFO（快照从有变空 / 内容有更新），
+        # 电平不变（本就为空 / 内容和上次一致）时降 DEBUG（Brief 54-C）。
+        prev_text = load(oid)
         text = read_recent(days=2)
         save(oid, text)
         if text:
             _mark("diary_inject")
-            logger.info("[scheduler] 日记内容已存入 diary_context")
-        else:
+            if text != prev_text:
+                logger.info("[scheduler] 日记内容已存入 diary_context")
+            else:
+                logger.debug("[scheduler] 日记内容无变化，已刷新 diary_context 快照")
+        elif prev_text:
             logger.info("[scheduler] 近 2 天无日记，已清空 diary_context 快照")
+        else:
+            logger.debug("[scheduler] 近 2 天无日记，diary_context 快照本就为空")
     except Exception as e:
         log_error("scheduler._check_diary_inject", e)
 

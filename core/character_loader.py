@@ -19,6 +19,22 @@ CHARACTERS_DIR = Path("characters")
 # 一致性检测计数器：{character_name: 轮次计数}
 _consistency_counter: dict[str, int] = {}
 
+# 边沿检测：load() 会被路由解析（model_registry._char_model_routing）等热路径
+# 高频调用（每次 LLM 调用都可能带 char_id），并非只在真正切换角色时才走到这里。
+# 只在"本次加载的角色名与上次不同"（真正发生切换/首次加载）时打 INFO，
+# 同名重复解析降 DEBUG（Brief 54-C：记边沿，不记电平）。
+_last_loaded_char_name: str | None = None
+
+
+def _log_load_success(name: str, *, note: str = "") -> None:
+    global _last_loaded_char_name
+    suffix = f"（{note}）" if note else ""
+    if _last_loaded_char_name != name:
+        logger.info(f"[character_loader] 角色 '{name}' 加载成功{suffix}")
+        _last_loaded_char_name = name
+    else:
+        logger.debug(f"[character_loader] 角色 '{name}' 加载成功{suffix}（重复解析，非切换）")
+
 
 @dataclass
 class Character:
@@ -87,7 +103,7 @@ def load(filename_or_id: str) -> Character:
         text = path.read_text(encoding="utf-8")
         name = path.stem
         char = Character(name=name, description=text)
-        logger.info(f"[character_loader] 角色 '{name}' 加载成功（纯文本格式）")
+        _log_load_success(name, note="纯文本格式")
         return char
 
     # JSON 格式 — json.JSONDecodeError 直接向上抛
@@ -119,7 +135,7 @@ def load(filename_or_id: str) -> Character:
         if isinstance(val, list):
             setattr(char, field_name, "".join(val))
 
-    logger.info(f"[character_loader] 角色 '{char.name}' 加载成功")
+    _log_load_success(char.name)
     return char
 
 

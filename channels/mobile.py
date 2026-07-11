@@ -42,10 +42,17 @@ class MobileChannel(BaseChannel):
         return time.time() - self._last_seen <= _ACTIVE_TTL_SECONDS
 
     def set_active(self, active: bool) -> None:
+        # touch()/poll() 会在每次移动端轮询时调用本方法，是典型的"轮询完成"
+        # 高频路径；只在 active 状态真正发生转换时打 INFO，电平（重复同值）降
+        # DEBUG（Brief 54-C：记边沿，不记电平）。
+        changed = self._active != active
         self._active = active
         if active:
             self._last_seen = time.time()
-        logger.info(f"[mobile_channel] active={active}")
+        if changed:
+            logger.info(f"[mobile_channel] active={active}")
+        else:
+            logger.debug(f"[mobile_channel] active={active}（无变化）")
 
     def touch(self) -> None:
         self.set_active(True)
