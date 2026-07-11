@@ -263,6 +263,16 @@ def _build_model_client(preset_name: str) -> ModelClient:
     )
 
 
+def build_client_for_preset(name: str) -> ModelClient:
+    """按 preset 名称构建一个不经缓存的全新 ModelClient。
+
+    供连通性测试等一次性场景使用；不写入 `_model_clients` 缓存，调用方用完后
+    应自行关闭 `.client`（AsyncOpenAI），避免 httpx 连接泄漏。preset 不存在时
+    抛 ValueError（与 `_build_model_client` 一致）。
+    """
+    return _build_model_client(name)
+
+
 def get_model_client(call_category: str, *, char_id: str | None = None) -> ModelClient:
     """Resolve call_category → preset → ModelClient (cached per preset name).
 

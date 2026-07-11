@@ -4,8 +4,12 @@ GET  /llm-params                  — 读取当前 chat preset 的生成参数
 PUT  /llm-params                  — 修改当前 chat preset 的生成参数并热重载
 GET  /vision-params               — 读取 vision 配置
 PUT  /vision-params               — 修改 vision 配置并热重载
-GET  /model-presets               — 读取多模型 preset 配置（api_key 打码）
-PUT  /model-presets/active-routing — 切换当前生效的路由方案
+GET    /model-presets                        — 读取多模型 preset 配置（api_key 打码）
+PUT    /model-presets/active-routing          — 切换当前生效的路由方案
+PUT    /model-presets/presets/{name}          — 新增或更新一个 preset
+DELETE /model-presets/presets/{name}          — 删除一个 preset（被 routing_profiles 引用时拒绝）
+PUT    /model-presets/routing-profiles/{name} — 新增或更新一个 routing profile
+POST   /model-presets/presets/{name}/test     — 连通性测试：发一条 1 token ping，返回延迟/错误
 """
 
 from pathlib import Path
@@ -241,3 +245,216 @@ async def set_active_routing(body: ActiveRoutingUpdate, auth=Depends(require_sco
     config_loader.reload_config()
     llm_client.reload_client()
     return {"message": f"已切换到路由方案 '{body.active_routing}'", "active_routing": body.active_routing}
+
+
+# ---------------------------------------------------------------------------
+# /model-presets/presets/{name} — preset CRUD（Phase 4）
+# ---------------------------------------------------------------------------
+
+class PresetUpsert(BaseModel):
+    provider_kind: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    tool_call_mode: Optional[str] = None
+    prompt_style: Optional[str] = None
+    params: Optional[dict] = None
+    reasoning_native: Optional[bool] = None
+    reasoning_extra_body: Optional[dict] = None
+
+
+def _require_model_presets_block(full_cfg: dict) -> dict:
+    mp = full_cfg.get("model_presets")
+    if not mp:
+        raise HTTPException(
+            status_code=400,
+            detail="当前配置使用 legacy llm: 块，不支持 preset/routing profile 管理。请先配置 model_presets 块。",
+        )
+    return mp
+
+
+@router.put("/model-presets/presets/{name}", summary="新增或更新一个 model preset")
+async def upsert_preset(name: str, body: PresetUpsert, auth=Depends(require_scopes("admin"))):
+    """合并更新指定 preset；preset 不存在时新建（新建必须提供 provider_kind）。"""
+    from core.model_registry import PROVIDER_PROFILES
+    if body.provider_kind is not None and body.provider_kind not in PROVIDER_PROFILES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"未知 provider_kind: {body.provider_kind!r}，可选: {sorted(PROVIDER_PROFILES)}",
+        )
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            full_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {e}")
+
+    mp = _require_model_presets_block(full_cfg)
+    presets = mp.setdefault("presets", {})
+    is_new = name not in presets
+    if is_new and body.provider_kind is None:
+        raise HTTPException(status_code=422, detail="新建 preset 必须提供 provider_kind")
+
+    existing = dict(presets.get(name, {}))
+    update_data = body.model_dump(exclude_none=True)
+
+    if "params" in update_data and "params" in existing:
+        merged_params = dict(existing["params"])
+        merged_params.update(update_data.pop("params"))
+        existing["params"] = merged_params
+    elif "params" in update_data:
+        existing["params"] = update_data.pop("params")
+
+    existing.update(update_data)
+    presets[name] = existing
+
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(full_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入配置文件失败: {e}")
+
+    from core import config_loader, llm_client
+    config_loader.reload_config()
+    llm_client.reload_client()
+
+    return {
+        "message": f"preset '{name}' 已{'创建' if is_new else '更新'}",
+        "name": name,
+        "preset": _mask_presets({name: presets[name]})[name],
+    }
+
+
+@router.delete("/model-presets/presets/{name}", summary="删除一个 model preset")
+async def delete_preset(name: str, auth=Depends(require_scopes("admin"))):
+    """删除指定 preset。仍被某个 routing profile 的任意 call_category 引用时拒绝（409），
+    唯一剩余的 preset 也拒绝删除（409），避免路由解析无 preset 可用。
+    """
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            full_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {e}")
+
+    mp = _require_model_presets_block(full_cfg)
+    presets = mp.get("presets", {})
+    if name not in presets:
+        raise HTTPException(status_code=404, detail=f"preset {name!r} 不存在")
+    if len(presets) <= 1:
+        raise HTTPException(status_code=409, detail="不能删除唯一的 preset，至少保留一个")
+
+    referencing = [
+        f"{profile_name}.{category}"
+        for profile_name, profile in mp.get("routing_profiles", {}).items()
+        for category, preset_name in profile.items()
+        if preset_name == name
+    ]
+    if referencing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"preset {name!r} 仍被以下 routing profile 引用，请先改指向再删除: {referencing}",
+        )
+
+    del presets[name]
+
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(full_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入配置文件失败: {e}")
+
+    from core import config_loader, llm_client
+    config_loader.reload_config()
+    llm_client.reload_client()
+
+    return {"message": f"preset {name!r} 已删除", "name": name}
+
+
+# ---------------------------------------------------------------------------
+# /model-presets/routing-profiles/{name} — routing profile CRUD（Phase 4）
+# ---------------------------------------------------------------------------
+
+@router.put("/model-presets/routing-profiles/{name}", summary="新增或更新一个 routing profile")
+async def upsert_routing_profile(name: str, body: dict[str, str], auth=Depends(require_scopes("admin"))):
+    """合并更新指定 routing profile 的 call_category → preset 映射。
+
+    body 例：{"chat": "claude-sonnet", "probe": "deepseek-default"}
+    只传入需要修改的 category；未传入的沿用已有映射。所有值必须是已存在的 preset 名。
+    """
+    if not body:
+        raise HTTPException(status_code=422, detail="body 不能为空，至少提供一个 call_category")
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            full_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {e}")
+
+    mp = _require_model_presets_block(full_cfg)
+    presets = mp.get("presets", {})
+    unknown = sorted({v for v in body.values() if v not in presets})
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"routing profile 引用了不存在的 preset: {unknown}")
+
+    profiles = mp.setdefault("routing_profiles", {})
+    profile = dict(profiles.get(name, {}))
+    profile.update(body)
+    profiles[name] = profile
+
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(full_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入配置文件失败: {e}")
+
+    from core import config_loader, llm_client
+    config_loader.reload_config()
+    llm_client.reload_client()
+
+    return {"message": f"routing profile '{name}' 已更新", "name": name, "profile": profile}
+
+
+# ---------------------------------------------------------------------------
+# /model-presets/presets/{name}/test — 连通性测试（Phase 4）
+# ---------------------------------------------------------------------------
+
+@router.post("/model-presets/presets/{name}/test", summary="连通性测试：发一条 1 token ping")
+async def test_preset_connectivity(name: str, auth=Depends(require_scopes("admin"))):
+    """用该 preset 实际发一条 max_tokens=1 的请求，返回延迟/错误，不写入任何缓存。"""
+    from core.model_registry import build_client_for_preset
+    import time as _time
+
+    try:
+        client = build_client_for_preset(name)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    t0 = _time.monotonic()
+    try:
+        resp = await client.client.chat.completions.create(
+            model=client.model,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=1,
+            timeout=15.0,
+        )
+        latency_ms = round((_time.monotonic() - t0) * 1000, 1)
+        reply_preview = ""
+        try:
+            reply_preview = (resp.choices[0].message.content or "")[:20]
+        except Exception:
+            pass
+        return {
+            "ok": True, "name": name, "model": client.model,
+            "latency_ms": latency_ms, "reply_preview": reply_preview,
+        }
+    except Exception as e:
+        latency_ms = round((_time.monotonic() - t0) * 1000, 1)
+        return {
+            "ok": False, "name": name, "model": client.model,
+            "latency_ms": latency_ms, "error": str(e)[:300],
+        }
+    finally:
+        try:
+            await client.client.close()
+        except Exception:
+            pass

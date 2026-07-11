@@ -195,5 +195,9 @@ preset 侧可选字段，供 `config.thinking.mode: auto` 判断该 preset 走 n
 |---|---|
 | `GET /model-presets` | 返回 presets（api_key 打码）、routing_profiles、active_routing |
 | `PUT /model-presets/active-routing` | 切换 active_routing 并热重载（仅 model_presets 模式） |
+| `PUT /model-presets/presets/{name}` | 新增或更新一个 preset（合并更新；新建须提供 provider_kind；仅 model_presets 模式） |
+| `DELETE /model-presets/presets/{name}` | 删除一个 preset；被任意 routing_profile 引用或是唯一剩余 preset 时 409 |
+| `PUT /model-presets/routing-profiles/{name}` | 新增或更新一个 routing profile 的 call_category → preset 映射（合并更新，值须是已存在的 preset） |
+| `POST /model-presets/presets/{name}/test` | 连通性测试：实际发一条 `max_tokens=1` 的请求，返回 `{ok, latency_ms, error?}`，不经缓存 |
 | `GET /llm-params` | 读取当前 chat preset 的生成参数 |
 | `PUT /llm-params` | 修改当前 chat preset 的生成参数并热重载（legacy 模式写回 llm: 块） |
