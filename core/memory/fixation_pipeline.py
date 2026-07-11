@@ -47,6 +47,8 @@ _STATE_DEFAULTS: dict = {
     "strength_accumulated": 0.0,
     "last_sweep_at": 0.0,
     "salvaged_dates": [],   # event_log_salvage 已处理的 YYYY-MM-DD 列表，滚动保留 60 个（Brief 46 §2）
+    "janitor_last_run_at": 0.0,   # memory_janitor 上次运行时间（Brief 49）
+    "janitor_merged_count": 0,    # memory_janitor 累计合并对数（Brief 49）
 }
 
 # ── episodic 淘汰归档（Brief 46 §1）── digest prompt 模板 ──────────────────────

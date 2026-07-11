@@ -61,6 +61,7 @@ _COOLDOWNS: dict[str, int] = {
     "hidden_state_decay":         12 * 3600,       # 用户隐性状态衰减：12小时
     "hidden_state_consolidate":   7 * 24 * 3600,   # 基线收敛：7天
     "event_log_salvage":         24 * 3600,        # event_log 过期前抢救持久事实：24小时
+    "memory_janitor":            24 * 3600,        # 闲时整合 pass：episodic 近似重复合并 + 向量库一致性核对：24小时
     "overflow":              3 * 3600,   # 理由累积溢出：3小时
     "presence_nag":          2 * 3600,   # 存在感弹窗：2小时最多一次
     "dream_exit":           60 * 60,     # 出梦主动开口：一梦一次，1小时冷却兜底
@@ -915,6 +916,7 @@ async def _loop():
                     _check_hidden_state_decay, _check_hidden_state_consolidate,
                 )
                 from core.scheduler.triggers.event_log_salvage import _check_event_log_salvage
+                from core.scheduler.triggers.memory_janitor import _check_memory_janitor
                 from core.scheduler.triggers.coplay_watch import _check_coplay_watch
 
                 oid = _owner_id()
@@ -935,7 +937,7 @@ async def _loop():
                     "activity_switch", "dlq_monitor", "log_maintenance",
                     "episodic_sweep", "garden_water", "garden_daily",
                     "hidden_state_decay", "hidden_state_consolidate",
-                    "event_log_salvage",
+                    "event_log_salvage", "memory_janitor",
                     "sensor_aware", "coplay_watch",
                 ]
                 _trigger_results = await asyncio.gather(
@@ -969,6 +971,7 @@ async def _loop():
                     _check_hidden_state_decay(),
                     _check_hidden_state_consolidate(),
                     _check_event_log_salvage(),
+                    _check_memory_janitor(),
                     _check_sensor_aware(),
                     _check_coplay_watch(),
                     return_exceptions=True,
