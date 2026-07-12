@@ -68,7 +68,8 @@ async def ingest_visual(
     if not get_config().get("visual_perception", {}).get("enabled", False):
         return {"accepted": True, "processing": False}
     now = time.monotonic()
-    if now - _last_accepted.get(source, 0) < VISUAL_SOURCE_COOLDOWN_SECONDS:
+    last_accepted = _last_accepted.get(source)
+    if last_accepted is not None and now - last_accepted < VISUAL_SOURCE_COOLDOWN_SECONDS:
         _append_trace(source=source, dropped="cooldown")
         return {"accepted": True, "processing": False}
     image_bytes = await image.read()

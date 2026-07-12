@@ -5,11 +5,11 @@ import time
 from datetime import datetime
 
 HELP_STALL_DAYS=7
+BASELINE_WEIGHT=0.1
 
 def select_interest(interests: list[dict], rng=random) -> dict | None:
     if not interests: return None
-    weights=[max(0.0,float(x.get("learning_progress",0))) for x in interests]
-    if not any(weights): return rng.choice(interests)
+    weights=[BASELINE_WEIGHT + max(0.0,float(x.get("learning_progress",0))) for x in interests]
     return rng.choices(interests,weights=weights,k=1)[0]
 
 def _cfg():

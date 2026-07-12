@@ -41,9 +41,10 @@ def apply_note(interest_id: str, note: str | None, *, source: str, replaces: int
     if not note: return False
     note=str(note).strip()[:MAX_NOTE_CHARS]
     entries=load(interest_id,char_id=char_id)
-    if any(_similar(note,e["text"]) for e in entries): return False
     new={"text":note,"ts":time.time(),"src":source,"hits":0}
-    if isinstance(replaces,int) and 1 <= replaces <= len(entries): entries[replaces-1]=new
+    replace_index=replaces-1 if isinstance(replaces,int) and 1 <= replaces <= len(entries) else None
+    if any(_similar(note,e["text"]) for index,e in enumerate(entries) if index != replace_index): return False
+    if replace_index is not None: entries[replace_index]=new
     elif len(entries)<MAX_NOTES: entries.append(new)
     else:
         idx=min(range(len(entries)),key=lambda i:(entries[i]["hits"],entries[i]["ts"])); entries[idx]=new

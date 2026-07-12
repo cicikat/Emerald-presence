@@ -225,7 +225,9 @@ async def run_owner_turn(
                 latest_speaker,
                 generate_reply,
                 deliver_reply,
-                previous_ai_content=transcript[-1].content,
+                previous_ai_content=(
+                    transcript[-1].content if transcript[-1].speaker_id != "owner" else None
+                ),
             )
             _append_arbiter_trace(
                 stage, transcript[:-1] if entry is not None else transcript, ranked,

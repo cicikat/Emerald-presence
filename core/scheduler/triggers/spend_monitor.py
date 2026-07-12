@@ -11,6 +11,21 @@ def _recently_notified(payee: str) -> bool:
     return any(r.get("payee") == payee and r.get("status") == "notified" and now - float(r.get("ts", 0)) < _COOLDOWN_SECONDS
                for r in spend_ledger.read_ledger())
 
+
+def _unconfirmed_notified_rows(payee: str) -> list[dict]:
+    """Return only notifications whose mandate has not already recovered."""
+    rows = spend_ledger.read_ledger()
+    confirmed_ids = {
+        row.get("mandate_id") for row in rows
+        if row.get("status") == "confirmed" and row.get("mandate_id")
+    }
+    return [
+        row for row in rows
+        if row.get("payee") == payee
+        and row.get("status") == "notified"
+        and row.get("mandate_id") not in confirmed_ids
+    ]
+
 async def _notify(uid: str, text: str) -> bool:
     from channels import registry
     channel = registry.get("mobile")
@@ -41,8 +56,8 @@ async def _check_spend_monitor() -> None:
         amount = float(provider.get("topup_amount", 0) or 0)
         if balance >= float(threshold):
             # A later healthy balance is the only v1 confirmation signal.
-            if any(r.get("payee") == name and r.get("status") == "notified" for r in spend_ledger.read_ledger()):
-                spend_ledger.append(action="api_topup", payee=name, amount=amount, status="confirmed", origin="scheduler", note="balance recovered")
+            for notified in _unconfirmed_notified_rows(name):
+                spend_ledger.append(action="api_topup", payee=name, amount=float(notified.get("amount", amount) or 0), status="confirmed", origin="scheduler", mandate_id=notified["mandate_id"], note="balance recovered")
             continue
         if _recently_notified(name): continue
         allowed, reason = spend_ledger.check_budget("api_topup", name, amount)

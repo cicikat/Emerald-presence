@@ -13,6 +13,12 @@ DOMAIN_WORDS = {
     "music": ("音乐", "歌", "琴", "旋律"),
     "drawing": ("画", "绘", "摄影", "视觉"),
 }
+DOMAIN_CANDIDATE_NAMES = {
+    "writing": "写点东西",
+    "music": "玩玩音乐",
+    "drawing": "学着画画",
+    "other": "试试新爱好",
+}
 TRAIT_DOMAIN_MAP = {"creativity": "writing", "aesthetic": "drawing", "patience": "music", "curiosity": "other"}
 
 
@@ -32,8 +38,10 @@ def collect_candidates(uid: str, char_id: str) -> list[dict]:
     try:
         from core.memory.event_log import get_recent_days
         text = get_recent_days(uid, days=30, char_id=char_id)
-        counts = Counter(w for words in DOMAIN_WORDS.values() for w in words if w in text)
-        for word, _ in counts.most_common(5): candidates.append({"name": word, "domain": _domain(word), "origin": "topic_stats"})
+        counts = Counter({domain: sum(text.count(word) for word in words) for domain, words in DOMAIN_WORDS.items()})
+        for domain, count in counts.most_common(2):
+            if count:
+                candidates.append({"name": DOMAIN_CANDIDATE_NAMES[domain], "domain": domain, "origin": "topic_stats"})
     except Exception: pass
     try:
         from core.memory.user_profile import load

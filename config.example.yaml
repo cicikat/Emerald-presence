@@ -266,8 +266,8 @@ visual_perception:
 # Brief 57: notification-only API credit monitoring. No automatic payment exists.
 spend:
   enabled: false
-  daily_cap: 0
-  monthly_cap: 0
+  daily_cap: 0             # 0 = 全禁（fail-closed），不是无限额
+  monthly_cap: 0           # 0 = 全禁（fail-closed），不是无限额
   payee_whitelist: []
   balance_providers: []
 
@@ -280,7 +280,7 @@ practice:
 
 # Media MCP servers listed here gain level-based exposure. Unlisted servers
 # remain ordinary organ-like tools and preserve their current behavior.
-mcp_proficiency: {}
+mcp_proficiency: {}        # tiers 每档须列全量工具；高档不自动继承低档工具
 
 action_trace:
   enabled: true              # 关闭后不记录、不注入，零行为变化（回滚开关）

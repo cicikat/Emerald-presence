@@ -112,7 +112,7 @@ async def run_session(payload: dict) -> dict | None:
     if previous_scores and float(review["score"])>previous_scores[-1] and injected_notes: notes.increment_hits(interest_id,char_id=char_id)
     try:
         from core.memory import action_trace
-        action_trace.record(uid,char_id,tool="practice",origin="assistant_loop",status="ok",result_digest=f"练了{interest['name']}，{str(review['one_improvement'])[:40]}",echo_event_log=False)
+        action_trace.record(uid,char_id,tool="practice",origin="assistant_loop",status="ok",result_digest=f"练了{interest['name']}，{str(review['one_improvement'])[:40]}",echo_event_log=True)
     except Exception: pass
     if updated and int(updated["level"]) < MAX_LEVEL and len(updated["recent_scores"]) >= 5 and sum(updated["recent_scores"][-5:])/5 >= LEVEL_THRESHOLDS[int(updated["level"])]:
         upgraded,old=await interest_state.set_level(interest_id,int(updated["level"])+1,char_id=char_id,uid=uid)
@@ -130,7 +130,7 @@ async def _record_unlock(uid: str,char_id: str,interest: dict,old_level: int) ->
         from core.memory import action_trace,provenance_log
         for entry in unlocked:
             note=entry.get("unlock_note") or "一项新的方法"
-            action_trace.record(uid,char_id,tool="growth_unlock",origin="assistant_loop",status="ok",result_digest=f"琢磨明白了{note}")
+            action_trace.record(uid,char_id,tool="growth_unlock",origin="assistant_loop",status="ok",result_digest=f"琢磨明白了{note}",echo_event_log=True)
             provenance_log.append(uid,char_id,artifact="mcp_proficiency",field=entry["tool"],after_gist=str(note),trigger_signal="tier_unlocked",origin={"source":"practice"})
     except Exception: logger.debug("[practice] unlock trace failed",exc_info=True)
 
