@@ -58,6 +58,11 @@
 - 现实层 `6g_dream_impression`：显式 XML 标签框定"以下是叶瑄做过的梦，不是现实发生的事"，叶瑄可像记得一个梦一样自然提起但绝不当作真实经历复述
 - **D2 新隔离墙（固化端）**：`pipeline.post_process` 检测到当前有活跃 impression 时，在 `summarize_to_midterm` 入队 payload 中加 `dream_echo=True`；`handler_summarize_to_midterm` 收到此标记直接跳过，阻止该轮的梦境剧情通过 mid_term → episodic → identity 链路固化为现实事实
 
+**梦境明信片（archive 出站复盘，非第四层回流）**
+- 合格 sandbox 梦（至少五个 assistant 轮、非 hard_exit、每个 dream_id 至多一次）会在 summary 后冻结成一封信；模板随机，投递日随机延迟 1–356 天。
+- 明信片只读 dream summary/archive，并只写 `postcards/schedule.json` 与 SMTP；它是 archive 的第一个合法程序化读者，方向为梦 → 用户眼睛。
+- 它绝不写 memory / mood / hidden_state / impression，绝不进入任何 prompt loader；世界专有词可留在用户面对的信内。
+
 **世界包（v1）**
 - 六世界包 `characters/dream_worlds/{reality_derived,abo,vampire,cat,flower_bud,custom}/`，各含 `ruleset.md` / `mes_example.md` / `vocab.json` / `lorebook.yaml`(骨架)
 - `world_loader`：`load_world()` / `strip_vocab()` / `match_dream_lore()` 纯函数
@@ -218,6 +223,8 @@
 | `DM_mirror` | Mirror 梦境倾向材料（仅 mirror 模式；粗粒度桶标签 + 轻量 symbolic_hints；只读，不诊断，不暴露数值） | dream_mode=mirror |
 | `D9_dream_history` | 梦内滚动短上下文（不过现实 sanitizer） | — |
 | `D10_user_message` | 她当前梦内输入 | — |
+
+梦境运行目录另含 `postcards/schedule.json`（冻结信文、投递日、发送重试状态）；该目录不是任何对话或记忆 loader 的输入。
 
 > 与现实栈**相反**之处：D8 要求输出动作/环境（现实禁止），D9 绝不过反话剧化清洗（现实必过），全程无 retrieve / mood_state / author_note_extra。这些反转就是"必须独立 pipeline"的根据。
 

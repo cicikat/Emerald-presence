@@ -581,6 +581,11 @@ async def _generate_summary_bg(
             await distill_impression(uid, dream_id, exit_type, char_id=char_id)
         except Exception as e:
             logger.warning(f"[dream_pipeline] distill_impression failed uid={uid}: {e}")
+        try:
+            from core.dream.postcard import generate_postcard
+            await generate_postcard(uid, dream_id, exit_type, char_id=char_id)
+        except Exception as e:
+            logger.warning(f"[dream_pipeline] postcard generation failed uid={uid}: {e}")
     else:
         logger.info(
             "[dream_pipeline] %s mode — distill_impression skipped uid=%s dream_id=%s",

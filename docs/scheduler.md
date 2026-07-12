@@ -949,3 +949,7 @@ curl -H "Authorization: Bearer <token>" \
    触发器用 `"none"`；有具体锚点（话题 key、被选中记忆原文）的用 `"anchored"`；
    不确定就先留默认 `"seed"`，但目标是不再新增用 `"seed"` 的触发器
 8. 补 proposer / live / blocked 单测，并更新此文档列表
+
+### dream_postcards
+
+`dream_postcards` proposer 每日扫描梦境 archive 出站明信片的 schedule；到期未发送的条目复用 Gmail 链路投递。SMTP 失败只递增 attempts 并保留 last_error，后续 tick 持续重试，成功后才标记 sent。
