@@ -42,7 +42,7 @@ from admin.routers import (
     hidden_state_debug, hardware, observe,
     group, relationship_facts,
     transcribe, provenance,
-    auth_tokens, coplay,
+    auth_tokens, coplay, perception, spend,
 )
 
 app.include_router(users.router,          prefix="/users",     tags=["用户"])
@@ -84,6 +84,8 @@ app.include_router(transcribe.router,          prefix="", tags=["语音转写"])
 app.include_router(provenance.router,          prefix="", tags=["观测"])
 app.include_router(auth_tokens.router,         prefix="", tags=["鉴权"])
 app.include_router(coplay.router,              prefix="", tags=["陪玩"])
+app.include_router(perception.router,           prefix="", tags=["视觉感知"])
+app.include_router(spend.router,                prefix="", tags=["支出台账"])
 
 # ── 桌宠端 WebSocket 端点 ─────────────────────────────────────────────────────
 from fastapi import WebSocket as _WebSocket

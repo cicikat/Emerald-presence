@@ -255,6 +255,22 @@ screen_peek:
   enabled: false           # 默认关；在设置页打开后他可自主查看屏幕内容
   cooldown_minutes: 30     # 同一文件/窗口最短间隔分钟数（范围 5–240）
 
+# Brief 56: local VLM shadow observation. Disabled by default; images never persist.
+visual_perception:
+  enabled: false
+  base_url: ""
+  model: ""
+  api_key: ""
+  timeout_s: 20
+
+# Brief 57: notification-only API credit monitoring. No automatic payment exists.
+spend:
+  enabled: false
+  daily_cap: 0
+  monthly_cap: 0
+  payee_whitelist: []
+  balance_providers: []
+
 action_trace:
   enabled: true              # 关闭后不记录、不注入，零行为变化（回滚开关）
   inject_max_items: 5        # 层 10.5 最多注入几条痕迹

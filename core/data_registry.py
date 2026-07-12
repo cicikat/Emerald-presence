@@ -40,6 +40,8 @@ REGISTRY: dict[str, PathMeta] = {
     "mobile_queue_seq":       PathMeta("runtime",   "shared",          "global",        "ignore"),
     "agent_actions":          PathMeta("runtime",   "shared",          "global",        "ignore"),
     "pending_perception_dir": PathMeta("runtime",   "shared",          "global",        "ignore"),
+    "visual_trace_log":      PathMeta("runtime",   "shared",          "global",        "ignore"),
+    "spend_ledger":          PathMeta("runtime",   "shared",          "global",        "ignore"),
     "activity_snapshot":      PathMeta("runtime",   "character_inner", "per_char",      "ignore"),
     "dreams_tmp_dir":         PathMeta("runtime",   "dream",           "per_char_user", "ignore"),
     "scheduler_cooldowns":    PathMeta("canonical", "shared",          "global",        "ignore"),

@@ -191,6 +191,14 @@ class DataPaths:
         p.mkdir(parents=True, exist_ok=True)
         return p
 
+    def visual_trace_log(self) -> Path:
+        """Brief 56 shadow-only VLM observation trace (never stores images)."""
+        return self._p("runtime", "perception", "visual_trace.jsonl")
+
+    def spend_ledger(self) -> Path:
+        """Brief 57 append-only spending mandate ledger."""
+        return self._p("runtime", "spend", "ledger.jsonl")
+
     def activity_snapshot(self, *, char_id: str) -> Path:
         return self._p("runtime", "characters", char_id, "inner", "activity_snapshot.json")
 

@@ -28,6 +28,7 @@ core/scheduler/triggers/         ← 各触发器独立文件
     hidden_state_decay.py        用户隐性状态衰减（12h）+ 基线收敛（7d），不发言
     event_log_salvage.py         event_log 归档前抢救持久事实（24h，每次上限3文件），不发言
     memory_janitor.py            闲时整合 pass：episodic 近似重复合并 + 向量库一致性核对（24h，深夜时段），不发言
+    spend_monitor.py             API 余额每日检测；仅生成充值提醒和台账，绝不自动付款
     watch.py                     Apple Watch 心率 / 睡眠事件
     reminders.py                 到点备忘录 proposer
     sensor_aware.py              sensor 实时状态 → 主动开口（默认关闭）

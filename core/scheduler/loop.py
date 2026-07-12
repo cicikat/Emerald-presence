@@ -62,6 +62,7 @@ _COOLDOWNS: dict[str, int] = {
     "hidden_state_consolidate":   7 * 24 * 3600,   # 基线收敛：7天
     "event_log_salvage":         24 * 3600,        # event_log 过期前抢救持久事实：24小时
     "memory_janitor":            24 * 3600,        # 闲时整合 pass：episodic 近似重复合并 + 向量库一致性核对：24小时
+    "spend_monitor":             24 * 3600,
     "overflow":              3 * 3600,   # 理由累积溢出：3小时
     "presence_nag":          2 * 3600,   # 存在感弹窗：2小时最多一次
     "dream_exit":           60 * 60,     # 出梦主动开口：一梦一次，1小时冷却兜底
@@ -680,6 +681,11 @@ async def _check_log_maintenance():
                 log_error(f"scheduler.log_maintenance.observations[{_obs_path}]", _e)
     except Exception as e:
         log_error("scheduler.log_maintenance.observations", e)
+    try:
+        from admin.routers.perception import cleanup_visual_trace
+        cleanup_visual_trace()
+    except Exception as e:
+        log_error("scheduler.log_maintenance.visual_trace", e)
     _mark("log_maintenance")  # 无论各步是否失败，都标记以免 24h 内重复触发
 
 
@@ -918,6 +924,7 @@ async def _loop():
                 from core.scheduler.triggers.event_log_salvage import _check_event_log_salvage
                 from core.scheduler.triggers.memory_janitor import _check_memory_janitor
                 from core.scheduler.triggers.coplay_watch import _check_coplay_watch
+                from core.scheduler.triggers.spend_monitor import _check_spend_monitor
 
                 oid = _owner_id()
                 if oid:
@@ -939,6 +946,7 @@ async def _loop():
                     "hidden_state_decay", "hidden_state_consolidate",
                     "event_log_salvage", "memory_janitor",
                     "sensor_aware", "coplay_watch",
+                    "spend_monitor",
                 ]
                 _trigger_results = await asyncio.gather(
                     _check_morning(),
@@ -974,6 +982,7 @@ async def _loop():
                     _check_memory_janitor(),
                     _check_sensor_aware(),
                     _check_coplay_watch(),
+                    _check_spend_monitor(),
                     return_exceptions=True,
                 )
                 for _tname, _tres in zip(_trigger_names, _trigger_results):

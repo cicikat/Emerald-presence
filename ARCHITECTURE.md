@@ -213,6 +213,8 @@ data/
 │   └── state/{uid}/dream_state.json  per-uid Dream Session 状态
 ├── group_context/{gid}.json      群聊最近动态（prompt 层 4 注入）
 ├── pending_perception/           桌面动作失败感知（时间戳命名，两阶段提交）
+├── runtime/perception/visual_trace.jsonl  本地 VLM shadow 观察（30 天；不含原图，不入记忆/prompt）
+├── runtime/spend/ledger.jsonl  花钱动作台账（只提议/提醒；v1 不自动扣款）
 ├── inbox/                        三端统一的文件落盘目录（QQ/客户端/手机/HTTP 上传都进这里）
 ├── image_cache/                  图片 sha256 索引（描述文本 + 元数据）
 ├── agent_actions.json            桌面动作队列（桌宠端轮询）
