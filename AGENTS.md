@@ -139,10 +139,11 @@ python run_test.py
 4. **tag 规则改动后，用 `python tests/run_eval.py` 验证层激活情况。**
 5. **改 assistant 消息写入或截断逻辑前，必须先看 `_sanitize_assistant_message`，避免绕过脱敏。**
 6. **新增记忆写入点（identity / episodic / mid_term / trait / author_note）时，必须同步调用 `provenance_log.append()`（fail-open），否则改动无法追溯。详见 `docs/memory.md` §改动溯源。**
-7. WebSocket 客户端必须绕过系统代理。`websocket-client` 库会自动读取
+7. **新增落盘状态、trace 或台账时，必须同单提供只读观测端点；scope 按数据敏感度选取。没有观测端点的落盘物不可验收。**
+8. WebSocket 客户端必须绕过系统代理。`websocket-client` 库会自动读取
    `HTTP_PROXY` / `HTTPS_PROXY` 环境变量，必须在 `run_forever` 调用前
    临时清除（连接结束后恢复）。`http_proxy_host=""` 这种参数不顶用。
-8. **新代码禁止字面角色名/用户名。** 进入 LLM prompt 或展示给用户的文本用
+9. **新代码禁止字面角色名/用户名。** 进入 LLM prompt 或展示给用户的文本用
    `char_name`（现实侧 `core.character_name_provider.get_char_name()` /
    梦境侧 `character.name`）与 `user_name`
    （`core.config_loader.get_user_display_name()`）插值，不写死"叶瑄"/"风谕"这类
@@ -150,7 +151,7 @@ python run_test.py
    （`from core.data_paths import DEFAULT_CHAR_ID`），不写死 `"yexuan"`。
    守门测试：`tests/test_no_hardcoded_character.py`（字面角色名/用户名 + 协议兼容
    字段白名单）、`tests/test_r3_scope_lint.py`（`char_id="yexuan"` 默认参数）。
-9. **任何要 await 进 send/关键路径的调用，先问它是不是 LLM/网络往返。** 是的话必须
+10. **任何要 await 进 send/关键路径的调用，先问它是不是 LLM/网络往返。** 是的话必须
    挪到 send 之后异步执行（Brief 37 的教训：`detect_emotion` 曾经堵在
    `post_process` 里，每条消息多付一次 LLM 往返延迟）。`core/pipeline.py` 的
    `post_process_critical`（send 前，只做毫秒级本地落盘）/ `post_process_slow`
@@ -166,6 +167,8 @@ python run_test.py
 ---
 
 ## 工作惯例
+
+**每张施工工单在相关测试通过、差异检查完成后，必须立即提交一次独立 Git commit，再开始下一张工单。**
 
 **每积累若干个功能 brief，安排一个删除 brief。** 只加法、不做减法会让测试从安全网
 变成防腐层——迁移化石从不拆、legacy 分支越叠越厚。删除 brief 中，测试随功能一起

@@ -191,6 +191,23 @@ async def get_group(group_id: str, _auth=Depends(require_scopes("chat"))):
     }
 
 
+@router.get("/{group_id}/relations", summary="读取群聊角色双向印象")
+async def get_group_relations(group_id: str, _auth=Depends(require_scopes("state.read"))):
+    """Brief 64 read surface. Brief 55 data is optional, so an absent file is empty."""
+    _require_stage(group_id)
+    path = get_paths().stage_char_relations(group_id=group_id)
+    if not path.exists():
+        return {"group_id": group_id, "relations": [], "count": 0}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"group_id": group_id, "relations": [], "count": 0}
+    relations = data.get("relations", data) if isinstance(data, dict) else data
+    if not isinstance(relations, (list, dict)):
+        relations = []
+    return {"group_id": group_id, "relations": relations, "count": len(relations)}
+
+
 # ── send ─────────────────────────────────────────────────────────────────────
 
 @router.post("/{group_id}/send", summary="触发 arbiter 一轮（异步）")

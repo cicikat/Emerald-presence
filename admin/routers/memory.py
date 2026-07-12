@@ -44,6 +44,25 @@ def _resolve_char_id(char_id: str | None) -> str:
     return char_id
 
 
+@router.get("/digest/{user_id}", summary="读取淘汰情景记忆的时期摘要")
+async def get_memory_digest(
+    user_id: str,
+    char_id: str | None = None,
+    auth=Depends(require_scopes("memory.read")),
+):
+    from core.memory.path_resolver import resolve_path
+    from core.memory.scope import MemoryScope
+    resolved = _resolve_char_id(char_id)
+    path = resolve_path(MemoryScope.reality_scope(user_id, resolved), "memory_digest")
+    if not path.exists():
+        return {"user_id": user_id, "char_id": resolved, "content": ""}
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        content = ""
+    return {"user_id": user_id, "char_id": resolved, "content": content}
+
+
 # ── 短期记忆 ──────────────────────────────────────────────────────────────────
 
 @router.get("/{user_id}/short-term", summary="获取短期记忆")

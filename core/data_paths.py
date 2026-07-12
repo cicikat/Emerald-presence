@@ -199,6 +199,10 @@ class DataPaths:
         """Brief 57 append-only spending mandate ledger."""
         return self._p("runtime", "spend", "ledger.jsonl")
 
+    def spend_mandates(self) -> Path:
+        """Brief 63 purchase-intent journal; it is absent until that feature is enabled."""
+        return self._p("runtime", "spend", "mandates.jsonl")
+
     def interest_state(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
         return self._p("runtime", "characters", char_id, "inner", "interest_state.json")
 
@@ -551,6 +555,17 @@ class DataPaths:
     def stage_arbiter_trace(self, *, group_id: str) -> Path:
         """Append-only Stage arbiter decision trace for one group."""
         return self.stage_group_dir(group_id=group_id) / "arbiter_trace.jsonl"
+
+    def char_relation(self, *, char_a: str, char_b: str) -> Path:
+        """Global bilateral Stage relation, keyed by the canonical character pair."""
+        first, second = sorted((safe_user_id(char_a), safe_user_id(char_b)))
+        if first == second:
+            raise ValueError("character relation requires two distinct characters")
+        return self._p("runtime", "relations", f"{first}__{second}.json")
+
+    def stage_char_relations(self, *, group_id: str) -> Path:
+        """Brief 55 bilateral character impressions for one Stage group."""
+        return self.stage_group_dir(group_id=group_id) / "char_relations.json"
 
     # ── Activity: reading ─────────────────────────────────────────────────────
     def reading_char_root(self, *, char_id: str) -> Path:

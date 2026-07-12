@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
 from admin.auth import require_scopes
 from core.safe_write import safe_append_jsonl
@@ -75,3 +75,38 @@ async def ingest_visual(
     _last_accepted[source] = now
     asyncio.create_task(process_visual_image(image_bytes, source))
     return {"accepted": True, "processing": True}
+
+
+@router.get("/perception/visual-trace", summary="读取视觉 shadow trace")
+async def get_visual_trace(
+    date: str = "",
+    limit: int = Query(100, ge=1, le=500),
+    before: float | None = None,
+    _auth=Depends(require_scopes("state.read")),
+):
+    """Diagnostic-only view; missing trace files are a normal empty result."""
+    import datetime as _dt
+    import json
+    if date:
+        try:
+            _dt.date.fromisoformat(date)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="date 须为 YYYY-MM-DD") from exc
+    path = get_paths().visual_trace_log()
+    if not path.exists():
+        return {"date": date or None, "entries": [], "count": 0}
+    entries: list[dict] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict) or not isinstance(row.get("ts"), (int, float)):
+            continue
+        if date and _dt.datetime.fromtimestamp(row["ts"]).date().isoformat() != date:
+            continue
+        if before is not None and row["ts"] >= before:
+            continue
+        entries.append(row)
+    entries = entries[-limit:]
+    return {"date": date or None, "entries": entries, "count": len(entries)}
