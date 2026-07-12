@@ -4,6 +4,13 @@
 
 ## 工具触发路径
 
+### 媒介 MCP 熟练度门控（Brief 61）
+
+`mcp_proficiency` 按 MCP server 配置成长域与等级 tiers。连接层仍注册全量工具；
+tool-loop schema 暴露层根据角色级 `interest_state` 的同域最高 level 过滤，`execute()`
+再做一次防御性校验。未列入配置的 server 以及 tiers 从未列出的工具视为器官类，行为不变。
+未解锁调用只返回中性失败文本，不记录动作痕迹，也不暴露等级或配置细节。
+
 当前真正接入主流程的触发路径有两类：
 
 ```

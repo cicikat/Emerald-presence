@@ -942,7 +942,7 @@ def _is_tool_enabled(tool_name: str) -> bool:
     return cfg.get(group, {}).get("enabled", True)
 
 
-def get_tools_schema(categories: list[str] | None = None) -> list[dict]:
+def get_tools_schema(categories: list[str] | None = None, *, char_id: str | None = None) -> list[dict]:
     """返回已启用工具的 OpenAI function_calling 格式 schema。
     categories: 若提供，仅返回该分类内的工具；None 返回全部。
     """
@@ -961,6 +961,9 @@ def get_tools_schema(categories: list[str] | None = None) -> list[dict]:
                 "parameters": info["parameters"],
             },
         })
+    if char_id is not None:
+        from core.growth.mcp_proficiency import filter_schemas
+        schemas = filter_schemas(schemas, char_id=char_id)
     return schemas
 
 
@@ -1088,6 +1091,14 @@ async def execute(
         _fail = get_tool_fail_response()
         _trace("failed", _fail)
         return _fail, None
+
+    # Brief 61 defensive gate. A blocked hallucinated MCP call is not an action,
+    # so it deliberately leaves no action_trace record and reveals no level data.
+    if tool_name.startswith("mcp__"):
+        from core.growth.mcp_proficiency import NEUTRAL_REFUSAL, is_tool_allowed
+        if not is_tool_allowed(tool_name, char_id=char_id):
+            logger.warning("[tool_dispatcher] MCP proficiency gate denied tool=%s char_id=%s", tool_name, char_id)
+            return NEUTRAL_REFUSAL, None
 
     gate_msg = _mode_gate(tool_name)
     if gate_msg is not None:

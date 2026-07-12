@@ -144,6 +144,7 @@ def record(
     status: str,
     args_digest: str = "",
     result_digest: str = "",
+    echo_event_log: bool = True,
 ) -> None:
     """落一条痕迹，环形上限 30 条。fail-open：异常只 log，不抛出。"""
     if not _enabled():
@@ -166,7 +167,7 @@ def record(
         logger.warning("[action_trace] record failed: %s", e)
         return
 
-    if status == "ok":
+    if status == "ok" and echo_event_log:
         _maybe_echo_to_event_log(uid, char_id, tool, result_digest)
 
 

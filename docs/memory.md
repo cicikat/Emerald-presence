@@ -1372,3 +1372,13 @@ DELETE /memory/{uid}/event-log/{YYYY-MM-DD}
 
 新增记忆写入点时，**必须同步调用 `provenance_log.append()`**（fail-open，wrap in try/except）。否则改动无法追溯。
 
+---
+
+## 角色成长状态（Brief 58-60）
+
+- 兴趣唯一真值：`data/runtime/characters/{char_id}/inner/interest_state.json`，角色级、不分 uid。
+- 练习作品：`data/runtime/characters/{char_id}/works/{interest_id}/`，正文与盲评永不进入对话记忆链。
+- 技巧笔记：`data/runtime/characters/{char_id}/notes/{interest_id}.md`，只注入后台练习 prompt，不注入对话 prompt。
+- 唯一回流面是 `action_trace` 的一行“练习发生过”事实；兴趣新增、状态迁移、升级、笔记学习和 MCP 解锁均写 provenance。
+- `practice.enabled: false` 是 58-61 共用的默认关闭总闸。
+

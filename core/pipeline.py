@@ -807,8 +807,11 @@ class Pipeline:
         categories = char_categories if char_categories is not None else cfg.get("categories", ["info", "desktop", "memory"])
         exclude_tools = set(cfg.get("exclude_tools", []))
 
+        # Keep the registry helper's long-standing call shape for test/plugin
+        # compatibility; proficiency is an exposure-layer filter applied here.
+        from core.growth.mcp_proficiency import filter_schemas as _filter_growth_tools
         tools = [
-            t for t in get_tools_schema(categories=categories)
+            t for t in _filter_growth_tools(get_tools_schema(categories=categories), char_id=char_id)
             if (t.get("function") or t).get("name") not in exclude_tools
         ]
 
@@ -1631,3 +1634,5 @@ def register_slow_handlers() -> None:
     slow_queue.register_handler("trait_tracker_update",    _handler_trait_tracker_update)
     from core.post_process.toy_autogrow import handler_toy_autogrow
     slow_queue.register_handler("toy_autogrow",            handler_toy_autogrow)
+    from core.growth.practice_session import handler_practice_session
+    slow_queue.register_handler("practice_session",        handler_practice_session)

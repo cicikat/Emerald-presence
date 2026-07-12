@@ -123,6 +123,8 @@ async def _connect_server(name: str, server_cfg: dict) -> None:
             "dangerous": False,
             "category": "mcp",
             "parameters": tool.inputSchema or {"type": "object", "properties": {}},
+            "mcp_server": name,
+            "mcp_tool": tool.name,
         }
         handle.tool_names.append(reg_name)
 

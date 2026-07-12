@@ -199,6 +199,17 @@ class DataPaths:
         """Brief 57 append-only spending mandate ledger."""
         return self._p("runtime", "spend", "ledger.jsonl")
 
+    def interest_state(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
+        return self._p("runtime", "characters", char_id, "inner", "interest_state.json")
+
+    def growth_works_dir(self, interest_id: str, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
+        safe_interest_id = safe_user_id(interest_id)
+        return self._p("runtime", "characters", char_id, "works", safe_interest_id)
+
+    def growth_note(self, interest_id: str, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
+        safe_interest_id = safe_user_id(interest_id)
+        return self._p("runtime", "characters", char_id, "notes", f"{safe_interest_id}.md")
+
     def activity_snapshot(self, *, char_id: str) -> Path:
         return self._p("runtime", "characters", char_id, "inner", "activity_snapshot.json")
 

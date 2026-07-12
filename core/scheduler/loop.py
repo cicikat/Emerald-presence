@@ -63,6 +63,8 @@ _COOLDOWNS: dict[str, int] = {
     "event_log_salvage":         24 * 3600,        # event_log 过期前抢救持久事实：24小时
     "memory_janitor":            24 * 3600,        # 闲时整合 pass：episodic 近似重复合并 + 向量库一致性核对：24小时
     "spend_monitor":             24 * 3600,
+    "interest_seed":             7 * 24 * 3600,
+    "practice":                  20 * 3600,
     "overflow":              3 * 3600,   # 理由累积溢出：3小时
     "presence_nag":          2 * 3600,   # 存在感弹窗：2小时最多一次
     "dream_exit":           60 * 60,     # 出梦主动开口：一梦一次，1小时冷却兜底
@@ -925,6 +927,8 @@ async def _loop():
                 from core.scheduler.triggers.memory_janitor import _check_memory_janitor
                 from core.scheduler.triggers.coplay_watch import _check_coplay_watch
                 from core.scheduler.triggers.spend_monitor import _check_spend_monitor
+                from core.scheduler.triggers.interest_seed import _check_interest_seed
+                from core.scheduler.triggers.practice import _check_practice
 
                 oid = _owner_id()
                 if oid:
@@ -947,6 +951,7 @@ async def _loop():
                     "event_log_salvage", "memory_janitor",
                     "sensor_aware", "coplay_watch",
                     "spend_monitor",
+                    "interest_seed", "practice",
                 ]
                 _trigger_results = await asyncio.gather(
                     _check_morning(),
@@ -983,6 +988,8 @@ async def _loop():
                     _check_sensor_aware(),
                     _check_coplay_watch(),
                     _check_spend_monitor(),
+                    _check_interest_seed(),
+                    _check_practice(),
                     return_exceptions=True,
                 )
                 for _tname, _tres in zip(_trigger_names, _trigger_results):
