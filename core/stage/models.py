@@ -24,6 +24,7 @@ class StageSettings:
     respond_threshold: float = 0.5
     spontaneous_threshold: float = 0.7
     addressed_exclusive: bool = False
+    allow_silent_rounds: bool = True
     transcript_limit: int = 200
     group_memory_strength: float = 0.7
     debug_token_log: bool = True
@@ -56,6 +57,7 @@ class StageSettings:
             "respond_threshold": self.respond_threshold,
             "spontaneous_threshold": self.spontaneous_threshold,
             "addressed_exclusive": self.addressed_exclusive,
+            "allow_silent_rounds": self.allow_silent_rounds,
             "transcript_limit": self.transcript_limit,
             "memory_strength": {"group": self.group_memory_strength},
             "debug_token_log": self.debug_token_log,
@@ -73,6 +75,7 @@ class StageSettings:
             respond_threshold=float(raw.get("respond_threshold", 0.5)),
             spontaneous_threshold=float(raw.get("spontaneous_threshold", 0.7)),
             addressed_exclusive=bool(raw.get("addressed_exclusive", False)),
+            allow_silent_rounds=bool(raw.get("allow_silent_rounds", True)),
             transcript_limit=int(raw.get("transcript_limit", 200)),
             group_memory_strength=float((raw.get("memory_strength") or {}).get("group", 0.7)),
             debug_token_log=bool(raw.get("debug_token_log", True)),

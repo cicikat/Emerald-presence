@@ -24,7 +24,20 @@ class StageCharacterView:
         if character.world_book:
             lore.load_entries(character.world_book)
         self.char_id = char_id
+        self._character = character
+        self._lore = lore
         self.pipeline = Pipeline(character, lore, active_character_id=char_id)
+
+    def topic_keywords(self, _owner_uid: str) -> tuple[str, ...]:
+        """Bounded, cached topic hints from already-loaded character/lore assets."""
+        from core.text_match import ngram_tokens
+        words: list[str] = []
+        for entry in self._character.world_book:
+            words.extend(str(word) for word in (entry.get("keywords") or entry.get("keyword") or []) if str(word).strip())
+        for entry in self._lore.entries:
+            words.extend(str(word) for word in entry.get("keywords", []) if str(word).strip())
+        words.extend(sorted(ngram_tokens(self._character.description + self._character.personality, lengths=(2, 3))))
+        return tuple(dict.fromkeys(word.strip() for word in words if word.strip()))[:30]
 
     async def generate(
         self,

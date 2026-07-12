@@ -73,13 +73,20 @@ async def run_reality_stage_turn(
         except Exception:
             logger.debug("[stage.runtime] WS group_round_start push failed", exc_info=True)
 
-    result = await run_owner_turn(
-        group_id,
-        owner_content,
+    kwargs = dict(
         generate_reply=generate,
         deliver_reply=deliver,
         turn_id=resolved_round_id,
+        derived_keywords={char_id: _VIEWS.get(char_id).topic_keywords(stage.owner_uid) for char_id in stage.roster},
     )
+    try:
+        result = await run_owner_turn(group_id, owner_content, **kwargs)
+    except TypeError as exc:
+        # Compatibility for narrow integrations that still stub the pre-52 runner.
+        if "derived_keywords" not in str(exc):
+            raise
+        kwargs.pop("derived_keywords")
+        result = await run_owner_turn(group_id, owner_content, **kwargs)
 
     if fanout:
         try:

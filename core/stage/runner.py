@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 _ARBITER_TRACE_MAX_BYTES = 5 * 1024 * 1024
 _ARBITER_TRACE_KEEP_N = 3
 ECHO_SIM_THRESHOLD = 0.55
+SILENCE_THRESHOLD = 0.35
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,13 @@ class StageTurnResult:
 
 async def _resolve(value):
     return await value if inspect.isawaitable(value) else value
+
+
+def _rank_candidates(stage: Stage, transcript: list[TranscriptEntry], candidates, derived_keywords):
+    """Keep the base runner compatible with lightweight test/integration scorers."""
+    if derived_keywords is None:
+        return score_candidates(stage, transcript, candidates=candidates)
+    return score_candidates(stage, transcript, candidates=candidates, derived_keywords=derived_keywords)
 
 
 def _append_arbiter_trace(
@@ -121,6 +129,7 @@ async def run_owner_turn(
     generate_reply: GenerateReply,
     deliver_reply: DeliverReply | None = None,
     turn_id: str | None = None,
+    derived_keywords: dict[str, tuple[str, ...]] | None = None,
 ) -> StageTurnResult:
     """Run Phase A + Phase B under one owner conversation lock."""
     stage = load_stage(group_id)
@@ -151,9 +160,20 @@ async def run_owner_turn(
         responded = 0
         max_responders = min(stage.settings.max_responders, len(stage.roster))
         min_responders = min(stage.settings.min_responders, max_responders)
+        initial_ranked = _rank_candidates(stage, transcript, list(stage.roster), derived_keywords)
+        from core.recall_gate import is_low_information
+        from core.stage.arbiter import addressed_kind
+        has_vocative = any(addressed_kind(stage, char_id, owner_content) == "vocative" for char_id in stage.roster)
+        may_be_silent = (
+            not has_vocative and initial_ranked and initial_ranked[0].total < SILENCE_THRESHOLD
+            and (is_low_information(owner_content) or stage.settings.allow_silent_rounds)
+        )
+        if may_be_silent:
+            _append_arbiter_trace(stage, transcript, initial_ranked, turn_id=resolved_turn_id, phase="A", selected=[], chain_depth=0, extra={"silent_round": True})
+            return StageTurnResult(stage.group_id, resolved_turn_id, (), 0)
         while responded < max_responders:
             candidates = [char_id for char_id in stage.roster if char_id not in attempted]
-            ranked = score_candidates(stage, transcript, candidates=candidates)
+            ranked = _rank_candidates(stage, transcript, candidates, derived_keywords)
             if not ranked:
                 break
             pick = ranked[0]
@@ -187,7 +207,7 @@ async def run_owner_turn(
         while ai_chain_depth < stage.settings.max_ai_chain_depth and transcript:
             latest_speaker = transcript[-1].speaker_id
             candidates = [char_id for char_id in stage.roster if char_id != latest_speaker]
-            ranked = score_candidates(stage, transcript, candidates=candidates)
+            ranked = _rank_candidates(stage, transcript, candidates, derived_keywords)
             # AI chain uses a looser threshold so peer_reply bonus can clear the bar.
             if not ranked or ranked[0].total < stage.settings.respond_threshold * 0.8:
                 if ranked:

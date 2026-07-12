@@ -42,6 +42,18 @@ Codex 应调用 workspace dependency discovery，使用其返回的 bundled Pyth
 
 ### pytest 临时目录权限错误
 
+### 已确认的本机 pytest（Codex / Claude Code）
+
+本机全局测试环境的固定入口是：
+
+```powershell
+& 'C:\Users\10434\AppData\Local\Python\pythoncore-3.14-64\Scripts\pytest.exe' -n auto tests/test_stage* -q
+& 'C:\Users\10434\AppData\Local\Python\pythoncore-3.14-64\Scripts\pytest.exe' --testmon
+```
+
+它对应 Python 3.14；不要误用 WindowsApps 别名或失效的 Python 3.13 PATH 残留。若 Codex
+沙箱拒绝执行该路径，应对同一条 pytest 命令申请权限后重跑。
+
 pytest 默认使用用户 `%TEMP%`。在受限沙箱中可能报：
 
 ```text

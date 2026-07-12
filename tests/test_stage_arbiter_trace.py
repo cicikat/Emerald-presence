@@ -30,7 +30,7 @@ async def test_trace_records_phase_a_and_each_phase_b_selection(sandbox):
     )
 
     async def generate(_stage, speaker_id, _transcript, _turn_id, _triggered_by):
-        return f"{speaker_id} 的不同回复"
+        return "我先说说窗外的雨。" if speaker_id == "yexuan" else "我更想谈谈刚才那部电影。"
 
     result = await run_owner_turn(stage.group_id, "今天怎么样", generate_reply=generate, turn_id="round-1")
 

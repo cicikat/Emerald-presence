@@ -186,11 +186,11 @@ async def test_phase_b_chain_continues_when_peer_spoke(sandbox):
     # Default talkativeness=0.5 for both chars.
     # With only owner speaking: base = 0.25 < threshold (0.5*0.8=0.4) → chain breaks.
     # With peer speaking: base + peer_reply = 0.25 + 0.20 = 0.45 > 0.40 → chain continues.
-    settings = _settings(max_responders=1, max_ai_chain_depth=3)
+    settings = _settings(max_responders=1, max_ai_chain_depth=3, allow_silent_rounds=False)
     stage = create_stage(f"cc05-chain-{uuid.uuid4().hex[:6]}", "owner", ["yexuan", "yexuanJ-5412"], settings=settings)
 
     async def generate(stage, speaker_id, transcript, turn_id, triggered_by):
-        return f"{speaker_id}-says"
+        return "我先说说窗外的雨。" if speaker_id == "yexuan" else "我更想谈谈刚才那部电影。"
 
     result = await run_owner_turn(
         stage.group_id,

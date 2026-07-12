@@ -10,6 +10,10 @@ from core.stage.models import Stage, TranscriptEntry
 # Bonus applied when a peer (another AI character, not the owner) just spoke.
 # Scaled by talkativeness so chatty chars are more eager to reply.
 PEER_REPLY_BASE = 0.40
+VOCATIVE_SCORE = 0.9
+MENTION_SCORE = 0.3
+VOCATIVE_QUESTION_BONUS = 0.3
+OPEN_QUESTION_BONUS = 0.1
 
 
 @dataclass(frozen=True)
@@ -19,10 +23,20 @@ class CandidateScore:
     parts: dict[str, float]
 
 
-def _addressed(stage: Stage, char_id: str, text: str) -> bool:
+def addressed_kind(stage: Stage, char_id: str, text: str) -> str:
+    """Classify direct address without mistaking third-person mentions for a call."""
     name = get_char_name(char_id)
-    char_mention = re.search(rf"@{re.escape(char_id)}(?![\w-])", text) is not None
-    return char_mention or f"@{name}" in text or name in text
+    aliases = (char_id, name)
+    for alias in aliases:
+        if re.search(rf"@{re.escape(alias)}(?![\w-])", text):
+            return "vocative"
+        if re.search(rf"(?:^|[。！？!?]\s*){re.escape(alias)}(?:[，、\s]|你)", text):
+            return "vocative"
+    return "mention" if any(alias in text for alias in aliases) else "none"
+
+
+def _is_question(text: str) -> bool:
+    return bool(re.search(r"[？?]\s*$|[吗呢么]\s*$|谁|什么|怎么|为什么|多少", text or ""))
 
 
 def _recency_penalty(char_id: str, transcript: list[TranscriptEntry]) -> float:
@@ -43,13 +57,16 @@ def score_candidates(
     transcript: list[TranscriptEntry],
     *,
     candidates: list[str] | tuple[str, ...] | None = None,
+    derived_keywords: dict[str, tuple[str, ...]] | None = None,
 ) -> list[CandidateScore]:
     latest_text = transcript[-1].content if transcript else ""
     latest_speaker = transcript[-1].speaker_id if transcript else "owner"
     pool = tuple(candidates) if candidates is not None else stage.roster
-    addressed = {char_id for char_id in pool if _addressed(stage, char_id, latest_text)}
-    if addressed and stage.settings.addressed_exclusive:
-        pool = tuple(char_id for char_id in pool if char_id in addressed)
+    addressed = {char_id: addressed_kind(stage, char_id, latest_text) for char_id in pool}
+    vocative = {char_id for char_id, kind in addressed.items() if kind == "vocative"}
+    if vocative and stage.settings.addressed_exclusive:
+        pool = tuple(char_id for char_id in pool if char_id in vocative)
+    question = _is_question(latest_text)
 
     result: list[CandidateScore] = []
     for char_id in pool:
@@ -58,8 +75,9 @@ def score_candidates(
         peer_spoke = latest_speaker != "owner" and latest_speaker != char_id
         parts = {
             "talkativeness": talkativeness * 0.5,
-            "addressed": 0.9 if char_id in addressed else 0.0,
-            "topic": _keyword_relevance(stage, char_id, latest_text),
+            "addressed": VOCATIVE_SCORE if addressed[char_id] == "vocative" else MENTION_SCORE if addressed[char_id] == "mention" else 0.0,
+            "question": VOCATIVE_QUESTION_BONUS if question and addressed[char_id] == "vocative" else OPEN_QUESTION_BONUS if question and not vocative else 0.0,
+            "topic": min(sum(1 for keyword in set(stage.settings.keywords.get(char_id, ())) | set((derived_keywords or {}).get(char_id, ())) if keyword and keyword in latest_text) * 0.2, 0.6),
             "peer_reply": PEER_REPLY_BASE * talkativeness if peer_spoke else 0.0,
             "recency_penalty": -_recency_penalty(char_id, transcript),
         }
