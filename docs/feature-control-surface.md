@@ -1,0 +1,13 @@
+# 功能控制面事实清单（2026-07-13）
+
+管理服务的设置面分三层：
+
+- persona 级：`/settings/model-routing`、`/settings/tts-desktop`、`/settings/tool-loop`、`/settings/thinking`，供桌面客户端使用；不返回模型密钥。
+- admin 专用配置：`/model-presets/*`、`/proxy`、`/tts-config`、`/scheduler/config`、`/settings/relay`。
+- admin 功能开关白名单：`GET/PUT /settings/feature-flags`。只接受 `settings_feature_flags.FLAGS` 中已有运行时消费者的布尔字段，不接受密钥、路径、额度或任意 YAML。
+
+模型从 legacy 迁移时调用 `POST /model-presets/bootstrap`，它把现有 `llm` 连接持久化为 `legacy` preset 和 `default` routing profile；之后客户端只切 routing profile，不需要重新录入 API key/base URL。
+
+TTS 有两个不同开关：`tts.enabled` 是服务端能力总开关，`tts.desktop_enabled` 决定桌面是否显示/请求语音条。`POST /tts/synthesize` 仅在两者均开启且 persona 鉴权通过时按需合成，返回 base64 WAV。
+
+降级路径：关闭对应功能布尔值时保留其余配置；tool loop 回到普通单次回复，thinking 回到无前置思考，桌面 TTS 回到纯文字，模型可切回稳定 routing profile。

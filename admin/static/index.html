@@ -357,6 +357,11 @@ textarea { resize: vertical; min-height: 72px; }
           <button class="btn btn-ghost" onclick="reloadConfig()">⚡ 热重载全部配置</button>
         </div>
       </div>
+      <div class="card">
+        <div class="card-header"><h3>Feature switches</h3><button class="btn btn-ghost btn-sm" onclick="loadFeatureFlags()">Refresh</button></div>
+        <div id="feature-flags-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px"><div class="loading">Loading...</div></div>
+        <button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="saveFeatureFlags()">Save and reload</button>
+      </div>
 
       <!-- 已注册工具（只读诊断） -->
       <div class="card">
@@ -370,13 +375,13 @@ textarea { resize: vertical; min-height: 72px; }
       <!-- 代理配置（只读镜像） -->
       <div class="card">
         <div class="card-header">
-          <h3>代理配置 <span class="badge" style="font-size:10px;vertical-align:middle;opacity:.7">只读</span></h3>
+          <h3>代理配置</h3><button class="btn btn-primary btn-sm" onclick="saveProxy()">保存</button>
           <button class="btn btn-ghost btn-sm" onclick="loadProxy()">刷新</button>
         </div>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:12px;padding:6px 10px;background:var(--bg-secondary);border-left:3px solid var(--muted);border-radius:4px">部署期配置，请修改 <code>config.yaml → proxy:</code> 后在系统状态页热重载。</p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">保存后热重载；仅后端出站请求使用代理，桌面客户端 HTTP 始终禁用代理。</p>
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
           <label class="checkbox-row" style="gap:8px;font-size:14px">
-            <input type="checkbox" id="proxy-enabled" disabled style="width:16px;height:16px;accent-color:var(--accent)">
+            <input type="checkbox" id="proxy-enabled" style="width:16px;height:16px;accent-color:var(--accent)">
             <span>启用代理</span>
           </label>
           <span id="proxy-status-badge" class="badge badge-danger">未启用</span>
@@ -384,11 +389,11 @@ textarea { resize: vertical; min-height: 72px; }
         <div class="form-row" style="max-width:640px">
           <label class="field">
             <span>HTTP 代理地址</span>
-            <input type="text" id="proxy-http" placeholder="http://127.0.0.1:7897" disabled>
+            <input type="text" id="proxy-http" placeholder="http://127.0.0.1:7897">
           </label>
           <label class="field">
             <span>HTTPS 代理地址</span>
-            <input type="text" id="proxy-https" placeholder="http://127.0.0.1:7897" disabled>
+            <input type="text" id="proxy-https" placeholder="http://127.0.0.1:7897">
           </label>
         </div>
       </div>
@@ -396,15 +401,15 @@ textarea { resize: vertical; min-height: 72px; }
       <!-- 上下文轮数（只读镜像） -->
       <div class="card">
         <div class="card-header">
-          <h3>上下文长度 <span class="badge" style="font-size:10px;vertical-align:middle;opacity:.7">只读</span></h3>
+          <h3>上下文长度</h3><button class="btn btn-primary btn-sm" onclick="saveContextConfig()">保存</button>
           <button class="btn btn-ghost btn-sm" onclick="loadContextConfig()">刷新</button>
         </div>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:12px;padding:6px 10px;background:var(--bg-secondary);border-left:3px solid var(--muted);border-radius:4px">部署期配置，请修改 <code>config.yaml → context.max_turns</code> 后热重载。</p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">保存后热重载，影响后续新请求使用的上下文窗口。</p>
         <div style="max-width:480px">
           <label class="field" style="margin-bottom:14px">
             <span>最大轮数（每轮 = 一问一答）</span>
             <div style="display:flex;align-items:center;gap:12px;margin-top:6px">
-              <input type="range" id="ctx-slider" min="5" max="50" value="20" disabled
+              <input type="range" id="ctx-slider" min="5" max="50" value="20"
                 style="flex:1;accent-color:var(--accent)">
               <span id="ctx-val" style="min-width:28px;text-align:center;font-weight:700;color:var(--accent)">20</span>
               <span style="font-size:12px;color:var(--muted)">轮</span>
@@ -416,17 +421,17 @@ textarea { resize: vertical; min-height: 72px; }
       <!-- LLM 生成参数（只读镜像） -->
       <div class="card">
         <div class="card-header">
-          <h3>LLM 生成参数 <span class="badge" style="font-size:10px;vertical-align:middle;opacity:.7">只读</span></h3>
+          <h3>LLM 生成参数</h3><button class="btn btn-primary btn-sm" onclick="saveLlmParams()">保存</button>
           <button class="btn btn-ghost btn-sm" onclick="loadLlmParams()">刷新</button>
         </div>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:12px;padding:6px 10px;background:var(--bg-secondary);border-left:3px solid var(--muted);border-radius:4px">部署期配置，请修改 <code>config.yaml → llm:</code> 后热重载。</p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">legacy 参数可在此热更新；启用多模型后优先在「模型路由」编辑 preset 参数。</p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px 32px;max-width:760px">
           <div>
             <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px">
               <span style="font-size:13px;font-weight:600">max_tokens</span>
               <span id="llm-max-tokens-val" style="color:var(--accent);font-weight:700;font-size:15px">1500</span>
             </div>
-            <input type="range" id="llm-max-tokens" min="200" max="4000" step="100" value="1500" disabled
+            <input type="range" id="llm-max-tokens" min="200" max="4000" step="100" value="1500"
               style="width:100%;accent-color:var(--accent)">
             <div style="font-size:11px;color:var(--muted);margin-top:4px">单次回复最大 token 数</div>
           </div>
@@ -442,7 +447,7 @@ textarea { resize: vertical; min-height: 72px; }
               <span style="font-size:13px;font-weight:600">temperature</span>
               <span id="llm-temp-val" style="color:var(--accent);font-weight:700;font-size:15px">0.70</span>
             </div>
-            <input type="range" id="llm-temperature" min="0.0" max="2.0" step="0.05" value="0.7" disabled
+            <input type="range" id="llm-temperature" min="0.0" max="2.0" step="0.05" value="0.7"
               style="width:100%;accent-color:var(--accent)">
             <div style="font-size:11px;color:var(--muted);margin-top:4px">值越高回复越随机，越低越保守</div>
           </div>
@@ -451,7 +456,7 @@ textarea { resize: vertical; min-height: 72px; }
               <span style="font-size:13px;font-weight:600">top_p</span>
               <span id="llm-topp-val" style="color:var(--accent);font-weight:700;font-size:15px">0.90</span>
             </div>
-            <input type="range" id="llm-top-p" min="0.0" max="1.0" step="0.05" value="0.9" disabled
+            <input type="range" id="llm-top-p" min="0.0" max="1.0" step="0.05" value="0.9"
               style="width:100%;accent-color:var(--accent)">
             <div style="font-size:11px;color:var(--muted);margin-top:4px">核采样概率，配合 temperature 控制多样性</div>
           </div>
@@ -460,7 +465,7 @@ textarea { resize: vertical; min-height: 72px; }
               <span style="font-size:13px;font-weight:600">frequency_penalty</span>
               <span id="llm-fp-val" style="color:var(--accent);font-weight:700;font-size:15px">0.00</span>
             </div>
-            <input type="range" id="llm-frequency-penalty" min="0.0" max="2.0" step="0.05" value="0.0" disabled
+            <input type="range" id="llm-frequency-penalty" min="0.0" max="2.0" step="0.05" value="0.0"
               style="width:100%;accent-color:var(--accent)">
             <div style="font-size:11px;color:var(--muted);margin-top:4px">惩罚重复词，值越高越不容易重复用词</div>
           </div>
@@ -471,17 +476,17 @@ textarea { resize: vertical; min-height: 72px; }
       <!-- 视觉模型配置（只读镜像） -->
       <div class="card">
         <div class="card-header">
-          <h3>视觉模型配置（图片识别）<span class="badge" style="font-size:10px;vertical-align:middle;opacity:.7">只读</span></h3>
+          <h3>视觉模型配置（图片识别）</h3><button class="btn btn-primary btn-sm" onclick="saveVisionParams()">保存</button>
           <label style="display:flex;align-items:center;gap:8px">
             <span style="font-size:13px;color:var(--muted)">启用</span>
-            <input type="checkbox" id="vision-enabled" disabled>
+            <input type="checkbox" id="vision-enabled">
           </label>
         </div>
-        <p style="font-size:12px;color:var(--muted);margin:0 16px 8px;padding:6px 10px;background:var(--bg-secondary);border-left:3px solid var(--muted);border-radius:4px">部署期配置，请修改 <code>config.yaml → vision:</code> 后热重载。</p>
+        <p style="font-size:12px;color:var(--muted);margin:0 16px 8px">API Key 留空时保留已有密钥；保存后热重载。</p>
         <div style="padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
           <div>
             <div style="font-size:13px;font-weight:600;margin-bottom:6px">Provider</div>
-            <select id="vision-provider" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)" disabled>
+            <select id="vision-provider" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
               <option value="gemini">Gemini（谷歌）</option>
               <option value="openai">OpenAI</option>
               <option value="glm">GLM（智谱）</option>
@@ -490,19 +495,19 @@ textarea { resize: vertical; min-height: 72px; }
           </div>
           <div>
             <div style="font-size:13px;font-weight:600;margin-bottom:6px">模型</div>
-            <select id="vision-model-select" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)" disabled>
+            <select id="vision-model-select" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
             </select>
           </div>
           <div style="grid-column:1/-1">
             <div style="font-size:13px;font-weight:600;margin-bottom:6px">API Key</div>
-            <input type="password" id="vision-api-key" placeholder="填入对应provider的API Key" disabled
+            <input type="password" id="vision-api-key" placeholder="留空则保留已有 API Key"
               style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text);box-sizing:border-box">
           </div>
           <div style="grid-column:1/-1">
             <div style="font-size:13px;font-weight:600;margin-bottom:4px">Base URL
               <span style="font-size:11px;font-weight:400;color:var(--muted)">（自动填写，自定义时可修改）</span>
             </div>
-            <input type="text" id="vision-base-url" disabled
+            <input type="text" id="vision-base-url"
               style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text);box-sizing:border-box">
           </div>
           <div style="grid-column:1/-1;font-size:12px;color:var(--muted);line-height:1.8;padding:10px 14px;background:var(--bg-secondary);border-radius:6px;border:1px solid var(--border)">
@@ -533,6 +538,12 @@ textarea { resize: vertical; min-height: 72px; }
         </div>
       </div>
 
+      <div class="card">
+        <div class="card-header"><h3>中继唤醒</h3><button class="btn btn-ghost btn-sm" onclick="loadRelaySettings()">刷新</button></div>
+        <div class="form-row" style="max-width:760px"><label class="field"><span>Base URL</span><input id="relay-base-url"></label><label class="field"><span>Topic</span><input id="relay-topic"></label></div>
+        <label class="field" style="max-width:760px"><span>Token（留空保留已有值）</span><input type="password" id="relay-token" autocomplete="off"></label>
+        <button class="btn btn-primary btn-sm" onclick="saveRelaySettings()">保存</button>
+      </div>
       <!-- TTS 配置 -->
       <div class="card">
         <div class="card-header">
@@ -545,7 +556,7 @@ textarea { resize: vertical; min-height: 72px; }
             <span>启用</span>
           </label>
           <label class="checkbox-row" style="gap:8px;font-size:14px">
-            <input type="checkbox" id="tts-emotion-enabled" style="width:16px;height:16px;accent-color:var(--accent)">
+            <input type="checkbox" id="tts-emotion-enabled" style="width:16px;height:16px;accent-color:var(--accent)"><span>情绪分档</span></label><label class="checkbox-row" style="gap:8px;font-size:14px"><input type="checkbox" id="tts-desktop-enabled" style="width:16px;height:16px;accent-color:var(--accent)"><span>桌面语音条</span>
             <span>情绪分档</span>
           </label>
         </div>
@@ -804,9 +815,9 @@ textarea { resize: vertical; min-height: 72px; }
             <option value="">-- 加载中 --</option>
           </select>
           <button class="btn btn-primary btn-sm" onclick="setActiveCharacter()">设为当前</button>
-          
-          <button class="btn btn-ghost btn-sm" onclick="renameCharacter()">✏️ 重命名</button> 
-           
+
+          <button class="btn btn-ghost btn-sm" onclick="renameCharacter()">✏️ 重命名</button>
+
           <span id="char-active-badge" class="badge badge-accent" style="display:none"></span>
         </div>
         <p style="font-size:12px;color:var(--muted);margin-top:8px">支持 .json / .txt / .md</p>
@@ -962,7 +973,7 @@ textarea { resize: vertical; min-height: 72px; }
           当前配置未开启 <code style="font-family:var(--mono)">model_presets</code> 块（legacy 模式，等价合成了单个
           <code style="font-family:var(--mono)">legacy</code> preset）。请先在 <code style="font-family:var(--mono)">config.yaml</code>
           里加上 <code style="font-family:var(--mono)">model_presets:</code> 顶层块（参见 <code style="font-family:var(--mono)">config.example.yaml</code>），
-          否则本页新增/切换会返回 400。
+          可点击右侧按钮把当前 legacy 连接初始化为可编辑 preset。<button class="btn btn-primary btn-sm" style="margin-left:12px" onclick="bootstrapModelPresets()">一键初始化</button>
         </p>
       </div>
 
@@ -1213,6 +1224,16 @@ textarea { resize: vertical; min-height: 72px; }
     <div class="page" id="page-scheduler">
       <h1 class="page-title">调度器</h1>
 
+      <div class="card">
+        <div class="card-header"><h3>调度配置</h3><button class="btn btn-primary btn-sm" onclick="saveSchedulerConfig()">保存</button></div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px" id="sc-config-switches"></div>
+        <div class="form-row" style="max-width:760px">
+          <label class="field"><span>Owner ID</span><input id="sc-owner-id"></label>
+          <label class="field"><span>存在感提醒（分钟）</span><input type="number" min="1" id="sc-presence-minutes"></label>
+          <label class="field"><span>主动消息最小间隔（小时）</span><input type="number" min="0.1" max="24" step="0.1" id="sc-gap-hours"></label>
+        </div>
+        <label class="field" style="max-width:760px"><span>签名（每行一条）</span><textarea id="sc-signatures" rows="4"></textarea></label>
+      </div>
       <!-- 触发状态 -->
       <div class="card">
         <div class="card-header">
@@ -1853,6 +1874,7 @@ function toast(msg, type = 'ok') {
 //  Status page
 // ══════════════════════════════════════════════════════════
 async function loadStatus() {
+  loadFeatureFlags();
   try {
     const d = await api('GET', '/status');
     document.getElementById('s-sessions').textContent = d.active_session_count ?? d.active_sessions?.length ?? '—';
@@ -2997,8 +3019,16 @@ function closeAtSuccessModal() {
 // ══════════════════════════════════════════════════════════
 //  模型路由（model-presets）
 // ══════════════════════════════════════════════════════════
+let _featureFlags = {};
+async function loadFeatureFlags() {
+  const el = document.getElementById('feature-flags-grid'); if (!el) return;
+  try { const d = await api('GET', '/settings/feature-flags'); _featureFlags = d.flags || {};
+    el.innerHTML = Object.entries(_featureFlags).map(([name, item]) => `<label class="checkbox-row" style="gap:9px;padding:9px 10px;border:1px solid var(--border);border-radius:6px"><input type="checkbox" data-feature-flag="${name}" ${item.enabled ? 'checked' : ''}><span>${item.label}<small style="display:block;color:var(--muted)">${name}</small></span></label>`).join('');
+  } catch (e) { el.innerHTML = `<div class="empty">${e.message}</div>`; }
+}
+async function saveFeatureFlags() { const flags = {}; document.querySelectorAll('[data-feature-flag]').forEach(el => flags[el.dataset.featureFlag] = el.checked); try { await api('PUT', '/settings/feature-flags', { flags }); toast('Saved', 'ok'); loadFeatureFlags(); } catch (e) { toast(e.message, 'err'); } }
 let _mrData = { presets: {}, routing_profiles: {}, active_routing: 'default' };
-const MR_CATEGORIES = ['chat', 'intent', 'probe', 'summary', 'detect_emotion', 'consolidation', 'perform'];
+const MR_CATEGORIES = ['chat', 'intent', 'probe', 'summary', 'detect_emotion', 'consolidation', 'perform', 'monologue'];
 
 async function loadModelRouting() {
   document.getElementById('mr-presets-body').innerHTML = '<div class="loading">加载中…</div>';
@@ -3020,6 +3050,11 @@ async function loadModelRouting() {
     document.getElementById('mr-presets-body').innerHTML = `<div class="empty">加载失败: ${e.message}</div>`;
     document.getElementById('mr-profiles-body').innerHTML = '';
   }
+}
+
+async function bootstrapModelPresets() {
+  try { await api('POST', '/model-presets/bootstrap'); toast('模型 preset 已初始化', 'ok'); loadModelRouting(); }
+  catch (e) { toast('初始化失败: ' + e.message, 'err'); }
 }
 
 async function switchActiveRouting() {
@@ -3404,10 +3439,12 @@ async function saveScreenPeekSettings() {
 }
 
 async function loadTtsConfig() {
+  loadRelaySettings();
   try {
     const d = await api('GET', '/tts-config');
     document.getElementById('tts-enabled').checked = !!d.enabled;
     document.getElementById('tts-emotion-enabled').checked = !!d.emotion_enabled;
+    document.getElementById('tts-desktop-enabled').checked = !!d.desktop_enabled;
     document.getElementById('tts-api-url').value = d.api_url || '';
     document.getElementById('tts-ref-audio').value = d.ref_audio || '';
     document.getElementById('tts-prompt-text').value = d.prompt_text || '';
@@ -3420,6 +3457,7 @@ async function saveTtsConfig() {
   const body = {
     enabled: document.getElementById('tts-enabled').checked,
     emotion_enabled: document.getElementById('tts-emotion-enabled').checked,
+    desktop_enabled: document.getElementById('tts-desktop-enabled').checked,
     api_url: document.getElementById('tts-api-url').value.trim(),
     ref_audio: document.getElementById('tts-ref-audio').value.trim(),
     prompt_text: document.getElementById('tts-prompt-text').value.trim(),
@@ -3954,7 +3992,14 @@ async function loadProactiveLedger() {
   }
 }
 
+const SC_BOOL_FIELDS = ['enabled','morning_greeting','night_reminder','random_message','daily_journal','period_reminder','diary_reminder','diary_inject','presence_nag'];
+let _scConfig = {};
+async function loadSchedulerConfig() { try { _scConfig = await api('GET','/scheduler/config'); document.getElementById('sc-config-switches').innerHTML = SC_BOOL_FIELDS.map(k => `<label class="checkbox-row"><input type="checkbox" data-sc-bool="${k}" ${_scConfig[k] ? 'checked' : ''}><span>${k}</span></label>`).join(''); document.getElementById('sc-owner-id').value=_scConfig.owner_id||''; document.getElementById('sc-presence-minutes').value=_scConfig.presence_nag_minutes||60; document.getElementById('sc-gap-hours').value=_scConfig.global_proactive_min_gap_hours||1.5; document.getElementById('sc-signatures').value=(_scConfig.signatures||[]).join('\n'); } catch(e){toast('读取调度配置失败: '+e.message,'err');} }
+async function saveSchedulerConfig() { const body={owner_id:document.getElementById('sc-owner-id').value.trim(),presence_nag_minutes:Number(document.getElementById('sc-presence-minutes').value),global_proactive_min_gap_hours:Number(document.getElementById('sc-gap-hours').value),signatures:document.getElementById('sc-signatures').value.split('\n').map(x=>x.trim()).filter(Boolean)}; document.querySelectorAll('[data-sc-bool]').forEach(el=>body[el.dataset.scBool]=el.checked); try{await api('PUT','/scheduler/config',body);toast('调度配置已保存','ok');loadSchedulerConfig();}catch(e){toast('保存失败: '+e.message,'err');} }
+async function loadRelaySettings(){try{const d=await api('GET','/settings/relay');document.getElementById('relay-base-url').value=d.relay_base_url||'';document.getElementById('relay-topic').value=d.relay_topic||'';document.getElementById('relay-token').value='';document.getElementById('relay-token').placeholder=d.relay_token?`已配置（${d.relay_token}），留空保留`:'未配置';}catch(e){toast('读取中继失败: '+e.message,'err');}}
+async function saveRelaySettings(){const body={relay_base_url:document.getElementById('relay-base-url').value.trim(),relay_topic:document.getElementById('relay-topic').value.trim()};const token=document.getElementById('relay-token').value.trim();if(token)body.relay_token=token;try{await api('PUT','/settings/relay',body);toast('中继配置已保存','ok');loadRelaySettings();}catch(e){toast('保存失败: '+e.message,'err');}}
 async function loadScheduler() {
+  loadSchedulerConfig();
   _startWatchStatusPoller();
   loadProactiveLedger();
   try {

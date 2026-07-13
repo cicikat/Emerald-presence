@@ -26,6 +26,7 @@ _DEFAULTS = {
     "total_timeout_s": 90,
     "categories": ["info", "desktop", "memory"],
     "exclude_tools": ["toy_vibrate", "toy_stop", "toy_pattern", "write_toy_file"],
+    "nudge_hint": "",
 }
 
 
@@ -47,6 +48,8 @@ class ToolLoopUpdate(BaseModel):
     max_steps: Optional[int] = None
     categories: Optional[list[str]] = None
     exclude_tools: Optional[list[str]] = None
+    total_timeout_s: Optional[int] = None
+    nudge_hint: Optional[str] = None
 
 
 @router.get("/settings/tool-loop", summary="获取 tool loop 配置")
@@ -58,6 +61,7 @@ async def get_tool_loop(auth=Depends(require_scopes("persona"))):
         "total_timeout_s": cfg.get("total_timeout_s", _DEFAULTS["total_timeout_s"]),
         "categories": cfg.get("categories", _DEFAULTS["categories"]),
         "exclude_tools": cfg.get("exclude_tools", _DEFAULTS["exclude_tools"]),
+        "nudge_hint": cfg.get("nudge_hint", _DEFAULTS["nudge_hint"]),
         "chat_preset_supports_fc": _chat_preset_supports_fc(),
     }
 
@@ -79,6 +83,10 @@ async def update_tool_loop(body: ToolLoopUpdate, auth=Depends(require_scopes("pe
         tl["categories"] = body.categories
     if body.exclude_tools is not None:
         tl["exclude_tools"] = body.exclude_tools
+    if body.total_timeout_s is not None:
+        tl["total_timeout_s"] = max(5, min(600, body.total_timeout_s))
+    if body.nudge_hint is not None:
+        tl["nudge_hint"] = body.nudge_hint[:1000]
 
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:

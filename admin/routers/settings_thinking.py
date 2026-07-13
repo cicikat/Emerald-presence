@@ -46,6 +46,7 @@ class ThinkingUpdate(BaseModel):
     enabled: Optional[bool] = None
     mode: Optional[str] = None
     apply_to_proactive: Optional[bool] = None
+    monologue_max_tokens: Optional[int] = None
 
 
 @router.get("/settings/thinking", summary="获取思考开关配置")
@@ -78,6 +79,8 @@ async def update_thinking(body: ThinkingUpdate, auth=Depends(require_scopes("per
         th["mode"] = body.mode
     if body.apply_to_proactive is not None:
         th["apply_to_proactive"] = body.apply_to_proactive
+    if body.monologue_max_tokens is not None:
+        th["monologue_max_tokens"] = max(32, min(2000, body.monologue_max_tokens))
 
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:

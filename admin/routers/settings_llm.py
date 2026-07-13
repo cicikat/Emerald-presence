@@ -208,6 +208,82 @@ class ActiveRoutingUpdate(BaseModel):
     active_routing: str
 
 
+def _persist_model_presets(full_cfg: dict) -> None:
+    """Persist config and invalidate every cached model client."""
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(full_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入配置文件失败: {e}")
+
+    from core import config_loader, llm_client
+    config_loader.reload_config()
+    llm_client.reload_client()
+
+
+@router.post("/model-presets/bootstrap", summary="从 legacy llm 配置初始化 model_presets")
+async def bootstrap_model_presets(auth=Depends(require_scopes("admin"))):
+    """One-time migration used by the visual admin panel."""
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            full_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {e}")
+
+    if full_cfg.get("model_presets"):
+        return {"message": "model_presets 已存在，无需初始化", "created": False}
+
+    from core.model_registry import _synth_legacy_presets
+    full_cfg["model_presets"] = _synth_legacy_presets(full_cfg)
+    _persist_model_presets(full_cfg)
+    return {"message": "已从 legacy llm 配置初始化 model_presets", "created": True}
+
+
+@router.get("/settings/model-routing", summary="桌面端读取可选模型路由")
+async def get_desktop_model_routing(auth=Depends(require_scopes("persona"))):
+    """Return safe display data; API keys and endpoint credentials stay admin-only."""
+    from core.model_registry import _get_preset_config
+    mp = _get_preset_config()
+    presets = mp.get("presets", {})
+    profiles = mp.get("routing_profiles", {})
+    rows = []
+    for name, profile in profiles.items():
+        preset_name = profile.get("chat") or next(iter(presets), "")
+        preset = presets.get(preset_name, {})
+        rows.append({
+            "name": name,
+            "chat_preset": preset_name,
+            "provider_kind": preset.get("provider_kind", "openai"),
+            "model": preset.get("model", ""),
+            "tool_call_mode": preset.get("tool_call_mode", "function_calling"),
+        })
+    return {
+        "active_routing": mp.get("active_routing", "default"),
+        "profiles": rows,
+        "is_legacy_synth": "model_presets" not in get_config(),
+    }
+
+
+@router.put("/settings/model-routing", summary="桌面端切换已有模型路由")
+async def set_desktop_model_routing(body: ActiveRoutingUpdate, auth=Depends(require_scopes("persona"))):
+    """Allow desktop selection without exposing preset secrets."""
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            full_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {e}")
+
+    mp = full_cfg.get("model_presets")
+    if not mp:
+        raise HTTPException(status_code=409, detail="请先在管理面板初始化 model_presets")
+    if body.active_routing not in mp.get("routing_profiles", {}):
+        raise HTTPException(status_code=422, detail="未知 routing profile")
+
+    mp["active_routing"] = body.active_routing
+    _persist_model_presets(full_cfg)
+    return {"message": "模型路由已切换", "active_routing": body.active_routing}
+
+
 @router.put("/model-presets/active-routing", summary="切换当前生效的路由方案")
 async def set_active_routing(body: ActiveRoutingUpdate, auth=Depends(require_scopes("admin"))):
     """切换 active_routing（如 'default' → 'claude-main'）并热重载。

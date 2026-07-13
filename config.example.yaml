@@ -168,6 +168,7 @@ tools:
     enabled: true
 tts:
   enabled: true
+  desktop_enabled: false  # 桌面端按需语音条；独立于 QQ 概率语音，默认关闭
   probability: 0.1
   api_url: http://127.0.0.1:9872
   top_k: 15

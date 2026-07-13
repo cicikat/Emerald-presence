@@ -189,3 +189,8 @@ brief，遵循“删除必须连同守卫、测试和文档条目一起删除”
 4. 跨仓执行 git 时可能遇到 `dubious ownership`；优先按命令使用
    `git -c safe.directory=<Emerald-client 路径> ...`，不要擅自修改全局 git 配置。
 5. 两个仓库经常存在其他 agent 的并行未提交改动。只改任务相关文件，完整测试失败时先判断是否与本任务相关，禁止顺手修复或回滚无关改动。
+
+
+## 设置控制面文档
+
+修改模型路由、TTS、scheduler、relay、thinking、tool loop 或高级功能开关时，必须同步 docs/feature-control-surface.md 与客户端的设置审计文档。

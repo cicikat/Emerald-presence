@@ -2,6 +2,7 @@
 杂项设置接口：工具开关、上下文轮数、破限预设、TTS 配置
 """
 
+import base64
 from pathlib import Path
 from typing import Optional
 
@@ -74,6 +75,7 @@ async def update_context_config(body: ContextConfigUpdate, auth=Depends(require_
 
 class TtsConfigUpdate(BaseModel):
     enabled:         Optional[bool]  = None
+    desktop_enabled: Optional[bool]  = None
     api_url:         Optional[str]   = None
     ref_audio:       Optional[str]   = None
     prompt_text:     Optional[str]   = None
@@ -87,6 +89,7 @@ async def get_tts_config(auth=Depends(require_scopes("admin"))):
     cfg = get_config().get("tts", {})
     return {
         "enabled":         cfg.get("enabled",         False),
+        "desktop_enabled": cfg.get("desktop_enabled", False),
         "api_url":         cfg.get("api_url",         "http://127.0.0.1:9880"),
         "ref_audio":       cfg.get("ref_audio",       ""),
         "prompt_text":     cfg.get("prompt_text",     ""),
@@ -110,6 +113,8 @@ async def update_tts_config(body: TtsConfigUpdate, auth=Depends(require_scopes("
     tts_cfg = full_cfg.setdefault("tts", {})
     if body.enabled is not None:
         tts_cfg["enabled"] = body.enabled
+    if body.desktop_enabled is not None:
+        tts_cfg["desktop_enabled"] = body.desktop_enabled
     if body.api_url is not None:
         tts_cfg["api_url"] = body.api_url
     if body.ref_audio is not None:
@@ -132,6 +137,56 @@ async def update_tts_config(body: TtsConfigUpdate, auth=Depends(require_scopes("
     from core import config_loader
     config_loader.reload_config()
     return {"message": "TTS 配置已更新", "tts": tts_cfg}
+
+
+class DesktopTtsUpdate(BaseModel):
+    enabled: bool
+
+
+class DesktopTtsSynthesize(BaseModel):
+    text: str
+    emotion: str = "neutral"
+
+
+@router.get("/settings/tts-desktop", summary="读取桌面语音播放开关")
+async def get_desktop_tts(auth=Depends(require_scopes("persona"))):
+    cfg = get_config().get("tts", {})
+    return {"enabled": bool(cfg.get("desktop_enabled", False))}
+
+
+@router.post("/settings/tts-desktop", summary="切换桌面语音播放")
+async def update_desktop_tts(body: DesktopTtsUpdate, auth=Depends(require_scopes("persona"))):
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            full_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {e}")
+    full_cfg.setdefault("tts", {})["desktop_enabled"] = body.enabled
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(full_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入配置文件失败: {e}")
+    from core import config_loader
+    config_loader.reload_config()
+    return {"message": "桌面语音播放开关已更新", "enabled": body.enabled}
+
+
+@router.post("/tts/synthesize", summary="为桌面消息按需合成语音")
+async def synthesize_desktop_tts(body: DesktopTtsSynthesize, auth=Depends(require_scopes("persona"))):
+    cfg = get_config().get("tts", {})
+    if not cfg.get("desktop_enabled", False):
+        raise HTTPException(status_code=409, detail="桌面语音播放未开启")
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="text 不能为空")
+    if len(text) > 4000:
+        raise HTTPException(status_code=422, detail="单条语音文本不能超过 4000 字")
+    from core.output.voice_adapter import synthesize
+    audio = await synthesize(text, body.emotion)
+    if not audio:
+        raise HTTPException(status_code=502, detail="TTS 未返回音频，请检查 API 与参考音频配置")
+    return {"audio_b64": base64.b64encode(audio).decode("ascii"), "mime": "audio/wav"}
 
 
 # ─── 聊天模式 ──────────────────────────────────────────────────────────────────
