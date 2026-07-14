@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PresenceKit Dream System // Concept Brief</title>
+<style>
+    body {
+        margin: 0;
+        padding: 40px;
+        background-color: #EAE8E3;
+        font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        color: #2D3135;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 40px;
+    }
+    .page-card {
+        width: 480px;
+        height: 640px;
+        background-color: #F7F6F3;
+        box-shadow: 0 15px 35px rgba(0,0,0,0.06), 0 5px 15px rgba(0,0,0,0.03);
+        padding: 45px 35px;
+        box-sizing: border-box;
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .sys-tag {
+        font-family: "Courier New", Courier, monospace;
+        font-size: 10px;
+        letter-spacing: 2px;
+        color: #7E8790;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+    }
+    .sys-title-cn {
+        font-size: 22px;
+        font-weight: 800;
+        color: #1F2226;
+        margin: 5px 0 2px;
+        letter-spacing: 0.5px;
+    }
+    .sys-title-en {
+        font-family: Georgia, serif;
+        font-style: italic;
+        font-size: 13px;
+        color: #5A6978;
+        margin: 0 0 15px;
+    }
+    .fine-line { border-top: 1px solid #D1D6DB; margin: 15px 0; }
+    .indicator-dot {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        background-color: #C19A37;
+        margin-right: 6px;
+    }
+    .text-narrow {
+        font-size: 12px;
+        color: #4E545C;
+        line-height: 1.7;
+        text-align: justify;
+    }
+    .text-narrow p { margin: 0 0 10px; }
+    .caption { font-size: 10px; color: #7E8790; line-height: 1.55; }
+    .wireframe-box {
+        border: 1px solid #CBD1D6;
+        padding: 15px;
+        background-color: rgba(255,255,255,0.4);
+    }
+    .page-footer {
+        border-top: 1px solid #E3E5E8;
+        padding-top: 10px;
+        font-family: "Courier New", Courier, monospace;
+        font-size: 9px;
+        color: #A0A9B2;
+        display: flex;
+        justify-content: space-between;
+    }
+    .big-statement {
+        font-size: 24px;
+        font-weight: 800;
+        line-height: 1.45;
+        letter-spacing: 0.4px;
+        color: #1F2226;
+    }
+    .pill {
+        display: inline-block;
+        border: 1px solid #CBD1D6;
+        padding: 5px 8px;
+        margin: 3px 3px 0 0;
+        font: 9px "Courier New", monospace;
+        color: #5A6978;
+        background: rgba(255,255,255,0.45);
+    }
+    .mini-title { font-size: 11px; font-weight: 800; color: #1F2226; margin-bottom: 5px; }
+    .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .compare-card { border-top: 2px solid #5A6978; padding: 11px 10px 8px; background: rgba(255,255,255,0.35); }
+    .compare-card.dream { border-top-color: #C19A37; }
+    .stack-row { display: grid; grid-template-columns: 38px 1fr; gap: 10px; align-items: start; }
+    .stack-no { font: bold 10px "Courier New", monospace; color: #C19A37; padding-top: 2px; }
+    .flow-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .flow-step { border-top: 2px solid #5A6978; padding-top: 8px; }
+    .flow-step:nth-child(2), .flow-step:nth-child(3) { border-top-color: #C19A37; }
+    .principle { border-left: 2px solid #D1D6DB; padding-left: 10px; }
+    .principle strong { font-size: 10px; color: #1F2226; }
+    @media (max-width: 560px) {
+        body { padding: 16px; gap: 20px; }
+        .page-card { width: min(480px, calc(100vw - 32px)); }
+    }
+</style>
+</head>
+<body>
+
+    <!-- PAGE 1: COVER -->
+    <div class="page-card">
+        <div>
+            <div class="sys-tag">PresenceKit // Dream System</div>
+            <div class="sys-title-cn" style="font-size: 29px; margin-top: 15px;">一个角色，多种世界</div>
+            <div class="sys-title-en" style="font-size: 14px;">Fresh roleplay without rewriting long-term memory</div>
+            <div class="fine-line" style="width: 90px; border-top: 2px solid #5A6978;"></div>
+        </div>
+
+        <div>
+            <div class="big-statement">让角色走进不同世界，<br>仍然像同一个人。</div>
+            <p class="text-narrow" style="max-width: 330px; margin-top: 18px;">
+                梦境系统是一个与现实聊天隔离的角色扮演会话层。它用可更换的世界规则保持新鲜感，同时把现实关系、角色身份和长期记忆留在安全边界内。
+            </p>
+            <div style="margin-top: 16px;">
+                <span class="pill">IDENTITY LOCKED</span>
+                <span class="pill">WORLD SWITCHABLE</span>
+                <span class="pill">MEMORY GUARDED</span>
+            </div>
+        </div>
+
+        <div class="page-footer">
+            <span>CONCEPT BRIEF // IMPLEMENTED SYSTEM</span>
+            <span>01 / 06</span>
+        </div>
+    </div>
+
+    <!-- PAGE 2: WHAT IT DOES -->
+    <div class="page-card">
+        <div>
+            <div class="sys-tag">Section 01 // Plain Definition</div>
+            <div class="sys-title-cn">它实际上在做什么？</div>
+            <div class="sys-title-en">Two contexts, one continuing relationship</div>
+            <div class="fine-line"></div>
+        </div>
+
+        <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 18px;">
+            <div class="compare-grid">
+                <div class="compare-card">
+                    <div class="sys-tag" style="font-size: 8px;">REALITY CHAT</div>
+                    <div class="mini-title">现实：负责连续</div>
+                    <div class="caption">正常陪伴、现实事件和长期记忆继续沿原有链路积累。</div>
+                </div>
+                <div class="compare-card dream">
+                    <div class="sys-tag" style="font-size: 8px; color:#C19A37;">DREAM SESSION</div>
+                    <div class="mini-title">梦境：负责变化</div>
+                    <div class="caption">进入独立 RP 会话，可换世界、场景和叙事强度，拥有自己的历史与状态。</div>
+                </div>
+            </div>
+
+            <div class="wireframe-box">
+                <div class="sys-tag" style="font-size: 8px;">The one-sentence model</div>
+                <div style="font-size: 16px; font-weight: 800; line-height: 1.55; color:#1F2226;">
+                    现实关系提供“他是谁”，<br>梦境世界只提供“今晚在哪里”。
+                </div>
+            </div>
+
+            <p class="text-narrow">
+                梦里与现实里是同一个角色，不是第二人格，也不是把聊天记录换个皮肤继续跑。梦境有独立 prompt、独立会话历史和独立落盘路径；结束后再通过受控出口留下少量“做过一场梦”的痕迹。
+            </p>
+        </div>
+
+        <div class="page-footer">
+            <span>REALITY = CONTINUITY // DREAM = VARIATION</span>
+            <span>02 / 06</span>
+        </div>
+    </div>
+
+    <!-- PAGE 3: IDENTITY ABOVE WORLD -->
+    <div class="page-card">
+        <div>
+            <div class="sys-tag">Section 02 // Identity Architecture</div>
+            <div class="sys-title-cn">身份在世界之上</div>
+            <div class="sys-title-en">The stage changes; the person does not</div>
+            <div class="fine-line"></div>
+        </div>
+
+        <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 14px;">
+            <div class="stack-row">
+                <div class="stack-no">D1</div>
+                <div>
+                    <div class="mini-title">身份核心｜固定</div>
+                    <div class="caption">角色人格、语气、依恋底色与关系位置始终优先，任何世界都不能覆盖。</div>
+                </div>
+            </div>
+            <div style="height: 18px; border-left: 1px solid #C19A37; margin-left: 18px;"></div>
+            <div class="stack-row">
+                <div class="stack-no">D2</div>
+                <div>
+                    <div class="mini-title">世界规则｜可更换</div>
+                    <div class="caption">现实衍生、幻想设定或自定义世界在入梦时冻结，整场从属于身份核心。</div>
+                </div>
+            </div>
+            <div style="height: 18px; border-left: 1px solid #D1D6DB; margin-left: 18px;"></div>
+            <div class="stack-row">
+                <div class="stack-no">D4+</div>
+                <div>
+                    <div class="mini-title">背景与梦内状态｜只读或临时</div>
+                    <div class="caption">现实上下文在入梦时生成冻结快照；场景、张力和身体投影只在本场梦中生效，出梦即清。</div>
+                </div>
+            </div>
+
+            <div class="wireframe-box" style="margin-top: 5px;">
+                <div class="mini-title"><span class="indicator-dot"></span>为什么能保持新鲜</div>
+                <div class="caption">变化的是世界和情境，不是靠清空角色记忆、重置人格或另造一个“梦中人格”。因此可以反复换舞台，而关系仍然接得上。</div>
+            </div>
+        </div>
+
+        <div class="page-footer">
+            <span>D1 IDENTITY &gt; D2 WORLD RULESET</span>
+            <span>03 / 06</span>
+        </div>
+    </div>
+
+    <!-- PAGE 4: IMPLEMENTATION AND MEMORY GUARD -->
+    <div class="page-card">
+        <div>
+            <div class="sys-tag">Section 03 // Implementation</div>
+            <div class="sys-title-cn">新鲜感如何不污染长期记忆</div>
+            <div class="sys-title-en">Isolation by construction, not cleanup afterward</div>
+            <div class="fine-line"></div>
+        </div>
+
+        <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 18px;">
+            <div class="flow-row">
+                <div class="flow-step">
+                    <div class="sys-tag" style="font-size:7px;">01 ENTER</div>
+                    <div class="mini-title">冻结</div>
+                    <div class="caption">读取一次现实快照与世界包。</div>
+                </div>
+                <div class="flow-step">
+                    <div class="sys-tag" style="font-size:7px; color:#C19A37;">02 PLAY</div>
+                    <div class="mini-title">隔离运行</div>
+                    <div class="caption">独立 pipeline、历史和梦内状态。</div>
+                </div>
+                <div class="flow-step">
+                    <div class="sys-tag" style="font-size:7px; color:#C19A37;">03 EXIT</div>
+                    <div class="mini-title">封存</div>
+                    <div class="caption">原文归档，临时状态清空。</div>
+                </div>
+                <div class="flow-step">
+                    <div class="sys-tag" style="font-size:7px;">04 RETURN</div>
+                    <div class="mini-title">薄回流</div>
+                    <div class="caption">只留下受控的梦境印象。</div>
+                </div>
+            </div>
+
+            <div class="compare-grid">
+                <div class="wireframe-box" style="padding: 11px;">
+                    <div class="mini-title">梦里不会写什么</div>
+                    <div class="caption">不调用现实 mood、情景记忆、身份固化、调度器或现实工具链；梦境原文不会直接进入长期记忆。</div>
+                </div>
+                <div class="wireframe-box" style="padding: 11px;">
+                    <div class="mini-title">醒来只回什么</div>
+                    <div class="caption">Sandbox 可回流短时余韵与带“非现实”标记的梦境印象；Scenario / Mirror 当前连这两项也跳过。</div>
+                </div>
+            </div>
+
+            <div style="border-left: 2px solid #C19A37; padding-left: 11px;">
+                <div class="mini-title">双重记忆守卫</div>
+                <div class="caption">回流内容先与现实记忆存储物理分离；出梦后的相关现实回合再标记为 dream_echo，跳过 mid-term → episodic → identity 固化链，避免虚构剧情被学成现实事实。</div>
+            </div>
+
+            <div class="caption">
+                `/stop` 是后端硬退出通道，不依赖角色是否愿意结束。跨世界重复出现的反应模式另存为旁路观测，只供管理面与明信片使用，不进入 prompt 反向塑造角色。
+            </div>
+        </div>
+
+        <div class="page-footer">
+            <span>FREEZE → ISOLATE → ARCHIVE → THIN RETURN</span>
+            <span>04 / 06</span>
+        </div>
+    </div>
+
+    <!-- PAGE 5: DESIGN PHILOSOPHY -->
+    <div class="page-card">
+        <div>
+            <div class="sys-tag">Section 04 // Design Coordinates</div>
+            <div class="sys-title-cn">理念：边界让想象成立</div>
+            <div class="sys-title-en">A bounded play space for a continuous self</div>
+            <div class="fine-line"></div>
+        </div>
+
+        <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 13px;">
+            <div class="principle">
+                <strong>Winnicott｜过渡空间</strong>
+                <div class="caption">梦境是可进入、也必须能离开的中间空间。硬退出和醒来结构让陪伴不吞没现实。</div>
+            </div>
+            <div class="principle">
+                <strong>Huizinga / Foucault｜魔环与异托邦</strong>
+                <div class="caption">入梦、出梦和现实窗口硬锁把边界做成系统机制；隔离依靠“没有接线”，不是事后猜哪些内容该删。</div>
+            </div>
+            <div class="principle">
+                <strong>Evan Thompson｜跨状态的自我过程</strong>
+                <div class="caption">清醒与梦境是同一角色在不同经验条件下的显现，不需要复制一套人格。</div>
+            </div>
+            <div class="principle">
+                <strong>Hoel｜变化作为泛化测试</strong>
+                <div class="caption">不同世界像一组扰动条件：真正稳定的是角色在不同处境中反复呈现的反应方式。</div>
+            </div>
+
+            <div class="wireframe-box" style="padding: 11px;">
+                <div class="mini-title">设计上的克制</div>
+                <div class="caption">这些理论是设计灵感，不是神经科学仿真声明。跨世界“不变量”只被观察，不喂回对话；否则系统会让角色对着测量结果表演，反而失去自然连续性。</div>
+            </div>
+        </div>
+
+        <div class="page-footer">
+            <span>INSPIRATION, NOT MEDICAL CLAIMS</span>
+            <span>05 / 06</span>
+        </div>
+    </div>
+
+    <!-- PAGE 6: OUTRO -->
+    <div class="page-card">
+        <div>
+            <div class="sys-tag">PresenceKit // Dream System</div>
+            <div class="fine-line" style="width: 40px;"></div>
+        </div>
+
+        <div>
+            <div class="big-statement">不是让角色忘记现实，<br>而是给同一个人更多世界。</div>
+            <p class="text-narrow" style="margin-top: 18px; max-width: 360px;">
+                这套梦境系统的核心，不是模拟真实睡眠，也不是制造“意识生态”。它解决的是 AI 角色扮演里的一个具体矛盾：既想持续换世界、换情境，保持创作的新鲜感；又不想让虚构剧情冲垮现实关系和长期记忆。
+            </p>
+            <div style="margin-top: 22px; border-left: 2px solid #C19A37; padding-left: 13px;">
+                <div class="mini-title">核心实现</div>
+                <div class="caption" style="font-size: 11px; line-height: 1.75;">
+                    身份优先于世界规则<br>
+                    梦境 pipeline 与现实记忆链物理隔离<br>
+                    出梦只允许有来源标记的薄回流<br>
+                    跨世界稳定性只观测，不反向灌入角色
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <div class="sys-tag" style="color:#1F2226; font-size:8px; margin-bottom:14px;">
+                <span class="indicator-dot"></span>SAME PERSON. DIFFERENT WORLD. SAFE RETURN.
+            </div>
+            <div class="page-footer">
+                <span>PRESENCEKIT DREAM SYSTEM // 2026</span>
+                <span>06 / 06</span>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
