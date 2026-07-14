@@ -835,7 +835,22 @@ class Pipeline:
                     loop_msgs, tools, char_id=char_id, is_proactive=is_proactive,
                 )
                 if not turn.tool_calls:
-                    outcome = ("natural", turn.content)
+                    if turn.content.strip():
+                        outcome = ("natural", turn.content)
+                    else:
+                        # Some OpenAI-compatible gateways occasionally return a
+                        # successful tool-loop response whose assistant message
+                        # contains neither content nor tool_calls.  Treating that
+                        # as a natural stop leaks an empty reply into turn_sink,
+                        # where USER_CHAT correctly rejects it and /desktop/chat
+                        # becomes a local 500.  Reuse the existing tool-free
+                        # closing path instead; it is also the safest fallback
+                        # when the gateway loses a function-call translation.
+                        logger.warning(
+                            "[pipeline.run_agentic_loop] empty assistant completion "
+                            "without tool_calls; falling back to tool-free final generation"
+                        )
+                        outcome = ("empty", "")
                     return
                 loop_msgs.append(turn.assistant_message)
                 used_tool = True

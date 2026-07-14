@@ -111,6 +111,32 @@ async def test_natural_termination_no_tool(monkeypatch):
     assert execute_calls == []
 
 
+# ── 1b. 网关返回空自然终止 → 不带 tools 强制收尾 ───────────────────────────
+
+@pytest.mark.asyncio
+async def test_empty_natural_termination_falls_back_to_tool_free_final(monkeypatch):
+    _patch_tool_loop_config(monkeypatch)
+    _patch_tools_schema(monkeypatch, ["web_search"])
+    _script_chat_turn(monkeypatch, [
+        ChatTurn(content="", tool_calls=[], assistant_message={"role": "assistant", "content": ""}),
+    ])
+    execute_calls = _script_execute(monkeypatch, [])
+    final_calls = _patch_final_chat(monkeypatch, text="降级后的正常回复")
+
+    pipeline = _make_pipeline()
+    result = await pipeline.run_agentic_loop(
+        [{"role": "user", "content": "你好"}], uid="u1", char_id="yexuan", session_state=object(),
+    )
+
+    assert result == "降级后的正常回复"
+    assert execute_calls == []
+    assert len(final_calls) == 1
+    assert any(
+        m.get("role") == "system" and "工具用完了" in m.get("content", "")
+        for m in final_calls[0]
+    )
+
+
 # ── 2 + 4. 两步循环自然终止（用过工具），含 voice_reanchor 收尾 ──────────────
 
 @pytest.mark.asyncio
@@ -360,6 +386,33 @@ async def test_stream_tool_step_nonstream_final_streamed(monkeypatch):
     assert "".join(chunks) == "你好呀"
     assert len(chat_turn_calls) == 2  # 工具决策步全程非流式
     assert len(stream_calls) == 1     # 最终答案走 chat_stream 出口
+
+
+# ── 10b. stream：空自然终止同样降级到无 tools 的流式出口 ───────────────────
+
+@pytest.mark.asyncio
+async def test_stream_empty_natural_termination_falls_back_to_tool_free_stream(monkeypatch):
+    _patch_tool_loop_config(monkeypatch)
+    _patch_tools_schema(monkeypatch, ["web_search"])
+    _script_chat_turn(monkeypatch, [
+        ChatTurn(content="", tool_calls=[], assistant_message={"role": "assistant", "content": ""}),
+    ])
+    _script_execute(monkeypatch, [])
+
+    async def _fake_chat_stream(messages, max_tokens_override=None, call_category="chat", char_id=None,
+                                 is_proactive=False):
+        for piece in ["降级", "成功"]:
+            yield piece
+
+    monkeypatch.setattr("core.llm_client.chat_stream", _fake_chat_stream)
+
+    pipeline = _make_pipeline()
+    gen = await pipeline.run_agentic_loop(
+        [{"role": "user", "content": "你好"}], uid="u1", char_id="yexuan",
+        session_state=object(), stream=True,
+    )
+
+    assert "".join([piece async for piece in gen]) == "降级成功"
 
 
 # ── 11. action_trace：loop 每步 execute 落痕（origin=assistant_loop）───────
