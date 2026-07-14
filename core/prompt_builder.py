@@ -1375,6 +1375,7 @@ def build(
             f"【输出格式】以{character.name}第一人称沉浸式展开当前场景。"
             "说出口的话直接写，动作/心理/环境全部在（）括号内，不加人称主语。"
             "话语有长有短，句号后换行。不要总结、不要跳跃，给对方留回应空间。"
+            "回复正文至少分为两段，段落之间必须保留一个空行。且必须使用 `\\n\\n` 作为段落分隔。"
         ),
     }
     style_instruction = _STYLE_INSTRUCTION.get(_style, _STYLE_INSTRUCTION["roleplay"])
