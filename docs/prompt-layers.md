@@ -149,7 +149,7 @@ Author's Note 放在历史之后、用户消息之前，对模型影响最大，
 2. 记忆/人格约束单句（旧记忆≠当前事实，保持角色边界；原四块协议已压缩为此句）
 3. `author_note_extra`（consistency_check 临时纠偏；`（...）` 包裹；用完即清）
 4. S2 防句式坍缩软提示（句首同质性检测，命中时注入；`core/memory/short_term.py::detect_reply_homogeneity_prefix()`，与层9历史投影去同质复用同一份检测结果 `_s2_prefix`；填充词前缀「嗯/啊/呃/哦/唔/哈」等命中时用不复读字面的文案，避免再次 prime 同一个词，其余前缀沿用引用式文案，见下方「反坍缩治理」）
-5. 【输出格式】（`chat` 或 `roleplay`，由 config.yaml `chat.style` 决定；三处格式规则已合并为单句）
+5. 【输出格式】（`chat` 或 `roleplay`，由 config.yaml `chat.style` 决定；两种模式都常态要求正文至少两段、段间一个空行；`chat` 分段不依赖句号）
 6. 【词级强调】每条回复在情绪/语义焦点处用一次 `<hl>`；需要时再用 `<big>/<sm>`，每条 1–3 处
 7. 条件工具规则（R5）：
    - 有 `tool_result`：`【工具结果已提供】`，提示层10已注入，禁止再声称调用

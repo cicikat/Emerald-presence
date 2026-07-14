@@ -305,6 +305,10 @@ def test_phase2a_chat_style_instruction_in_prompt():
     assert "对白" in chat_instruction or "Chat" in chat_instruction, (
         "chat 指令应包含 Chat 模式的输出规则说明"
     )
+    assert "回复正文至少分为两段" in chat_instruction
+    assert "段落之间必须保留一个空行" in chat_instruction
+    assert "两个真实换行符" in chat_instruction
+    assert "句号后换行" not in chat_instruction, "分段规则不得依赖与角色卡冲突的句号"
     # 不应再使用 XML 标签作为格式指引
     assert "<say>" not in chat_instruction, "chat 指令不应使用 XML <say> 标签"
     assert "<do>" not in chat_instruction, "chat 指令不应使用 XML <do> 标签"
