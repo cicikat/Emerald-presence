@@ -183,10 +183,14 @@ async def run_owner_chat_turn(
             pass
 
         # Shared reality guard: remove tool_call residue, character-name prefix,
-        # AI self-disclosure — applied before both fanout and memory write.
+        # AI self-disclosure before memory write. Brief 72's paragraph enforcer
+        # is deliberately skipped here and applied only to the outgoing copy below.
         if reply:
-            from core.reality_output_guard import clean_reality_reply_text as _clean_reply
-            reply = _clean_reply(reply, pipeline.character.name) or reply
+            from core.reality_output_guard import (
+                clean_reality_reply_text as _clean_reply,
+                clean_reality_reply_text_for_memory as _clean_memory_reply,
+            )
+            reply = _clean_memory_reply(reply, pipeline.character.name) or reply
 
         from channels.registry import get as _get_channel
         channel = _get_channel(channel_name)
@@ -222,7 +226,10 @@ async def run_owner_chat_turn(
         # Visible reply: strip render/NMP tags only so action descriptions survive
         # for chat texture.  Memory is already scrubbed inside record_assistant_turn.
         from core.response_processor import strip_render_tags as _strip_tags
-        visible_reply = _strip_tags(reply) or reply
+        visible_source = reply
+        if not _use_stream:
+            visible_source = _clean_reply(reply, pipeline.character.name) or reply
+        visible_reply = _strip_tags(visible_source) or visible_source
 
         # 流式路径：record 走完后用同一 msg_id 推 canonical 干净版替换临时气泡。
         # record_assistant_turn 已通过 exclude_origin_channel="desktop" 跳过 desktop fanout，
@@ -717,9 +724,13 @@ async def desktop_wake(body: dict = Body(default={}), _auth=Depends(require_scop
                 except Exception:
                     pass
             if reply:
-                # Shared reality guard before record_assistant_turn.
-                from core.reality_output_guard import clean_reality_reply_text as _clean_wake_reply
-                reply = _clean_wake_reply(reply, pipeline.character.name) or reply
+                # Shared reality guard before record_assistant_turn. Paragraph
+                # enforcement is reserved for the outgoing copy after record.
+                from core.reality_output_guard import (
+                    clean_reality_reply_text as _clean_wake_reply,
+                    clean_reality_reply_text_for_memory as _clean_wake_memory_reply,
+                )
+                reply = _clean_wake_memory_reply(reply, pipeline.character.name) or reply
             if reply:
                 logger.info(
                     "[desktop_wake] Path B LLM done uid=%s event_id=%s reply_len=%d",
@@ -749,8 +760,9 @@ async def desktop_wake(body: dict = Body(default={}), _auth=Depends(require_scop
                 # Visible reply: strip render/NMP tags only; memory already scrubbed
                 # inside record_assistant_turn (memory_text path).
                 from core.response_processor import strip_render_tags as _strip_tags
+                visible_reply = _clean_wake_reply(reply, pipeline.character.name) or reply
                 return {
-                    "reply": _strip_tags(reply) or reply,
+                    "reply": _strip_tags(visible_reply) or visible_reply,
                     "source": "live_wake",
                     "turn_id": turn_result.turn_id,
                     "msg_id": turn_result.turn_id,

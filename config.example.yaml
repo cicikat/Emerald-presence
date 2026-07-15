@@ -372,6 +372,10 @@ anti_collapse:
   segment_min_len: 40      # 分段坍缩阈值：无换行且字数超过此值才计一次"未分段"命中
   segment_recent_n: 2      # 连续几轮命中"未分段"才触发分段提示（同样延续 hint_rounds 轮）
   # 旧键 recent_n / thresholds 已废弃，读到时忽略并打 warning，不做自动迁移
+output:
+  segment_enforce:
+    enabled: false          # 生成后段落硬兜底；默认关，便于 A/B 对比
+    min_len: 40             # 缺省时回退 anti_collapse.segment_min_len
 context:
   max_turns: 30
 chat:

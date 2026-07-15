@@ -1457,6 +1457,24 @@ textarea { resize: vertical; min-height: 72px; }
         <div id="obs-ablation-list" style="font-size:12px">加载中…</div>
       </div>
 
+      <div class="card" id="obs-segment-enforce-card" style="margin-bottom:16px">
+        <div class="card-header">
+          <h3>生成后段落兜底（实验）</h3>
+          <span style="font-size:12px;color:var(--muted)">只改发送副本，不写回短期记忆；默认关闭</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <label style="display:flex;align-items:center;gap:8px;flex:1">
+            <input type="checkbox" id="obs-segment-enforce-enabled">
+            <span style="font-size:12px">长篇单段回复按句末标点补一个空行</span>
+          </label>
+          <label style="font-size:12px;color:var(--muted)">阈值
+            <input type="number" id="obs-segment-enforce-min-len" min="1" max="5000" style="width:72px;margin-left:4px">
+          </label>
+          <button class="btn btn-ghost btn-sm" onclick="loadOutputSegmentEnforce()">刷新</button>
+          <button class="btn btn-primary btn-sm" onclick="saveOutputSegmentEnforce()">保存</button>
+        </div>
+      </div>
+
       <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
         <input type="text" id="obs-prompt-uid" placeholder="uid (QQ号)" style="width:150px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text)">
         <select id="obs-prompt-n" style="padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text)">
@@ -1865,7 +1883,7 @@ function goto(page) {
     'observe-spend':   loadObserveSpend,
     'observe-group-arbiter': initObserveGroupArbiter,
     'observe-memory-summary': () => initObserveCharacters('obs-memory-summary-char'),
-    'observe-prompt':  () => { loadObservePromptUidList(); loadPromptAblation(); },
+    'observe-prompt':  () => { loadObservePromptUidList(); loadPromptAblation(); loadOutputSegmentEnforce(); },
     'observe-probe':   () => loadObserveProbeUidList(),
     'observe-dream-prompt': () => loadObserveDreamPromptUidList(),
     'observe-trigger-catalog': () => loadTriggerCatalog(),
@@ -4684,6 +4702,28 @@ async function savePromptAblation() {
     await api('PUT', '/prompt-ablation', { disabled_layers, perception_block_disabled });
     toast('已生效，下一轮对话起作用', 'ok');
     loadPromptAblation();
+  } catch(e) {
+    toast('保存失败：' + e.message, 'err');
+  }
+}
+
+async function loadOutputSegmentEnforce() {
+  try {
+    const d = await api('GET', '/output-segment-enforce');
+    document.getElementById('obs-segment-enforce-enabled').checked = !!d.enabled;
+    document.getElementById('obs-segment-enforce-min-len').value = String(d.min_len || 40);
+  } catch(e) {
+    toast('读取生成后段落兜底失败：' + e.message, 'err');
+  }
+}
+
+async function saveOutputSegmentEnforce() {
+  const enabled = document.getElementById('obs-segment-enforce-enabled').checked;
+  const min_len = parseInt(document.getElementById('obs-segment-enforce-min-len').value || '40', 10);
+  try {
+    await api('PUT', '/output-segment-enforce', { enabled, min_len });
+    toast('生成后段落兜底已更新，下一轮对话起作用', 'ok');
+    loadOutputSegmentEnforce();
   } catch(e) {
     toast('保存失败：' + e.message, 'err');
   }

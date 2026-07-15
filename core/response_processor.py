@@ -7,6 +7,10 @@ import re
 import logging
 
 from core.error_handler import log_error
+from core.output.segment_enforcer import (
+    enforce_paragraph_breaks,
+    get_segment_enforce_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +30,12 @@ _SELF_CENSOR_PATTERNS = [
 ]
 
 
-def process(reply: str, character_name: str) -> list[str]:
+def _process_reply(
+    reply: str,
+    character_name: str,
+    *,
+    enforce_segments: bool = True,
+) -> list[str]:
     """QQ-only legacy processor: guard filters + segment split.
 
     Helper functions (_remove_tool_call_tags / _remove_character_prefix /
@@ -52,12 +61,27 @@ def process(reply: str, character_name: str) -> list[str]:
         if not reply:
             return []
 
-        # 步骤5：超过 MAX_LENGTH 自动分段
+        # 步骤5：可选的生成后段落兜底，只改发送副本，不写回 memory。
+        segment_enabled, segment_min_len = get_segment_enforce_settings()
+        if enforce_segments and segment_enabled:
+            reply = enforce_paragraph_breaks(reply, min_len=segment_min_len)
+
+        # 步骤6：超过 MAX_LENGTH 自动分段
         return _split_message(reply)
 
     except Exception as e:
         log_error("response_processor.process", e)
         return [reply] if reply else []
+
+
+def process(reply: str, character_name: str) -> list[str]:
+    """Clean and split the visible QQ copy, including configured enforcement."""
+    return _process_reply(reply, character_name, enforce_segments=True)
+
+
+def process_memory_copy(reply: str, character_name: str) -> list[str]:
+    """Run the legacy cleanup/split path without Brief 72's visible-only enforcer."""
+    return _process_reply(reply, character_name, enforce_segments=False)
 
 
 def _remove_tool_call_tags(text: str) -> str:

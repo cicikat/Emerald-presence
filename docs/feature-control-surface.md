@@ -2,7 +2,7 @@
 
 管理服务的设置面分三层：
 
-- persona 级：`/settings/model-routing`、`/settings/tts-desktop`、`/settings/tool-loop`、`/settings/thinking`，供桌面客户端使用；不返回模型密钥。
+- persona 级：`/settings/model-routing`、`/settings/tts-desktop`、`/settings/tool-loop`、`/settings/thinking`、`GET/PUT /output-segment-enforce`，供桌面客户端使用；不返回模型密钥。段落兜底开关热更新 `output.segment_enforce`，只影响非流式发送副本，默认关闭。
 - admin 专用配置：`/model-presets/*`、`/proxy`、`/tts-config`、`/scheduler/config`、`/settings/relay`。
 - admin 功能开关白名单：`GET/PUT /settings/feature-flags`。只接受 `settings_feature_flags.FLAGS` 中已有运行时消费者的布尔字段，不接受密钥、路径、额度或任意 YAML。
 
@@ -10,4 +10,4 @@
 
 TTS 有两个不同开关：`tts.enabled` 是服务端能力总开关，`tts.desktop_enabled` 决定桌面是否显示/请求语音条。`POST /tts/synthesize` 仅在两者均开启且 persona 鉴权通过时按需合成，返回 base64 WAV。
 
-降级路径：关闭对应功能布尔值时保留其余配置；tool loop 回到普通单次回复，thinking 回到无前置思考，桌面 TTS 回到纯文字，模型可切回稳定 routing profile。
+降级路径：关闭对应功能布尔值时保留其余配置；tool loop 回到普通单次回复，thinking 回到无前置思考，桌面 TTS 回到纯文字，生成后段落兜底关闭后直接发送清理后的模型原文，模型可切回稳定 routing profile。

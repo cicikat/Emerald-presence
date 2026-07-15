@@ -249,6 +249,31 @@ anti_collapse:
 `core/memory/short_term.py` 的 `DEFAULT_HINT_ROUNDS` / `DEFAULT_SEGMENT_MIN_LEN` / `DEFAULT_SEGMENT_RECENT_N`
 硬编码默认值（3 / 40 / 2），不报错。
 
+### S4 生成后兜底：segment_enforcer（Brief 72）
+
+`core/output/segment_enforcer.py::enforce_paragraph_breaks()` 是 S4 预防之外的非流式发送前硬兜底：
+当回复没有 `\n\n` 且长度超过有效 `min_len` 时，只在 `。！？…` 句末候选中选择接近全文中点的
+停顿，插入一个空行；不改写标点，不增删字词。QQ 路径在
+`core/response_processor.py::process()` 完成清理后、`_split_message()` 前调用；桌面/手机 Reality 路径
+在 `core/reality_output_guard.py::clean_reality_reply_text()` 出口调用。Dream 与已吐出 token 的流式路径
+均不在本次覆盖范围。
+
+该兜底由 `output.segment_enforce.enabled` 控制，默认关闭；`output.segment_enforce.min_len` 缺省时回退
+到 `anti_collapse.segment_min_len`，再缺省回退 S4 的 `DEFAULT_SEGMENT_MIN_LEN=40`。运行时或文本处理
+异常均 fail-open，直接返回原文。`GET/PUT /output-segment-enforce` 可热切换，管理面板「Prompt 层检视」
+和桌面客户端「偏好 → 系统设置」均提供入口。
+
+**存储红线**：enforcer 只能处理发送副本，结果绝不写回 `short_term` / `event_log`。S4 的
+`note_segment_collapse_signal()` 必须继续读取模型原始回复，否则开启兜底后会掩盖模型真实的分段坍缩，
+令生成前预防错误失效。
+
+```yaml
+output:
+  segment_enforce:
+    enabled: false
+    min_len: 40
+```
+
 ---
 
 ## token 裁剪

@@ -585,6 +585,9 @@ async def handle_message(message: dict):
 
         # ── 步骤7：后处理回复 ────────────────────────────────────────────────
         segments = response_processor.process(raw_reply, _pipeline.character.name)
+        memory_segments = response_processor.process_memory_copy(
+            raw_reply, _pipeline.character.name,
+        )
         logger.info(f"[handle_message] 后处理完成，共 {len(segments)} 段")
         if not segments:
             logger.warning("[handle_message] LLM 回复经处理后为空，本轮不发送")
@@ -597,6 +600,7 @@ async def handle_message(message: dict):
             segments, user_id, content, target_id, is_group,
             frozen_scope=_frozen_scope,
             pending_paths=_meta.get("pending_paths", []),
+            memory_reply="\n".join(memory_segments),
             web_echo=bool(context.get("web_recall_result")),
             coplay_echo=_coplay_is_active(user_id, char_id=_char_id),
             loop_executed=_loop_active,
@@ -666,6 +670,9 @@ async def _reply_with_tool_result(
             return
 
         segments = response_processor.process(raw_reply, _pipeline.character.name)
+        memory_segments = response_processor.process_memory_copy(
+            raw_reply, _pipeline.character.name,
+        )
         if not segments:
             logger.warning("[_reply_with_tool_result] 处理后回复为空，不发送")
             return
@@ -676,6 +683,7 @@ async def _reply_with_tool_result(
             segments, user_id, _turn_content, target_id, is_group,
             frozen_scope=frozen_scope,
             pending_paths=_meta.get("pending_paths", []),
+            memory_reply="\n".join(memory_segments),
             coplay_echo=_coplay_is_active(user_id, char_id=_char_id),
         )
 
@@ -784,6 +792,7 @@ async def _qq_reality_reply_adapter(
     web_echo: bool = False,
     coplay_echo: bool = False,
     loop_executed: bool = False,
+    memory_reply: str | None = None,
 ) -> None:
     """
     QQ LLM_ASSISTANT_REPLY 统一出口（R1-D: turn_sink 统一链路）。
@@ -827,7 +836,7 @@ async def _qq_reality_reply_adapter(
     # bypass_gate=True: already inside conversation_lock from the call site.
     try:
         await _record_turn(
-            assistant_text="\n".join(segments),
+            assistant_text=memory_reply if memory_reply is not None else "\n".join(segments),
             uid=user_id,
             source=TurnSource.USER_CHAT,
             user_text=user_content,

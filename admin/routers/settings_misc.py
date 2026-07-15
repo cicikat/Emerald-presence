@@ -297,6 +297,58 @@ async def update_multi_message(body: dict, auth=Depends(require_scopes("persona"
     return {"message": f"分条发送已{'启用' if enabled else '禁用'}", "multi_message": enabled}
 
 
+# ─── 生成后段落兜底（Brief 72） ───────────────────────────────────────────────
+
+class OutputSegmentEnforceUpdate(BaseModel):
+    enabled: bool
+    min_len: Optional[int] = None
+
+
+@router.get("/output-segment-enforce", summary="获取生成后段落兜底配置")
+async def get_output_segment_enforce(auth=Depends(require_scopes("persona"))):
+    from core.output.segment_enforcer import get_segment_enforce_settings
+
+    enabled, min_len = get_segment_enforce_settings()
+    return {"enabled": enabled, "min_len": min_len}
+
+
+@router.put("/output-segment-enforce", summary="修改生成后段落兜底配置（热生效）")
+async def update_output_segment_enforce(
+    body: OutputSegmentEnforceUpdate,
+    auth=Depends(require_scopes("persona")),
+):
+    if body.min_len is not None and not (1 <= body.min_len <= 5000):
+        raise HTTPException(status_code=422, detail="min_len 必须在 1~5000 之间")
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            full_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {e}")
+
+    segment_cfg = full_cfg.setdefault("output", {}).setdefault("segment_enforce", {})
+    segment_cfg["enabled"] = body.enabled
+    if body.min_len is not None:
+        segment_cfg["min_len"] = body.min_len
+
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(full_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入配置文件失败: {e}")
+
+    from core import config_loader
+    config_loader.reload_config()
+    from core.output.segment_enforcer import get_segment_enforce_settings
+
+    enabled, min_len = get_segment_enforce_settings()
+    return {
+        "message": "生成后段落兜底配置已更新，下一轮对话起作用",
+        "enabled": enabled,
+        "min_len": min_len,
+    }
+
+
 # ─── Prompt 层级消融开关（CC 任务 23 · B6） ─────────────────────────────────────
 
 class PromptAblationUpdate(BaseModel):
