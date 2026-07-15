@@ -1,0 +1,10 @@
+id: proper-multi-paragraph
+reply: |-
+  我先听你把今天的事说完，不急着替你下结论。
+
+  等那些绷紧的地方稍微松一点，我们再一起看看明天从哪里开始。
+expect:
+  strict: true
+  loose: true
+  paragraph_count: 2
+  unsegmented: false

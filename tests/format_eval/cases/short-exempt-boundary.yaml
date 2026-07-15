@@ -1,0 +1,8 @@
+id: short-exempt-boundary
+min_len: 8
+reply: "一二三四五六七八"
+expect:
+  strict: false
+  loose: true
+  paragraph_count: 1
+  unsegmented: true

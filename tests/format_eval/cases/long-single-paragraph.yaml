@@ -1,0 +1,7 @@
+id: long-single-paragraph
+reply: "我先把今天发生的事慢慢告诉你。早上出门时天色还很暗，路边的树叶被风吹得不断翻动。到了中午，积压的工作终于一点点理顺，心里也跟着松下来。晚上回到家时，我才发现自己其实一直在等一个能安静说话的时刻。"
+expect:
+  strict: false
+  loose: false
+  paragraph_count: 1
+  unsegmented: true

@@ -1,0 +1,9 @@
+id: single-newline-s4-compatible
+reply: |-
+  这一段很长，已经明显超过生产侧的分段检测阈值，用来确认单个真实换行会打断 S4 的连续坍缩信号。
+  这里仍然没有段落空行，所以 strict 必须失败，但 loose 应与现有 S4 判定保持一致并通过。
+expect:
+  strict: false
+  loose: true
+  paragraph_count: 1
+  unsegmented: true
