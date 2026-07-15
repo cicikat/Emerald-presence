@@ -80,9 +80,38 @@ def _install_fastapi_stub(monkeypatch):
     )
 
 
+def _install_ui_transport_stubs(monkeypatch):
+    """Keep this scheduler test outside the concrete WebSocket transports."""
+    import channels
+
+    async def noop(*args, **kwargs):
+        return None
+
+    desktop_ws = SimpleNamespace(
+        is_connected=lambda: False,
+        _new_msg_id=lambda: "test-stream-message",
+        push_message=noop,
+        push_segments=noop,
+    )
+    ui_push = SimpleNamespace(
+        any_connected=lambda: False,
+        push_stream_start=noop,
+        push_stream_delta=noop,
+        push_stream_end=noop,
+    )
+
+    monkeypatch.setitem(sys.modules, "channels.desktop_ws", desktop_ws)
+    monkeypatch.setitem(sys.modules, "channels.ui_push", ui_push)
+    # `from channels import ...` can reuse attributes cached on the package by
+    # an earlier test, so replace those attributes as well as sys.modules.
+    monkeypatch.setattr(channels, "desktop_ws", desktop_ws, raising=False)
+    monkeypatch.setattr(channels, "ui_push", ui_push, raising=False)
+
+
 @pytest.mark.asyncio
 async def test_owner_chat_turn_marks_user_active(monkeypatch):
     _install_fastapi_stub(monkeypatch)
+    _install_ui_transport_stubs(monkeypatch)
     from admin.routers import chat
     from core.scheduler import loop
 
