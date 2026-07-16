@@ -74,16 +74,18 @@
 
 ## design-backlog
 
-以下条目都等待设计拍板，不再伪装成“等人写代码”。启动任一项时从 Git 历史取回原详情并单独开工单。
+**2026-07-16 全部拍板关闭**，裁决与理由见 `DESIGN.md` §十一（决策 3–8）。摘要：
 
-- D7：角色日记是否反向进入长期认知。
-- G4：花园 `dry` / `gift` / `ask` 的采后最终容器。
-- DESIGN-1：感知数据何时可直接说、何时只影响态度。
-- DESIGN-2：主动联系与不打扰的边界。
-- SC1：酒馆卡导入卫生、输出风格冲突与 token 预算；模块继续冻结。
-- REC1：召回准入从硬名单升级为长度、信息量、新颖度启发式。
-- P2-1：用户明确要求“再读一遍”时是否允许绕过工具已读指纹。
-- PB1：用户日记、角色记录与情景记忆的来源隔离；等待当前召回链复评。
+- D7：**不回流**（自产内容不固化原则）。
+- G4：**最小方案**，全落 `storage.json` history；gift 可触发一次性主动消息（走 ledger）。
+- DESIGN-1：**默认只影响态度**，直说需 tag 命中 / 健康告警 / 用户显式问三者之一。
+- DESIGN-2：**追认现状三级**（健康可打断 / 情感 QUIET+ledger / 信息可 defer）。
+- SC1：**维持冻结**。
+- REC1：**observe**，出现实际坏召回样本再动。
+- PB1：**并入决策 1**（数据级来源标记原则，Brief 79 模式），召回链复评时执行。
+
+需要写码的两条（G4 最小方案、P2-1）已各自出单落地（Brief 83 / Brief 82），见「本轮已核对关闭」。
+其余为纯设计裁决无代码工作。
 
 ## 用户动作（代码侧无事可做）
 
@@ -101,3 +103,5 @@
 | TEST-1 | `test_sandbox_paths.py` 已断言 `runtime/channel_queue.json`，旧 `_identity_file` 全仓零命中。 |
 | B11 / F10 / D2 / P1 / SEC-AUTH-1 / SEC-WS-1 / identity-1 / TD-2 / TD-3 | 均已完成，已从当前问题区移除。 |
 | PB2 | 2026-07-16 在 `1.5_fact_boundary` 加桌宠身份锚点；空屏幕感知时明确禁止虚构屏幕场景，并有专项测试。 |
+| P2-1 | Brief 82：`tool_read_log.detect_bypass_intent()` 探测显式重读短语常量表，命中给本轮 `execute()` 传 `bypass_read_log=True`，`is_recently_read(bypass=True)` 放行拦截但指纹照常刷新。 |
+| G4 | Brief 83：`garden_manager.daily_check()` 里 `dry`/`gift`/`ask` 处理完成后统一落 `storage.json.history`（`kind/flower/mood_source/ts/note`）并离开 `harvest`；`garden_handle_self` proposer 收窄为仅 vase，`ask`/`dry` 不再发消息，仅 gift 保留经 `ProactiveLedger` 记账的主动消息；`GET /garden/state` 新增 `history_recent`。 |

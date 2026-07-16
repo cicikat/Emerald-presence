@@ -106,11 +106,11 @@ _check_garden_water()
 | 事件 | 条件 | 状态变化 | 发言策略 |
 |---|---|---|---|
 | `harvest_expired` | `now > expires_at` | 从 `harvest` 移到 `history`，标记 `expired` | 30% sample |
-| `harvest_handle` / `ask` | 开花超过 3 天且未处理 | 标记 `handle_triggered` | 必走 `_pipeline_send`，但仍受用户活跃窗口影响 |
-| `harvest_handle` / `dry` | 随机处理分支 | 标记 `dried` | 30% sample |
+| `harvest_handle` / `ask` | 开花超过 3 天且未处理 | 从 `harvest` 移除，追加进 `history`（`kind="ask"`） | 不发言（G4） |
+| `harvest_handle` / `dry` | 随机处理分支 | 从 `harvest` 移除，追加进 `history`（`kind="dry"`） | 不发言（G4） |
 | `harvest_handle` / `vase` | 随机处理分支 | 进入 `vase`，从 `harvest` 移除 | 30% sample |
-| `harvest_handle` / `gift` | 随机处理分支 | 写 `gifted_note` | 必走 `_pipeline_send`，但仍受用户活跃窗口影响 |
-| `harvest_handle` / `silent` | 随机处理分支 | 只标记已处理 | 不发言 |
+| `harvest_handle` / `gift` | 随机处理分支 | 从 `harvest` 移除，追加进 `history`（`kind="gift"`），写 `gifted_note` | 必走 `_pipeline_send`，但仍受用户活跃窗口影响 |
+| `harvest_handle` / `silent` | 随机处理分支 | 只标记已处理，仍留在 `harvest` | 不发言 |
 | `vase_wilted` | `now > wilts_at` | 从 `vase` 移到 `history`，标记 `wilted` | 30% sample |
 
 处理概率：
@@ -119,6 +119,25 @@ _check_garden_water()
 - `dry/vase`: 0.30-0.60
 - `gift`: 0.60-0.80
 - `silent`: 0.80-1.00
+
+### 采后容器：dry/gift/ask 统一归宿（G4，Brief 83）
+
+`ask` / `dry` / `gift` 三种采后处理的最终产物统一追加进 `storage.json` 的 `history`
+列表（不新建容器、不新建 schema 顶层键），条目结构：
+
+```json
+{"kind": "dry|gift|ask", "flower": "<flower_id>", "mood_source": "<mood_key>", "ts": 0.0, "note": "..."}
+```
+
+`mood_source` 取该花种 `mood_keys` 的第一项（花种与情绪槽位固定映射，非当时实时情绪快照）。
+三者处理完成后立即离开 `harvest`（此前只有 `vase` 会离开，`ask`/`dry`/`gift` 会一直滞留到
+15 天后被 `harvest_expired` 误标为 `expired`，真实处理结果丢失——已在此工单修掉，见「当前边界」旧条目 3）。
+
+只有 **gift** 保留主动消息（走既有 `propose_garden_handle_gift` proposer + `_pipeline_send`，
+完整受 QUIET 状态机 / DND / 冷却 / `ProactiveLedger` gating，不是绕过账本的直发）；
+`ask` 与 `dry` 不再产生任何调度器消息，`garden_handle_self` proposer 收窄为只覆盖 `vase` 分支。
+`ask`/`dry`/`gift` 的处理结果改为通过 `GET /garden/state` 的 `history_recent`（最近 1 条
+`history`）被动露出，不主动打扰。
 
 ---
 
@@ -131,6 +150,8 @@ _check_garden_water()
 - `slots`：五个花槽的展示数据，含 `stage_progress`
 - `harvest_count`：收获区数量
 - `vase_count`：花瓶数量
+- `history_recent`：`history` 列表最近 1 条（可能为空列表），G4 花园 presence 提示素材，
+  免新建接口（Hard Rule 7）
 
 接口只读取和必要时初始化状态，不执行浇水。
 
@@ -142,4 +163,6 @@ _check_garden_water()
 2. `garden_bloom`、`garden_handle_*`、`garden_vase_wilted` 已有原生 proposer 和独立冷却；
    事件进入缓存后由 gating 每 tick 最多选择一个，只有真实发送成功才 mark。`garden_water` /
    `garden_daily` 扫描本体仍按原冷却执行状态变化。
-3. `ask` / `gift` / `dry` 分支会标记 `handle_triggered`，其中只有 `vase` 会从 `harvest` 移除；如果设计上“送给用户/做成干花”也应离开 harvest，需要补状态迁移。
+3. ~~`ask` / `gift` / `dry` 分支会标记 `handle_triggered`，其中只有 `vase` 会从 `harvest` 移除~~
+   已在 Brief 83（G4）修复：三者处理完成后立即离开 `harvest`，落 `history` 记录，详见上方
+   「采后容器：dry/gift/ask 统一归宿」。

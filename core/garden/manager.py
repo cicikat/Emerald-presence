@@ -97,6 +97,15 @@ def _resolve_slot_for_mood(mood: str) -> str | None:
     return None
 
 
+def _mood_source_for_flower(flower_id: str) -> str:
+    """该花种对应的代表性 mood（取 mood_keys 第一项），找不到返回空串。"""
+    for flower in FLOWERS:
+        if flower["id"] == flower_id:
+            keys = flower.get("mood_keys") or []
+            return keys[0] if keys else ""
+    return ""
+
+
 def _bootstrap(*, char_id: str = DEFAULT_CHAR_ID) -> dict:
     """plants.json 不存在则初始化五槽位；storage.json 不存在则初始化空仓库。返回 plants 数据。"""
     garden_dir = get_paths().garden(char_id=char_id)
@@ -262,12 +271,15 @@ def daily_check(*, char_id: str) -> list:
             item["handle_triggered"] = True
             r = random.random()
             meta = _flower_meta(item["flower_id"])
+            note = ""
             if r < HANDLE_ASK_THRESHOLD:
                 action = "ask"
+                note = "想问问你要怎么处理"
             elif r < HANDLE_SELF_THRESHOLD:
                 if random.random() < 0.5:
                     action = "dry"
                     item["status"] = "dried"
+                    note = "自己收着晒成了干花"
                 else:
                     action = "vase"
                     item["status"] = "vased"
@@ -280,8 +292,22 @@ def daily_check(*, char_id: str) -> list:
             elif r < HANDLE_GIFT_THRESHOLD:
                 action = "gift"
                 item["gifted_note"] = meta["language"]
+                note = meta["language"]
             else:
                 action = "silent"
+
+            # G4 最小方案：dry/gift/ask 的最终产物统一落 history 作纪念记录，
+            # 不新建容器；三者处理完成后即离开 harvest（DESIGN.md §十一 决策 8）。
+            if action in ("dry", "gift", "ask"):
+                storage.setdefault("history", []).append({
+                    "kind": action,
+                    "flower": item["flower_id"],
+                    "mood_source": _mood_source_for_flower(item["flower_id"]),
+                    "ts": now,
+                    "note": note,
+                })
+                harvest_to_remove.append(item)
+
             event = {
                 "type": "harvest_handle",
                 "handle_action": action,
@@ -378,4 +404,6 @@ def get_state(*, char_id: str) -> dict:
             "slots": result_slots,
             "harvest_count": len(storage.get("harvest", [])),
             "vase_count": len(storage.get("vase", [])),
+            # G4：history 最近 1 条作为花园 presence 提示素材，复用既有观测端点，不新建接口。
+            "history_recent": storage.get("history", [])[-1:],
         }

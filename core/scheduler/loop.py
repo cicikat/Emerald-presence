@@ -54,7 +54,6 @@ _COOLDOWNS: dict[str, int] = {
     "garden_bloom":         8 * 3600,   # 开花发言冷却（同株短期不重复）
     "coplay_commentary":    300,        # 陪玩主动开口：≥5分钟一次（Brief 41 D5）
     "garden_harvest_expired": 4 * 3600,
-    "garden_handle_ask":    4 * 3600,
     "garden_handle_gift":   4 * 3600,
     "garden_handle_self":   4 * 3600,
     "garden_vase_wilted":   4 * 3600,

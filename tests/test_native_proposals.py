@@ -340,17 +340,34 @@ def test_garden_reactive_proposals_use_cached_events():
         "now_ts": 1_000.0,
         "garden_bloom_events": [{"type": "bloom", "name": "雏菊", "received_at": 990.0}],
     })
-    ask = garden_daily.propose_garden_handle_ask({
+    # G4：dry/ask 不再发消息，vase 分支仍走 garden_handle_self（DESIGN.md §十一 决策 8）。
+    vase = garden_daily.propose_garden_handle_self({
         "now_ts": 1_000.0,
         "garden_daily_events": [
-            {"type": "harvest_handle", "handle_action": "ask", "name": "雏菊", "received_at": 990.0}
+            {"type": "harvest_handle", "handle_action": "vase", "name": "雏菊", "received_at": 990.0}
         ],
     })
 
     assert bloom.trigger_name == "garden_bloom"
-    assert ask.trigger_name == "garden_handle_ask"
+    assert vase.trigger_name == "garden_handle_self"
     assert 0.30 <= bloom.urgency <= 0.49
-    assert 0.30 <= ask.urgency <= 0.49
+    assert 0.30 <= vase.urgency <= 0.49
+
+
+def test_garden_handle_self_ignores_dry_and_ask_no_longer_messages():
+    """G4：ask 与 dry 不发消息，garden_handle_self 只覆盖 vase（决策 8）。"""
+    from core.scheduler.triggers import garden_daily
+
+    assert not hasattr(garden_daily, "propose_garden_handle_ask")
+
+    for action in ("dry", "ask"):
+        proposal = garden_daily.propose_garden_handle_self({
+            "now_ts": 1_000.0,
+            "garden_daily_events": [
+                {"type": "harvest_handle", "handle_action": action, "name": "雏菊", "received_at": 990.0}
+            ],
+        })
+        assert proposal is None, f"{action} 不应再产生 garden_handle_self proposal"
 
 
 def test_weather_light_propose_uses_reactive_tier(monkeypatch):

@@ -187,12 +187,6 @@ POLICY_TABLE: dict[str, TriggerPolicy] = {
         active_window_behavior="drop",
         mark_on_drop=True,
     ),
-    "garden_handle_ask": TriggerPolicy(
-        trigger_id="garden_handle_ask",
-        priority="filler",
-        active_window_behavior="drop",
-        mark_on_drop=True,
-    ),
     "garden_handle_gift": TriggerPolicy(
         trigger_id="garden_handle_gift",
         priority="filler",

@@ -683,9 +683,8 @@ window 拦截、LLM 空回复或发送前异常时，不调用 execute 的 `afte
 | `garden_daily` | 24h | 低 | garden_daily | 扫描 harvest 过期、采后处理、花瓶枯萎 |
 | `garden_bloom` | 8h | 低 | garden_water | 开花事件发言名；事件发言前单独 check/mark |
 | `garden_harvest_expired` | 4h | 低 | garden_daily | 收获过期事件发言名；事件发言前单独 check/mark |
-| `garden_handle_ask` | 4h | 低 | garden_daily | 采后询问用户事件发言名；事件发言前单独 check/mark |
 | `garden_handle_gift` | 4h | 低 | garden_daily | 采后送给用户事件发言名；事件发言前单独 check/mark |
-| `garden_handle_self` | 4h | 低 | garden_daily | 采后自己处理事件发言名；事件发言前单独 check/mark |
+| `garden_handle_self` | 4h | 低 | garden_daily | 采后自己处理事件发言名（仅 vase 分支，G4 之后 dry/ask 不再发消息）；事件发言前单独 check/mark |
 | `garden_vase_wilted` | 4h | 低 | garden_daily | 花瓶枯萎事件发言名；事件发言前单独 check/mark |
 | `hidden_state_decay` | 12h | 维护 | hidden_state_decay | apply_time_decay：所有标量向目标半衰期衰减；不发言，stamp_trigger |
 | `hidden_state_consolidate` | 7天 | 维护 | hidden_state_decay | consolidate_baselines：sensitivity/touch baseline 轻推向 SCALAR_CENTER；不发言，stamp_trigger |

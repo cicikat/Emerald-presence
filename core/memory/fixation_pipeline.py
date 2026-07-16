@@ -529,8 +529,8 @@ def _write_trigger_audit_log(
 # 保留对话连续性。纯维护型触发（episodic_sweep / hidden_state_decay 等）不发言，
 # 不调用 capture_turn，无需列出。
 CONVERSATIONAL_TRIGGERS: frozenset[str] = frozenset({
-    # 花园伴生事件
-    "garden_bloom", "garden_harvest_expired", "garden_handle_ask",
+    # 花园伴生事件（G4：dry/ask 已改落 history 记录，不再主动发消息）
+    "garden_bloom", "garden_harvest_expired",
     "garden_handle_gift", "garden_handle_self", "garden_vase_wilted",
     # 时间类问候 / 碎碎念
     "morning_greeting", "night_reminder", "random_message", "weather_alert",

@@ -134,7 +134,6 @@ def test_registered_triggers_match_scheduler_proposer_surface():
         "spontaneous_recall",
         "garden_bloom",
         "garden_harvest_expired",
-        "garden_handle_ask",
         "garden_handle_gift",
         "garden_handle_self",
         "garden_vase_wilted",

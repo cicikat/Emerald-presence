@@ -40,7 +40,6 @@ MIGRATED_TRIGGERS: frozenset[str] = frozenset({
     "spontaneous_recall",
     "garden_bloom",
     "garden_harvest_expired",
-    "garden_handle_ask",
     "garden_handle_gift",
     "garden_handle_self",
     "garden_vase_wilted",

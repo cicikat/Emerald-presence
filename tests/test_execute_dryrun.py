@@ -129,14 +129,12 @@ async def test_native_proposal_executes_dryrun_for_each_registered_trigger(monke
         garden_daily.propose_garden_harvest_expired({"now_ts": 1_000.0, "garden_daily_events": [
             {"type": "harvest_expired", "name": "玫瑰", "received_at": 990.0}
         ]}),
-        garden_daily.propose_garden_handle_ask({"now_ts": 1_000.0, "garden_daily_events": [
-            {"type": "harvest_handle", "handle_action": "ask", "name": "玫瑰", "received_at": 990.0}
-        ]}),
         garden_daily.propose_garden_handle_gift({"now_ts": 1_000.0, "garden_daily_events": [
             {"type": "harvest_handle", "handle_action": "gift", "name": "玫瑰", "language": "珍重", "received_at": 990.0}
         ]}),
+        # G4：ask/dry 不再发消息，garden_handle_self 只剩 vase 分支（决策 8）。
         garden_daily.propose_garden_handle_self({"now_ts": 1_000.0, "garden_daily_events": [
-            {"type": "harvest_handle", "handle_action": "dry", "name": "玫瑰", "received_at": 990.0}
+            {"type": "harvest_handle", "handle_action": "vase", "name": "玫瑰", "received_at": 990.0}
         ]}),
         garden_daily.propose_garden_vase_wilted({"now_ts": 1_000.0, "garden_daily_events": [
             {"type": "vase_wilted", "name": "玫瑰", "received_at": 990.0}
@@ -175,7 +173,6 @@ async def test_native_proposal_executes_dryrun_for_each_registered_trigger(monke
         "spontaneous_recall",
         "garden_bloom",
         "garden_harvest_expired",
-        "garden_handle_ask",
         "garden_handle_gift",
         "garden_handle_self",
         "garden_vase_wilted",
