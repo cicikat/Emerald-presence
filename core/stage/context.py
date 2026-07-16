@@ -37,6 +37,9 @@ def render_presence(stage: Stage, *, viewer_id: str, chain_reply: bool = False) 
                     relation_lines.append(f"{name_a}对{name_b}的印象：{a_of_b}")
                 if b_of_a:
                     relation_lines.append(f"{name_b}对{name_a}的印象：{b_of_a}")
+                moments = relation.get("recent_moments") or []
+                if moments:
+                    relation_lines.append(f"{name_a}和{name_b}之间的往事：{moments[-1]}")
         if relation_lines:
             text += "\n\n【角色间既有印象】\n" + "\n".join(relation_lines)
     except Exception:

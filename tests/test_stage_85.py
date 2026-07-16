@@ -4,6 +4,95 @@ from __future__ import annotations
 import pytest
 
 
+# ── §5 relation arbitration + recent_moments ────────────────────────────────
+
+
+def test_arbiter_peer_reply_modulated_by_valence(sandbox):
+    from core.stage.arbiter import PEER_REPLY_BASE, score_candidates
+    from core.stage.char_relations import _empty_relation, _save_relation
+    from core.stage.models import Stage, StageSettings, TranscriptEntry
+
+    stage = Stage(
+        "g", "owner", ("yexuan", "yexuanJ-5412"),
+        settings=StageSettings(talkativeness={"yexuanJ-5412": 1.0}),
+    )
+    transcript = [
+        TranscriptEntry("owner", "在吗", 1, "t", "user"),
+        TranscriptEntry("yexuan", "我在", 2, "t", "user"),
+    ]
+
+    baseline = score_candidates(stage, transcript, candidates=["yexuanJ-5412"])[0]
+    assert baseline.parts["peer_reply"] == pytest.approx(PEER_REPLY_BASE)
+
+    relation = _empty_relation("yexuan", "yexuanJ-5412")
+    relation["b_of_a"]["valence"] = 1.0
+    assert _save_relation(relation)
+    fond = score_candidates(stage, transcript, candidates=["yexuanJ-5412"])[0]
+    assert fond.parts["peer_reply"] == pytest.approx(PEER_REPLY_BASE * 1.2)
+
+    relation["b_of_a"]["valence"] = -1.0
+    assert _save_relation(relation)
+    cold = score_candidates(stage, transcript, candidates=["yexuanJ-5412"])[0]
+    assert cold.parts["peer_reply"] == pytest.approx(PEER_REPLY_BASE * 0.8)
+
+
+@pytest.mark.asyncio
+async def test_relation_handler_rolls_recent_moments_capped_at_five(sandbox, monkeypatch):
+    from core.stage.char_relations import handler_update_char_relations, recent_moments
+
+    call_n = {"i": 0}
+
+    async def fake_chat(*args, **kwargs):
+        call_n["i"] += 1
+        return (
+            '{"a_of_b":{"summary":"甲觉得乙靠谱","valence":0.1},'
+            '"b_of_a":{"summary":"乙觉得甲随和","valence":0.1},'
+            f'"moment":"往事{call_n["i"]}"}}'
+        )
+
+    monkeypatch.setattr("core.llm_client.chat", fake_chat)
+    for i in range(7):
+        await handler_update_char_relations({
+            "uid": "owner", "char_a": "yexuan", "char_b": "yexuanJ-5412",
+            "excerpt": "甲→乙：回应", "timestamp": 100000.0 + i * 3600 * 7,
+            "write_envelope": {"source": "user_chat", "can_write_memory": True},
+        })
+
+    assert call_n["i"] == 7
+    assert recent_moments("yexuan", "yexuanJ-5412") == [f"往事{i}" for i in range(3, 8)]
+
+
+def test_recent_moments_backward_compatible_with_old_relation_files(sandbox):
+    from core.safe_write import safe_write_json
+    from core.sandbox import get_paths
+    from core.stage.char_relations import _pair, recent_moments
+
+    char_a, char_b = _pair("yexuan", "yexuanJ-5412")
+    old_style = {
+        "char_a": char_a, "char_b": char_b,
+        "a_of_b": {"summary": "旧摘要", "valence": 0.0, "updated_at": ""},
+        "b_of_a": {"summary": "", "valence": 0.0, "updated_at": ""},
+        "interaction_count": 1, "last_interaction_ts": 0.0,
+    }
+    assert safe_write_json(get_paths().char_relation(char_a=char_a, char_b=char_b), old_style)
+
+    assert recent_moments("yexuan", "yexuanJ-5412") == []
+
+
+def test_directed_block_and_presence_surface_recent_moment(sandbox):
+    from core.stage.char_relations import _empty_relation, _save_relation
+    from core.stage.context import render_presence
+    from core.stage.models import Stage
+
+    relation = _empty_relation("yexuan", "yexuanJ-5412")
+    relation["recent_moments"] = ["上次乙帮甲调琴"]
+    assert _save_relation(relation)
+
+    stage = Stage("g", "owner", ("yexuan", "yexuanJ-5412"))
+    presence = render_presence(stage, viewer_id="yexuan")
+    assert "上次乙帮甲调琴" in presence
+
+
 def _settings(**overrides):
     from core.stage.models import StageSettings
 

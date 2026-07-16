@@ -199,12 +199,15 @@ class StageCharacterView:
         if not quote:
             return ""
         speaker_name = get_char_name(triggered_by)
-        from core.stage.char_relations import viewer_summary
+        from core.stage.char_relations import recent_moments, viewer_summary
 
         summary, _valence = viewer_summary(self.char_id, triggered_by)
+        moments = recent_moments(self.char_id, triggered_by)
         lines = [f"你在回应 {speaker_name} 刚才那句：「{quote}」"]
         if summary:
             lines.append(f"你对{speaker_name}的印象：{summary}")
+        if moments:
+            lines.append(f"你和{speaker_name}之间：{moments[-1]}")
         lines.append("可以直接称呼对方，可以同意、反驳、追问或岔开。")
         return "\n".join(lines)
 

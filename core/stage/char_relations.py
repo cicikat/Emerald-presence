@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 RELATION_COOLDOWN_SECONDS = 6 * 60 * 60
 RELATION_SUMMARY_MAX_CHARS = 60
+RECENT_MOMENTS_MAX = 5
 
 
 def _pair(char_a: str, char_b: str) -> tuple[str, str]:
@@ -41,7 +42,24 @@ def _empty_relation(char_a: str, char_b: str) -> dict:
         "b_of_a": {"summary": "", "valence": 0.0, "updated_at": ""},
         "interaction_count": 0,
         "last_interaction_ts": 0.0,
+        "recent_moments": [],
     }
+
+
+def recent_moments(char_a: str, char_b: str) -> list[str]:
+    """Rolling list (<=RECENT_MOMENTS_MAX) of concrete shared moments (Brief 85 §5).
+
+    Pair-level, not per-viewer: a "he fixed my instrument last time" fact is
+    the same fact from either character's side. Relation files written before
+    this field existed simply have none — returns [], never raises.
+    """
+    relation = load_relation(char_a, char_b)
+    if relation is None:
+        return []
+    moments = relation.get("recent_moments")
+    if not isinstance(moments, list):
+        return []
+    return [str(item) for item in moments if str(item).strip()]
 
 
 def load_relation(char_a: str, char_b: str) -> dict | None:
@@ -113,6 +131,7 @@ def _parse_relation_response(raw: str, char_a: str, char_b: str) -> dict | None:
                 "summary": _clip_summary(b_of_a.get("summary")),
                 "valence": _clamp_valence(b_of_a.get("valence")),
             },
+            "moment": _clip_summary(parsed.get("moment")),
         }
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
@@ -132,8 +151,11 @@ def _relation_prompt(char_a: str, char_b: str, excerpt: str, old: dict) -> str:
         f"本轮直接互动：\n{excerpt}\n"
         "只输出 JSON："
         '{"a_of_b":{"summary":"", "valence":0},'
-        '"b_of_a":{"summary":"", "valence":0}}；'
-        f"其中 a={name_a}，b={name_b}，valence 范围为 -1 到 1。"
+        '"b_of_a":{"summary":"", "valence":0},'
+        '"moment":""}；'
+        f"其中 a={name_a}，b={name_b}，valence 范围为 -1 到 1；"
+        "moment 是这次互动里一件值得记住的具体小事"
+        "（量级参考：「上次他帮我调琴」），没有就留空字符串。"
     )
 
 
@@ -195,6 +217,13 @@ async def handler_update_char_relations(payload: dict) -> None:
     timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
     relation["a_of_b"] = {**updated["a_of_b"], "updated_at": timestamp}
     relation["b_of_a"] = {**updated["b_of_a"], "updated_at": timestamp}
+    moment = str(updated.get("moment") or "").strip()
+    if moment:
+        existing_moments = relation.get("recent_moments")
+        if not isinstance(existing_moments, list):
+            existing_moments = []
+        existing_moments = [str(item) for item in existing_moments if str(item).strip()]
+        relation["recent_moments"] = (existing_moments + [moment])[-RECENT_MOMENTS_MAX:]
     if _save_relation(relation):
         _append_provenance(uid, char_a, char_b, old_a, relation["a_of_b"]["summary"])
         _append_provenance(uid, char_b, char_a, old_b, relation["b_of_a"]["summary"])

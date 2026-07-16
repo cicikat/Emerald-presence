@@ -52,6 +52,25 @@ def _keyword_relevance(stage: Stage, char_id: str, text: str) -> float:
     return min(hits * 0.2, 0.6)
 
 
+def _peer_valence(char_id: str, peer_id: str) -> float:
+    """`char_id`'s own fondness of `peer_id`, from the shared relation store.
+
+    Brief 85 §5: characters who like each other are more eager to reply —
+    relation participates in arbitration by *modulating* peer_reply eagerness,
+    never by gating who is allowed to speak. Fail-open: no relation on file
+    (or any lookup error) → 0.0, so the (1 + 0.2 * valence) coefficient
+    collapses to 1.0 (no modulation). Never touches owner↔char relations —
+    char_relations only ever stores char↔char pairs.
+    """
+    try:
+        from core.stage.char_relations import viewer_summary
+
+        _summary, valence = viewer_summary(char_id, peer_id)
+        return valence
+    except Exception:
+        return 0.0
+
+
 def score_candidates(
     stage: Stage,
     transcript: list[TranscriptEntry],
@@ -73,12 +92,17 @@ def score_candidates(
         talkativeness = min(max(stage.settings.talkativeness.get(char_id, 0.5), 0.0), 1.0)
         # peer_spoke: another AI character (not the human owner, not self) just spoke
         peer_spoke = latest_speaker != "owner" and latest_speaker != char_id
+        peer_reply = 0.0
+        if peer_spoke:
+            # valence ∈ [-1, 1] (char_relations clamps it) → coefficient ∈ [0.8, 1.2].
+            valence_coef = 1.0 + 0.2 * _peer_valence(char_id, latest_speaker)
+            peer_reply = PEER_REPLY_BASE * talkativeness * valence_coef
         parts = {
             "talkativeness": talkativeness * 0.5,
             "addressed": VOCATIVE_SCORE if addressed[char_id] == "vocative" else MENTION_SCORE if addressed[char_id] == "mention" else 0.0,
             "question": VOCATIVE_QUESTION_BONUS if question and addressed[char_id] == "vocative" else OPEN_QUESTION_BONUS if question and not vocative else 0.0,
             "topic": min(sum(1 for keyword in set(stage.settings.keywords.get(char_id, ())) | set((derived_keywords or {}).get(char_id, ())) if keyword and keyword in latest_text) * 0.2, 0.6),
-            "peer_reply": PEER_REPLY_BASE * talkativeness if peer_spoke else 0.0,
+            "peer_reply": peer_reply,
             "recency_penalty": -_recency_penalty(char_id, transcript),
         }
         total = round(max(0.0, min(sum(parts.values()), 1.5)), 4)
