@@ -137,11 +137,10 @@ class TestWatchUnifiedGating:
         from core.scheduler.defer_queue import clear_all
         from core.scheduler.triggers import watch
 
-        # on_watch_event() reads datetime.now().hour to skip 06-08 (可能晨跑) and to
-        # pick day/night thresholds; without freezing it these tests are wall-clock
-        # dependent and fail for real whenever CI happens to run in that window.
-        # Fixed to 14:00 — outside both the 06-08 skip and the 22-06 night branch —
-        # matching the existing FakeDatetime convention in test_execute_dryrun.py.
+        # on_watch_event() reads datetime.now().hour for the stored event's "hour"
+        # field (used by _heart_rate_prompt()'s day/night wording); freezing it keeps
+        # these tests deterministic regardless of wall-clock time, matching the
+        # existing FakeDatetime convention in test_execute_dryrun.py.
         class FakeDatetime(datetime):
             @classmethod
             def now(cls):

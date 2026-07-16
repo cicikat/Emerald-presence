@@ -56,8 +56,6 @@ def propose(ctx: dict | None = None):
         return None
     hr = int(event.get("value") or 0)
     hour = int(event.get("hour", datetime.now().hour))
-    if 6 <= hour < 8:
-        return None
     if hr <= HR_CRITICAL_THRESHOLD:
         return None
 
@@ -87,8 +85,6 @@ def propose_hr_high(ctx: dict | None = None):
         return None
     hr = int(event.get("value") or 0)
     hour = int(event.get("hour", datetime.now().hour))
-    if 6 <= hour < 8:
-        return None
     if not (HR_HIGH_THRESHOLD < hr <= HR_CRITICAL_THRESHOLD):
         return None
 
@@ -235,30 +231,14 @@ async def on_watch_event(event_type: str, data: dict):
         now_hour = datetime.now().hour
         _remember_heart_rate(hr, now_hour)
 
-        # 06-08点跳过，可能晨跑
-        if 6 <= now_hour < 8:
-            # 设备可能高频上报心率，晨间每次上报都会命中此跳过分支，降 DEBUG。
-            logger.debug(f"[scheduler] 心率数据在早晨，跳过触发 hr={hr}")
-            return
-
-        # 深夜(22-06点)降低阈值，>100就关心
-        in_night = now_hour >= 22 or now_hour < 6
         trigger_name = ""
         proposal = None
-        if in_night:
-            if hr > HR_CRITICAL_THRESHOLD:
-                trigger_name = "hr_critical"
-                proposal = propose({"heart_rate_event": get_last_heart_rate_event()})
-            elif hr > HR_HIGH_THRESHOLD:
-                trigger_name = "hr_high"
-                proposal = propose_hr_high({"heart_rate_event": get_last_heart_rate_event()})
-        else:
-            if hr > HR_CRITICAL_THRESHOLD:
-                trigger_name = "hr_critical"
-                proposal = propose({"heart_rate_event": get_last_heart_rate_event()})
-            elif hr > HR_HIGH_THRESHOLD:
-                trigger_name = "hr_high"
-                proposal = propose_hr_high({"heart_rate_event": get_last_heart_rate_event()})
+        if hr > HR_CRITICAL_THRESHOLD:
+            trigger_name = "hr_critical"
+            proposal = propose({"heart_rate_event": get_last_heart_rate_event()})
+        elif hr > HR_HIGH_THRESHOLD:
+            trigger_name = "hr_high"
+            proposal = propose_hr_high({"heart_rate_event": get_last_heart_rate_event()})
         if trigger_name and proposal is not None:
             _, reason, result = await _execute_watch_event(
                 proposal,
