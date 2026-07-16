@@ -25,6 +25,30 @@ class LayerSpec:
 logger = logging.getLogger(__name__)
 _prompt_logger = logging.getLogger("prompt_builder.token")
 
+_WATCH_FRESH_DAYS = 3
+_WATCH_TRIGGERS = {
+    "topic.energy", "topic.health", "topic.activity", "query.body_state",
+}
+
+
+def _watch_segment_is_fresh(segment_time: str, *, today=None) -> bool:
+    """Return whether a watch sleep segment is recent enough for layer 3.6."""
+    try:
+        from datetime import date
+        from core.config_loader import get_config
+
+        if today is None:
+            today = date.today()
+        raw_days = (get_config().get("watch") or {}).get(
+            "fresh_days", _WATCH_FRESH_DAYS
+        )
+        fresh_days = max(0, int(raw_days))
+        segment_date = date.fromisoformat(str(segment_time)[:10])
+        age_days = (today - segment_date).days
+        return 0 <= age_days <= fresh_days
+    except Exception:
+        return False
+
 # tone → soft description for afterglow hint (see _format_afterglow_soft_hint)
 _AG_TONE_DESC: dict[str, str] = {
     "comfort":  "warm, calm",
@@ -632,14 +656,15 @@ def build(
     # ─────────────────────────────────────────────────────────────────────────
     # 层 3.6：watch数据摘要（mode=tagged，体能/健康/睡眠相关话题才注入）
     # ─────────────────────────────────────────────────────────────────────────
-    _watch_triggers = {"topic.energy", "topic.health", "topic.activity", "query.body_state", "emotion.down", "emotion.indirect"}
-    if _tags & _watch_triggers:
+    if _tags & _WATCH_TRIGGERS:
         try:
             from core.memory.user_profile import load as _load_up
             _up = _load_up(user_id)
             _segs = [s for s in _up.get("sleep_segments", []) if s.get("duration_minutes", 0) > 0]
             if _segs:
                 _last_seg = _segs[-1]
+                if not _watch_segment_is_fresh(_last_seg.get("time", "")):
+                    raise ValueError("stale or invalid watch sleep segment")
                 _dur = int(_last_seg.get("duration_minutes", 0))
                 _h, _m = _dur // 60, _dur % 60
                 _seg_date = _last_seg["time"][:10]
@@ -652,8 +677,8 @@ def build(
                     "_layer": "3.6_watch",
                     "_provenance": {
                         "mode": "tagged",
-                        "triggers_checked": sorted(_watch_triggers),
-                        "matched_tags": sorted(_tags & _watch_triggers),
+                        "triggers_checked": sorted(_WATCH_TRIGGERS),
+                        "matched_tags": sorted(_tags & _WATCH_TRIGGERS),
                     },
                 })
         except Exception:
