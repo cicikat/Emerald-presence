@@ -622,7 +622,10 @@ def build(
     if not history or _is_silent_10min(user_id):
         try:
             from core.activity_manager import get_prompt_fragment
-            _activity_fragment = get_prompt_fragment(char_id=char_id)
+            _activity_fragment = get_prompt_fragment(
+                char_id=char_id,
+                suppress_growth=bool(_tags & _GROWTH_SELF_TRIGGERS),
+            )
             logger.info(f"[activity_inject] fragment={_activity_fragment!r}")
             if _activity_fragment:
                 _layers.append("2.6_presence")

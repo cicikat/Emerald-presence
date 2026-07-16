@@ -134,6 +134,44 @@ def _pick_activity(arc: str, char_id: str = _DEFAULT_CHAR_ID) -> dict:
         text = text.replace("{book}", random.choice(books))
     return {**chosen, "text": text}
 
+
+def _pick_recent_growth_activity(
+    char_id: str = _DEFAULT_CHAR_ID, *, now_ts: float | None = None
+) -> dict | None:
+    """Occasionally surface an interest that had a real practice in the last 20h."""
+    try:
+        from core.config_loader import get_config
+        from core.growth.interest_state import active_interests
+        from core.growth.practice_session import load_index
+
+        probability = float((get_config().get("presence") or {}).get(
+            "growth_activity_prob", 0.3
+        ))
+        probability = max(0.0, min(1.0, probability))
+        if probability <= 0 or random.random() >= probability:
+            return None
+
+        now_ts = time.time() if now_ts is None else float(now_ts)
+        candidates: list[dict] = []
+        for interest in active_interests(char_id):
+            index = load_index(str(interest.get("id") or ""), char_id=char_id)
+            if not index:
+                continue
+            practiced_at = datetime.fromisoformat(str(index[-1].get("date") or "")).timestamp()
+            if 0 <= now_ts - practiced_at <= 20 * 3600:
+                candidates.append(interest)
+        if not candidates:
+            return None
+        interest = random.choice(candidates)
+        return {
+            "id": f"growth:{interest['id']}",
+            "text": f"在练{interest['name']}",
+            "source": "growth",
+            "interest_id": interest["id"],
+        }
+    except Exception:
+        return None
+
 def should_switch(char_id: str = _DEFAULT_CHAR_ID) -> bool:
     """判断是否需要切换activity（距上次切换超过15-45分钟随机值）。"""
     state = _load_state(char_id=char_id)
@@ -145,7 +183,7 @@ def should_switch(char_id: str = _DEFAULT_CHAR_ID) -> bool:
 def switch_activity(char_id: str = _DEFAULT_CHAR_ID) -> dict:
     """切换到新activity，返回新状态。"""
     arc = _get_current_arc()
-    activity = _pick_activity(arc, char_id=char_id)
+    activity = _pick_recent_growth_activity(char_id) or _pick_activity(arc, char_id=char_id)
     now = datetime.now()
     # 随机持续15-45分钟
     duration_min = random.randint(15, 45)
@@ -166,6 +204,8 @@ def switch_activity(char_id: str = _DEFAULT_CHAR_ID) -> dict:
         "expected_until_ts": expected_until_ts,
         "thinking_about": thinking_about,
         "arc": arc,
+        "source": activity.get("source", "pool"),
+        "interest_id": activity.get("interest_id", ""),
     }
     _save_state(state, char_id=char_id)
     logger.info(f"[activity] 切换: {activity['text']} (char={char_id}, arc={arc}, {duration_min}分钟)")
@@ -179,9 +219,13 @@ def get_current(char_id: str = _DEFAULT_CHAR_ID) -> dict:
 
 _PATTERN_WORDS = ["每次", "总是", "一直", "从来", "每天", "每周"]
 
-def get_prompt_fragment(char_id: str = _DEFAULT_CHAR_ID) -> str:
+def get_prompt_fragment(
+    char_id: str = _DEFAULT_CHAR_ID, *, suppress_growth: bool = False
+) -> str:
     """返回注入prompt的文本片段，50字以内。"""
     state = get_current(char_id=char_id)
+    if suppress_growth and state.get("source") == "growth":
+        return ""
     current = state.get("current", "")
     thinking = state.get("thinking_about", "")
     if not current:

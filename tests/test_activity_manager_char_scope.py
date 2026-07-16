@@ -16,6 +16,8 @@ _load_pool() 调 get_paths().activity_state()/activity_pool() 时不传 char_id�
 from __future__ import annotations
 
 import json
+import time
+from datetime import datetime
 
 import pytest
 
@@ -137,6 +139,63 @@ def test_get_prompt_fragment_forwards_char_id(monkeypatch):
 
     assert text == "在遛狗"
     assert captured == ["character_c"]
+
+
+def test_recent_practice_can_supply_growth_presence(monkeypatch):
+    now = time.time()
+    monkeypatch.setattr("core.config_loader.get_config", lambda: {
+        "presence": {"growth_activity_prob": 1.0}
+    })
+    monkeypatch.setattr("core.growth.interest_state.active_interests", lambda _: [{
+        "id": "int-writing", "name": "写作", "status": "active",
+    }])
+    monkeypatch.setattr("core.growth.practice_session.load_index", lambda *a, **kw: [{
+        "date": datetime.fromtimestamp(now - 3600).isoformat(),
+    }])
+    monkeypatch.setattr(am.random, "random", lambda: 0.0)
+
+    picked = am._pick_recent_growth_activity("character_c", now_ts=now)
+    assert picked["text"] == "在练写作"
+    assert picked["source"] == "growth"
+
+
+def test_no_active_interest_always_falls_back_to_pool(monkeypatch):
+    monkeypatch.setattr("core.config_loader.get_config", lambda: {
+        "presence": {"growth_activity_prob": 1.0}
+    })
+    monkeypatch.setattr("core.growth.interest_state.active_interests", lambda _: [])
+    monkeypatch.setattr(am.random, "random", lambda: 0.0)
+    monkeypatch.setattr(am, "_pick_activity", lambda arc, char_id: {
+        "id": "pool", "text": "在看书",
+    })
+
+    assert am._pick_recent_growth_activity("character_c") is None
+    assert (am._pick_recent_growth_activity("character_c") or am._pick_activity(
+        "afternoon", "character_c"
+    ))["text"] == "在看书"
+
+
+def test_stale_practice_does_not_supply_growth_presence(monkeypatch):
+    now = time.time()
+    monkeypatch.setattr("core.config_loader.get_config", lambda: {
+        "presence": {"growth_activity_prob": 1.0}
+    })
+    monkeypatch.setattr("core.growth.interest_state.active_interests", lambda _: [{
+        "id": "int-writing", "name": "写作", "status": "active",
+    }])
+    monkeypatch.setattr("core.growth.practice_session.load_index", lambda *a, **kw: [{
+        "date": datetime.fromtimestamp(now - 21 * 3600).isoformat(),
+    }])
+    monkeypatch.setattr(am.random, "random", lambda: 0.0)
+    assert am._pick_recent_growth_activity("character_c", now_ts=now) is None
+
+
+def test_growth_presence_yields_to_tagged_growth_layer(monkeypatch):
+    monkeypatch.setattr(am, "get_current", lambda char_id: {
+        "current": "在练写作", "source": "growth", "thinking_about": "",
+    })
+    assert am.get_prompt_fragment("character_c", suppress_growth=True) == ""
+    assert am.get_prompt_fragment("character_c", suppress_growth=False) == "在练写作"
 
 
 # ── 5. admin/routers/activity.py 响应体带 char_id ────────────────────────────
