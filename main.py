@@ -508,6 +508,9 @@ async def handle_message(message: dict):
                 await _mark_thinking(uid=user_id, char_id=_char_id, envelope=_qq_envelope)
             except Exception:
                 pass
+            # Brief 82 · 决策 7：本轮用户原始消息命中显式重读短语时，放行 persist 工具已读指纹。
+            from core.memory.tool_read_log import detect_bypass_intent as _detect_bypass_reread
+            _bypass_read_log = _detect_bypass_reread(_trusted_user_text)
             for tc in tool_calls:
                 t_name = tc.get("name", "")
                 t_args = tc.get("arguments", {})
@@ -521,6 +524,7 @@ async def handle_message(message: dict):
                     session_state=state,
                     origin="user_live",
                     char_id=_char_id,
+                    bypass_read_log=_bypass_read_log,
                 )
                 if ask_text:
                     logger.info(f"[handle_message] 高危工具 {t_name}，等待用户确认")

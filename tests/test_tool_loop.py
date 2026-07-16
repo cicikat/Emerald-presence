@@ -65,11 +65,13 @@ def _script_execute(monkeypatch, results: list[tuple]):
     calls: list[dict] = []
     it = iter(results)
 
-    async def _fake(tool_name, tool_args, user_id, target_id, is_group, session_state, *, origin, char_id):
+    async def _fake(tool_name, tool_args, user_id, target_id, is_group, session_state, *, origin, char_id,
+                     bypass_read_log=False):
         calls.append({
             "tool_name": tool_name, "tool_args": tool_args,
             "user_id": user_id, "target_id": target_id,
             "is_group": is_group, "origin": origin, "char_id": char_id,
+            "bypass_read_log": bypass_read_log,
         })
         return next(it)
 

@@ -376,6 +376,9 @@ async def _probe_and_execute_tools(message: str, user_id: str, *, char_id: str) 
             _capture_snap()
             return None
 
+        # Brief 82 · 决策 7：本轮用户原始消息命中显式重读短语时，放行 persist 工具已读指纹。
+        from core.memory.tool_read_log import detect_bypass_intent as _detect_bypass_reread
+        _bypass_read_log = _detect_bypass_reread(message)
         for tc in tool_calls:
             t_name = tc.get("name", "")
             t_args = tc.get("arguments", {})
@@ -389,6 +392,7 @@ async def _probe_and_execute_tools(message: str, user_id: str, *, char_id: str) 
                 session_state=state,
                 origin="user_live",
                 char_id=char_id,
+                bypass_read_log=_bypass_read_log,
             )
             _probe_tool_results.append({
                 "name": t_name,

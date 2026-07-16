@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 
 _MAX_LOG = 30
 
+# Brief 82 · P2-1：显式重读短语常量表（受控小集合，不上 LLM 判断）。
+_BYPASS_PHRASES: tuple[str, ...] = ("再读一遍", "重新读", "再看一次", "重新看看")
+
+
+def detect_bypass_intent(text: str) -> bool:
+    """探测用户当轮消息里是否含显式重读短语，命中即放行已读指纹拦截（决策 7）。"""
+    if not text:
+        return False
+    return any(phrase in text for phrase in _BYPASS_PHRASES)
+
 
 def _log_path(uid: str, char_id: str) -> Path:
     return get_paths().user_memory_root(safe_user_id(uid), char_id=char_id) / "tool_read_log.json"
@@ -44,8 +54,14 @@ def build_fingerprint(tool_name: str, tool_args: dict) -> str | None:
     return None
 
 
-def is_recently_read(uid: str, char_id: str, fingerprint: str) -> bool:
-    """检查该指纹是否已在最近已读集合中。"""
+def is_recently_read(uid: str, char_id: str, fingerprint: str, *, bypass: bool = False) -> bool:
+    """检查该指纹是否已在最近已读集合中。
+
+    bypass=True（用户本轮显式要求重读）时恒放行——调用方仍会照常走 record_read()
+    刷新指纹，bypass 只影响"拦不拦"，不影响"记不记"（Brief 82 · 决策 7）。
+    """
+    if bypass:
+        return False
     path = _log_path(uid, char_id)
     try:
         if path.exists():

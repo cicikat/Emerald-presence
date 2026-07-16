@@ -857,6 +857,16 @@ class Pipeline:
         from core.error_handler import log_error
         from core.tool_dispatcher import execute as _execute, get_tools_schema
 
+        # Brief 82 · 决策 7：本轮最后一条用户消息命中显式重读短语时，放行本轮全部
+        # persist 工具已读指纹（多步调用复用同一次探测结果，短语与工具目标同轮）。
+        from core.memory.tool_read_log import detect_bypass_intent as _detect_bypass_reread
+        _last_user_text = next(
+            (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), ""
+        )
+        _bypass_read_log = _detect_bypass_reread(
+            _last_user_text if isinstance(_last_user_text, str) else ""
+        )
+
         # Brief 32：monologue 注入只做一次（首步前），loop 内逐步复用同一份 loop_msgs，
         # 之后每步的 chat_turn() 不会重复触发（native 路线则每步都在 chat_turn 内部叠加）。
         messages = await thinking.maybe_apply(
@@ -925,6 +935,7 @@ class Pipeline:
                         result, ask_confirm = await _execute(
                             tc["name"], tc["arguments"], uid, uid, is_group,
                             session_state, origin="assistant_loop", char_id=char_id,
+                            bypass_read_log=_bypass_read_log,
                         )
                     except Exception as e:
                         log_error("pipeline.run_agentic_loop.execute", e)

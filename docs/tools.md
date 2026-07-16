@@ -312,6 +312,21 @@ fs_access:
 | `core/tools/diary_search.py` | `search_diary` 工具实现，按关键词搜最近30天 |
 | `core/memory/diary_context.py` | 存储层，用户日记上下文单独存 txt，只进 prompt 层6d，不参与检索 |
 
+### persist 工具已读指纹（P2 / Brief 82）
+
+`core/memory/tool_read_log.py` 为 `persist=True` 工具（`read_diary` / `read_watch` /
+`read_toy_file` / `search_diary`）记录已读指纹（`data/runtime/memory/{char_id}/{uid}/tool_read_log.json`），
+同一 uid/char 重复触发同一来源会被 `tool_dispatcher.execute()` 拦下，返回
+`（刚读过这个，这次跳过）`。
+
+用户显式要求重读时（显式意图优先于去重优化，DESIGN.md §十一 决策 7）：探针/工具调用点
+在同轮用户原始文本里命中 `_BYPASS_PHRASES` 常量表（`再读一遍` / `重新读` / `再看一次` /
+`重新看看`，不上 LLM 判断）就给本轮 `execute()` 传 `bypass_read_log=True`。`is_recently_read()`
+的 `bypass` 参数只影响"拦不拦"：命中时放行本次调用，但指纹仍照常 `record_read()` 刷新，
+不是关掉去重本身。三个调用点（`main.py` QQ 探针/快速路径、`admin/routers/chat.py`
+`owner_chat`、`core/pipeline.py::run_agentic_loop` Path C）各自从本轮用户原始文本探测一次，
+Path C 多步调用复用同一次探测结果。
+
 ### 花园工具
 
 `water_garden` 是 info 类工具，会被探针覆盖。它不接收参数，内部读取当前 `mood_state`，再调用 `garden_manager.force_water()` 给对应情绪花槽浇一次水。

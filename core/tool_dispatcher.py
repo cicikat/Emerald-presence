@@ -1049,6 +1049,7 @@ async def execute(
     *,
     origin: str,
     char_id: str,
+    bypass_read_log: bool = False,
 ) -> tuple[str | None, str | None]:
     """
     执行工具，返回 (tool_result, ask_confirm_text)
@@ -1061,6 +1062,8 @@ async def execute(
     assistant_loop（Path C tool loop 自主多步调用，Brief 28）。
     漏传 → TypeError，杜绝静默绕过。
     char_id: 当前活跃角色桶 id，用于 persist=True 工具的已读指纹检查和 short_term 回写。
+    bypass_read_log: 本轮用户消息命中显式重读短语时由调用方传 True（Brief 82 · 决策 7），
+    放行 persist 工具的已读指纹拦截，但指纹仍照常记录/刷新。
     """
     if origin not in _EXECUTE_ALLOWED_ORIGINS:
         logger.warning(
@@ -1145,7 +1148,7 @@ async def execute(
         try:
             from core.memory.tool_read_log import build_fingerprint, is_recently_read
             _fingerprint = build_fingerprint(tool_name, tool_args)
-            if _fingerprint and is_recently_read(user_id, char_id, _fingerprint):
+            if _fingerprint and is_recently_read(user_id, char_id, _fingerprint, bypass=bypass_read_log):
                 logger.info(
                     "[tool_dispatcher] persist 工具已读，跳过: tool=%s fp=%s",
                     tool_name, _fingerprint,
@@ -1229,7 +1232,7 @@ class ToolDispatcher:
     def get_tools_schema(self, categories: list[str] | None = None) -> list:
         return get_tools_schema(categories=categories)
 
-    async def execute(self, tool_name, tool_args, user_id, target_id, is_group, session_state, *, origin: str, char_id: str):
+    async def execute(self, tool_name, tool_args, user_id, target_id, is_group, session_state, *, origin: str, char_id: str, bypass_read_log: bool = False):
         return await execute(
             tool_name=tool_name,
             tool_args=tool_args,
@@ -1239,4 +1242,5 @@ class ToolDispatcher:
             session_state=session_state,
             origin=origin,
             char_id=char_id,
+            bypass_read_log=bypass_read_log,
         )
