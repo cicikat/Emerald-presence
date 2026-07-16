@@ -24,6 +24,7 @@
 | `3.6_watch` | 最近一次睡眠数据（以角色第三人称旁白注入，无方括号标签） | tagged（见下） | `user_profile` sleep_segments |
 | `3.7_sensor` | 手机传感器（步数/电量/位置/亮屏次数，以角色旁白注入，无方括号标签/时间戳/数据来源描述） | 当天有数据即注（无 tag 门控） | `user_profile.phone_sensor_today` |
 | `3.8_activity` | 屏幕活动快照（以角色旁白注入，无方括号标签；内容来自 activity_snapshot 的类别字段，不含原始应用名） | tagged（见下） | `data/runtime/characters/{char_id}/inner/activity_snapshot.json`（TTL 5分钟） |
+| `3.8_growth_self` | 角色自身近期兴趣、等级与最新心得；软提示，不作数据播报 | tagged：成长 domain 或直接询问角色近况 | `core/growth/interest_state.py` + `core/growth/notes.py`（只读、失败不注入） |
 | `3.9_screen_awareness` | 桌面实时感知摘要（粗粒度应用/活动类别 + 模糊编辑状态；不注入窗口标题或屏幕原文） | 活动相关 tagged 快照 5 分钟内，或用户活跃且快照 3 分钟内 | `core.memory.realtime_state`（纯内存，重启清零） |
 | `5_profile` | 用户画像（名字/位置/宠物/兴趣/职业）+ stable/misc 标签事实 | 有内容即注 | `user_profile.load()` |
 | `5_profile_pref` | 用户偏好/习惯类事实（pref.*/habit/health tag） | recency 90天窗口内 OR 当前轮 tag 命中 | `user_profile.load()` → `_is_recency_tag()` |
