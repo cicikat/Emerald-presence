@@ -15,6 +15,9 @@ def _settings(**overrides):
         "max_ai_chain_depth": 2,
         "respond_threshold": 0.5,
         "talkativeness": {"yexuan": 1.0, "yexuanJ-5412": 1.0},
+        # Brief 85 §4 topic-seed is orthogonal to what these tests exercise and
+        # uses real random.random() when unmocked — pin it off for determinism.
+        "topic_seed_prob": 0.0,
     }
     values.update(overrides)
     return StageSettings(**values)

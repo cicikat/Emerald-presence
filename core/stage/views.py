@@ -92,7 +92,7 @@ class StageCharacterView:
         context["stage_presence"] = render_presence(
             stage,
             viewer_id=self.char_id,
-            chain_reply=triggered_by not in ("user", "owner"),
+            chain_reply=triggered_by in stage.roster,
         )
         context["stage_transcript"] = render_transcript(
             stage,
@@ -211,10 +211,56 @@ class StageCharacterView:
         lines.append("可以直接称呼对方，可以同意、反驳、追问或岔开。")
         return "\n".join(lines)
 
+    def _topic_seed_block(self, stage: Stage) -> str:
+        """Round-end conversation spark (Brief 85 §4).
+
+        All material is already-loaded local state — zero new retrieval:
+        current activity, an unfinished followed topic, a relationship
+        anecdote with someone else in the roster, and the current time.
+        """
+        parts = [
+            "群聊有点冷场了，你想到一个新话头，主动抛出来聊聊，"
+            "不必等谁问起，自然一点就好。"
+        ]
+        try:
+            from core import activity_manager
+
+            activity = activity_manager.get_prompt_fragment(char_id=self.char_id)
+        except Exception:
+            activity = ""
+        if activity:
+            parts.append(f"你最近在忙：{activity}")
+        try:
+            from core.scheduler.last_mentioned import load_followed_topics
+
+            followed = list(load_followed_topics().keys())
+        except Exception:
+            followed = []
+        if followed:
+            parts.append(f"可以接着这个还没聊完的话头：{followed[-1]}")
+        try:
+            from core.stage.char_relations import recent_moments
+
+            for other in stage.roster:
+                if other == self.char_id:
+                    continue
+                moments = recent_moments(self.char_id, other)
+                if moments:
+                    parts.append(f"你和{get_char_name(other)}之间：{moments[-1]}")
+                    break
+        except Exception:
+            pass
+        from datetime import datetime
+
+        parts.append(f"现在是{datetime.now().strftime('%m月%d日 %H:%M')}。")
+        return "\n".join(parts)
+
     def _extra_instruction(
         self, stage: Stage, triggered_by: str, transcript: list[TranscriptEntry]
     ) -> str:
         """Content-side hook for directed replies (§2) and topic seeds (§4)."""
+        if triggered_by == "topic_seed":
+            return self._topic_seed_block(stage)
         if triggered_by in stage.roster and triggered_by != self.char_id:
             return self._directed_block(triggered_by, transcript)
         return ""

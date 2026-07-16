@@ -16,6 +16,9 @@ def _settings(**overrides):
         "spontaneous_threshold": 0.7,
         "transcript_limit": 200,
         "talkativeness": {"yexuan": 1.0, "yexuanJ-5412": 0.8},
+        # Brief 85 §4 topic-seed is orthogonal to what these tests exercise and
+        # uses real random.random() when unmocked — pin it off for determinism.
+        "topic_seed_prob": 0.0,
     }
     values.update(overrides)
     return StageSettings(**values)

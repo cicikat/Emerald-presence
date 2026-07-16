@@ -79,6 +79,189 @@ def test_recent_moments_backward_compatible_with_old_relation_files(sandbox):
     assert recent_moments("yexuan", "yexuanJ-5412") == []
 
 
+# ── §4 topic seed ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_phase_t_topic_seed_triggers_when_round_falls_flat(sandbox, monkeypatch):
+    from core.stage import runner as runner_mod
+    from core.stage.models import StageSettings
+    from core.stage.store import create_stage
+
+    create_stage(
+        "seed-group",
+        "owner",
+        ["yexuan", "yexuanJ-5412", "hongcha"],
+        settings=StageSettings(
+            min_responders=1, max_responders=1, max_ai_chain_depth=0, max_reactions=0,
+            topic_seed_prob=1.0,
+            talkativeness={"yexuan": 1.0, "yexuanJ-5412": 0.9, "hongcha": 0.2},
+        ),
+    )
+    monkeypatch.setattr(runner_mod.random, "random", lambda: 0.0)
+
+    async def generate_reply(stg, speaker_id, transcript, turn_id, triggered_by):
+        return f"{speaker_id}说话"
+
+    result = await runner_mod.run_owner_turn(
+        "seed-group", "随便聊聊", generate_reply=generate_reply, turn_id="t-seed",
+    )
+
+    # Phase A: only yexuan speaks (max_responders=1); B/R are off → 1 < 2 falls flat.
+    # The seed goes to the highest-talkativeness char who hasn't spoken: yexuanJ-5412.
+    seed_entries = [e for e in result.replies if e.triggered_by == "topic_seed"]
+    assert len(seed_entries) == 1
+    assert seed_entries[0].speaker_id == "yexuanJ-5412"
+
+
+@pytest.mark.asyncio
+async def test_phase_t_skipped_by_probability_gate(sandbox, monkeypatch):
+    from core.stage import runner as runner_mod
+    from core.stage.models import StageSettings
+    from core.stage.store import create_stage
+
+    create_stage(
+        "seed-group-noprob",
+        "owner",
+        ["yexuan", "yexuanJ-5412"],
+        settings=StageSettings(
+            min_responders=1, max_responders=1, max_ai_chain_depth=0, max_reactions=0,
+            topic_seed_prob=0.25,
+        ),
+    )
+    monkeypatch.setattr(runner_mod.random, "random", lambda: 0.99)
+
+    async def generate_reply(stg, speaker_id, transcript, turn_id, triggered_by):
+        return f"{speaker_id}说话"
+
+    result = await runner_mod.run_owner_turn(
+        "seed-group-noprob", "随便聊聊", generate_reply=generate_reply, turn_id="t-noprob",
+    )
+
+    assert not any(e.triggered_by == "topic_seed" for e in result.replies)
+
+
+@pytest.mark.asyncio
+async def test_phase_t_skipped_when_round_did_not_fall_flat(sandbox, monkeypatch):
+    from core.stage import runner as runner_mod
+    from core.stage.arbiter import CandidateScore
+    from core.stage.models import StageSettings
+    from core.stage.store import create_stage
+
+    create_stage(
+        "seed-group-lively",
+        "owner",
+        ["yexuan", "yexuanJ-5412"],
+        settings=StageSettings(
+            min_responders=1, max_responders=1, max_ai_chain_depth=1, max_reactions=0,
+            topic_seed_prob=1.0,
+        ),
+    )
+    monkeypatch.setattr(runner_mod.random, "random", lambda: 0.0)
+
+    def fake_score(stg, transcript, *, candidates=None, derived_keywords=None):
+        pool = list(candidates) if candidates is not None else list(stg.roster)
+        return [CandidateScore(char_id=c, total=0.9, parts={}) for c in pool]
+
+    monkeypatch.setattr(runner_mod, "score_candidates", fake_score)
+
+    _TEXT = {"yexuan": "今天天气不错", "yexuanJ-5412": "你怎么看？"}
+
+    async def generate_reply(stg, speaker_id, transcript, turn_id, triggered_by):
+        return _TEXT[speaker_id]
+
+    result = await runner_mod.run_owner_turn(
+        "seed-group-lively", "随便聊聊", generate_reply=generate_reply, turn_id="t-lively",
+    )
+
+    # 2 substantive replies (Phase A + Phase B), last one ends in a question → not flat.
+    assert len([e for e in result.replies if e.triggered_by != "topic_seed"]) == 2
+    assert not any(e.triggered_by == "topic_seed" for e in result.replies)
+
+
+@pytest.mark.asyncio
+async def test_round_llm_call_budget_hard_cap(sandbox, monkeypatch):
+    """max_responders + max_ai_chain_depth + max_reactions + 1(seed) is a hard ceiling."""
+    from core.stage import runner as runner_mod
+    from core.stage.arbiter import CandidateScore
+    from core.stage.models import StageSettings
+    from core.stage.store import create_stage
+
+    settings = StageSettings(
+        min_responders=1, max_responders=1, max_ai_chain_depth=1, max_reactions=0,
+        topic_seed_prob=1.0,
+    )
+    create_stage("budget-group", "owner", ["yexuan", "yexuanJ-5412", "hongcha"], settings=settings)
+    monkeypatch.setattr(runner_mod.random, "random", lambda: 0.0)
+
+    def fake_score(stg, transcript, *, candidates=None, derived_keywords=None):
+        pool = list(candidates) if candidates is not None else list(stg.roster)
+        return [CandidateScore(char_id=c, total=0.99, parts={}) for c in pool]
+
+    monkeypatch.setattr(runner_mod, "score_candidates", fake_score)
+
+    _TEXT = {
+        "yexuan": "今天天气还不错吧",
+        "yexuanJ-5412": "我倒是觉得有点闷热",
+        "hongcha": "对了我们聊聊别的",
+    }
+    call_log: list[tuple[str, str]] = []
+
+    async def generate_reply(stg, speaker_id, transcript, turn_id, triggered_by):
+        call_log.append((speaker_id, triggered_by))
+        return _TEXT[speaker_id]
+
+    result = await runner_mod.run_owner_turn(
+        "budget-group", "随便聊聊", generate_reply=generate_reply, turn_id="t-budget",
+    )
+
+    budget = settings.max_responders + settings.max_ai_chain_depth + settings.max_reactions + 1
+    assert len(call_log) <= budget
+    assert len(call_log) == 3  # tight in this scenario: 1 (A) + 1 (B) + 0 (R) + 1 (T)
+    assert any(triggered_by == "topic_seed" for _speaker, triggered_by in call_log)
+    assert len(result.replies) == len(call_log)
+
+
+@pytest.mark.asyncio
+async def test_topic_seed_block_assembles_activity_topic_and_moment(sandbox, monkeypatch):
+    from core.scheduler.last_mentioned import mark_topic_followed
+    from core.stage.char_relations import _empty_relation, _save_relation
+    from core.stage.models import Stage, TranscriptEntry
+    from core.stage.views import StageCharacterView
+
+    mark_topic_followed("没聊完的暑假计划")
+    relation = _empty_relation("yexuan", "yexuanJ-5412")
+    relation["recent_moments"] = ["上次一起弹琴"]
+    assert _save_relation(relation)
+    monkeypatch.setattr("core.activity_manager.get_prompt_fragment", lambda char_id=None: "在看书")
+
+    captured = {}
+
+    class FakePipeline:
+        async def fetch_context(self, uid, content, *, frozen_scope):
+            raise AssertionError("topic seed must use the lightweight path")
+
+        def build_prompt(self, uid, content, context, **kwargs):
+            captured["content"] = content
+            return ([{"role": "user", "content": content}], {"token_estimate": 1})
+
+        async def run_llm(self, messages, *, char_id=None):
+            return "新话题来了"
+
+    view = object.__new__(StageCharacterView)
+    view.char_id = "yexuan"
+    view.pipeline = FakePipeline()
+    stage = Stage("g", "owner", ("yexuan", "yexuanJ-5412"))
+    transcript = [TranscriptEntry("owner", "在吗", 1, "t", "user")]
+
+    reply = await view.generate(stage, transcript, "t", "topic_seed")
+
+    assert reply == "新话题来了"
+    assert "在看书" in captured["content"]
+    assert "没聊完的暑假计划" in captured["content"]
+    assert "上次一起弹琴" in captured["content"]
+
+
 def test_directed_block_and_presence_surface_recent_moment(sandbox):
     from core.stage.char_relations import _empty_relation, _save_relation
     from core.stage.context import render_presence
@@ -119,7 +302,7 @@ async def test_phase_r_emits_bounded_short_reactions(sandbox, monkeypatch):
         "reaction-group",
         "owner",
         ["yexuan", "yexuanJ-5412", "hongcha"],
-        settings=_settings(react_threshold=0.2, speak_threshold=0.5, max_reactions=1),
+        settings=_settings(react_threshold=0.2, speak_threshold=0.5, max_reactions=1, topic_seed_prob=0.0),
     )
 
     def fake_score(stg, transcript, *, candidates=None, derived_keywords=None):
@@ -166,7 +349,7 @@ async def test_phase_r_skipped_without_generate_reaction_callback(sandbox, monke
         "reaction-group-legacy",
         "owner",
         ["yexuan", "yexuanJ-5412"],
-        settings=_settings(react_threshold=0.0, speak_threshold=1.0),
+        settings=_settings(react_threshold=0.0, speak_threshold=1.0, topic_seed_prob=0.0),
     )
 
     def fake_score(stg, transcript, *, candidates=None, derived_keywords=None):

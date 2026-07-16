@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import random
 import time
 import uuid
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ from typing import Awaitable, Callable
 from core.conversation_gate import conversation_lock
 from core.safe_write import rotate_jsonl_if_needed, safe_append_jsonl
 from core.memory.episodic_memory import _texture_similarity
-from core.stage.arbiter import score_candidates
+from core.stage.arbiter import _is_question, score_candidates
 from core.stage.models import Stage, TranscriptEntry
 from core.stage.store import append_transcript, load_stage, load_transcript
 
@@ -241,6 +242,12 @@ async def run_owner_turn(
             replies.append(entry)
             ai_chain_depth += 1
 
+        # Snapshot Phase A+B's own outcome before Phase R (reactions) touches
+        # the transcript — the topic-seed "did the round fall flat" check
+        # (below) is about the substantive A+B exchange, not trailing noise.
+        ab_reply_count = len(replies)
+        ab_last_entry = transcript[-1] if transcript else None
+
         # Phase R: bounded noise-tier reactions (Brief 85 §3). A one-shot pass
         # over near-miss candidates — not rescored, not counted against
         # max_ai_chain_depth. generate_reaction is optional so callers that
@@ -278,6 +285,42 @@ async def run_owner_turn(
                         stage, transcript, ranked, turn_id=resolved_turn_id, phase="R",
                         selected=reacted, chain_depth=ai_chain_depth,
                         extra={"reaction": True},
+                    )
+
+        # Phase T: round-end topic seed (Brief 85 §4). Terminal — nothing loops
+        # after this, so a seed can never chain into a new Phase B (no
+        # recursion to guard against by construction).
+        if stage.settings.topic_seed_prob > 0 and transcript:
+            falls_flat = ab_reply_count < 2 or (
+                ab_last_entry is not None
+                and not _is_question(ab_last_entry.content)
+                and not any(
+                    addressed_kind(stage, char_id, ab_last_entry.content) == "vocative"
+                    for char_id in stage.roster if char_id != ab_last_entry.speaker_id
+                )
+            )
+            if falls_flat and random.random() < stage.settings.topic_seed_prob:
+                spoken_this_round = {entry.speaker_id for entry in replies}
+                seed_candidates = [char_id for char_id in stage.roster if char_id not in spoken_this_round]
+                if seed_candidates:
+                    seeder = max(
+                        seed_candidates,
+                        key=lambda char_id: (
+                            stage.settings.talkativeness.get(char_id, 0.5),
+                            -stage.roster.index(char_id),
+                        ),
+                    )
+                    entry, _echo_cut = await _generate_and_append(
+                        stage, seeder, transcript, resolved_turn_id, "topic_seed",
+                        generate_reply, deliver_reply,
+                    )
+                    if entry is not None:
+                        replies.append(entry)
+                    _append_arbiter_trace(
+                        stage, transcript[:-1] if entry is not None else transcript, [],
+                        turn_id=resolved_turn_id, phase="T",
+                        selected=[entry.speaker_id] if entry is not None else [],
+                        chain_depth=ai_chain_depth, extra={"topic_seed": True},
                     )
 
     return StageTurnResult(
