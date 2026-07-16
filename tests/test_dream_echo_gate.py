@@ -16,3 +16,7 @@ def test_three_days_after_exit_with_dream_keyword_is_echo():
 
 def test_no_dream_history_without_keyword_is_not_echo():
     assert not should_dream_echo(last_exited_at=None, user_content="你好", reply="我在", now=1000)
+
+
+def test_aspiration_word_does_not_trigger_dream_echo():
+    assert not should_dream_echo(last_exited_at=None, user_content="我的梦想是去远方", reply="很好", now=1000)

@@ -58,6 +58,7 @@
 - 现实层 `6g_dream_impression`：显式 XML 标签框定"以下是叶瑄做过的梦，不是现实发生的事"，叶瑄可像记得一个梦一样自然提起但绝不当作真实经历复述
 - **D2 新隔离墙（固化端）**：只有强注轮或话题召回命中轮，`pipeline.post_process` 才在 `summarize_to_midterm` 入队 payload 中加 `dream_echo=True`；`handler_summarize_to_midterm` 收到此标记直接跳过，阻止该轮梦境剧情通过 mid_term → episodic → identity 链路固化为现实事实
 - **D2 echo 判定**：未注入的现实轮不置 `dream_echo`，现实固化链正常运行；计数只由真实用户驱动的现实回合消费，梦境回合与 scheduler/sensor/watch 回合不消费。
+  旧兼容 `echo_gate` seam 不再用裸「梦」匹配，只识别「梦里 / 梦见 / 梦到 / 做梦 / 梦境 / 入梦」等明确梦境表达，避免「梦想」误触。
 
 **梦境明信片（archive 出站复盘，非第四层回流）**
 - 合格 sandbox 梦（至少五个 assistant 轮、非 hard_exit、每个 dream_id 至多一次）会在 summary 后冻结成一封信；模板随机，投递日随机延迟 1–356 天。

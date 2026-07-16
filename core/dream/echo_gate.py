@@ -4,7 +4,10 @@ from __future__ import annotations
 import time
 
 ECHO_WINDOW_SECONDS = 8 * 3600
-DREAM_KEYWORDS = ("梦", "梦里", "梦见", "梦到", "做了个梦", "昨晚的梦")
+DREAM_KEYWORDS = (
+    "梦里", "梦见", "梦到", "做了个梦", "做梦",
+    "梦境", "那个梦", "昨晚的梦", "入梦",
+)
 
 def should_dream_echo(*, last_exited_at: float | None, user_content: str, reply: str, now: float | None = None) -> bool:
     """Silence the first 8h after exit, then only a turn explicitly about dreams.
