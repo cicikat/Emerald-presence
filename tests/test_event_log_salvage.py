@@ -180,3 +180,56 @@ def test_salvage_llm_failure_does_not_mark_salvaged(sandbox, fake_llm):
     _run_salvage()  # 不应抛异常
 
     assert date_str not in _salvaged_dates(uid)
+
+
+# ── Brief 79 §2: 带 source 标记的块过滤，堵外部信息重固化通路 ──────────────────
+
+def test_salvage_skips_blocks_with_source_tag(sandbox, fake_llm):
+    """带 source:web 的块不得进入 LLM 抢救输入；无 source 的块正常抢救。"""
+    uid = "u_salvage_source_web"
+    date_str = _date_n_days_ago(28)
+    content = (
+        "## 09:00\n**用户**：帮我查下天气\n**叶瑄**：查到了，明天晴，记得带伞\n"
+        "> emotion:gentle intensity:0 speaker:assistant source:web\n---\n"
+        "## 10:00\n**用户**：我喜欢喝咖啡\n**叶瑄**：好呀\n"
+        "> emotion:gentle intensity:0 speaker:assistant\n---\n"
+    )
+    _write_day_file(sandbox, "yexuan", uid, date_str, content=content)
+
+    _run_salvage()
+
+    assert date_str in _salvaged_dates(uid)
+    fake_llm.chat.assert_awaited()
+    llm_input = fake_llm.chat.call_args.args[0][1]["content"]
+    assert "明天晴" not in llm_input, "source:web 块不应出现在 LLM 抢救输入里"
+    assert "喜欢喝咖啡" in llm_input, "无 source 标记的块应正常进入抢救输入"
+
+
+def test_salvage_all_blocks_tagged_skips_llm_and_marks_salvaged(sandbox, fake_llm):
+    """整份日志所有块都带 source 标记 → 过滤后为空，不调用 LLM，仍标记 salvaged。"""
+    uid = "u_salvage_all_tagged"
+    date_str = _date_n_days_ago(28)
+    content = (
+        "## 09:00\n**用户**：帮我查下天气\n**叶瑄**：查到了，明天晴\n"
+        "> emotion:gentle intensity:0 speaker:assistant source:web\n---\n"
+    )
+    _write_day_file(sandbox, "yexuan", uid, date_str, content=content)
+
+    _run_salvage()
+
+    assert date_str in _salvaged_dates(uid)
+    fake_llm.chat.assert_not_awaited()
+
+
+def test_salvage_legacy_format_without_source_field_unaffected(sandbox, fake_llm):
+    """老格式日志（无 source 字段）→ salvage 行为不变（回归）。"""
+    uid = "u_salvage_legacy"
+    date_str = _date_n_days_ago(28)
+    _write_day_file(sandbox, "yexuan", uid, date_str)  # 默认 content 无 source 字段
+
+    _run_salvage()
+
+    assert date_str in _salvaged_dates(uid)
+    fake_llm.chat.assert_awaited()
+    llm_input = fake_llm.chat.call_args.args[0][1]["content"]
+    assert "喜欢喝咖啡" in llm_input

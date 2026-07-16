@@ -9,6 +9,11 @@
 每日处理上限 3 个文件（跨全部角色/用户合计，防积压时一次打爆 LLM 配额）。
 不发言、不影响 mood，stamp_trigger()。抢救状态记 fixation_state.json 的
 salvaged_dates（滚动保留 60 个），不新建状态文件。
+
+Brief 79 §2：拼 LLM 输入前先按块过滤掉 meta 行带非空 `source:` 标记的块
+（web/dream_echo/coplay 回流写入时打上的来源标记，见 core/memory/event_log.py）——
+这些内容已被固化链（handler_summarize_to_midterm）隔离在 mid_term 之外，抢救链必须
+同样排除，否则 27 天后绕过隔离直达 important_facts。
 """
 from __future__ import annotations
 
@@ -27,6 +32,7 @@ _MAX_FILES_PER_RUN = 3
 _MAX_SALVAGED_DATES = 60
 
 _DAY_FILE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.md$")
+_SOURCE_RE = re.compile(r"\bsource:(\S+)")
 
 _SALVAGE_SYSTEM_PROMPT = """\
 你是一个信息抢救分析器。下面是一天完整的对话日志，这天的记录即将过期归档。
@@ -131,6 +137,27 @@ def _mark_salvaged(uid: str, date_str: str, *, char_id: str) -> None:
     _save_fixation_state(uid, state, char_id=char_id)
 
 
+def _block_has_source(block_lines: list) -> bool:
+    """块的 meta 行（`> ...`）是否带非空 source: 标记（web/dream_echo/coplay）。
+    Brief 79 §2：这类块来自被固化链隔离的外部信息回流，不得进入抢救 LLM 输入。"""
+    for line in block_lines:
+        s = line.strip()
+        if s.startswith(">") and _SOURCE_RE.search(s):
+            return True
+    return False
+
+
+def _filter_salvageable_text(raw_text: str) -> tuple[str, int]:
+    """按块过滤掉带 source 标记的内容，返回 (过滤后文本, 跳过块数)。"""
+    from core.memory.event_log import _split_blocks
+
+    blocks = _split_blocks(raw_text)
+    kept = [b for b in blocks if not _block_has_source(b)]
+    skipped = len(blocks) - len(kept)
+    filtered_text = "\n".join("\n".join(b) for b in kept)
+    return filtered_text, skipped
+
+
 async def _salvage_one(char_id: str, uid: str, date_str: str) -> None:
     """抢救单个到期 event_log 日文件。失败时不标记 salvaged，留待窗口内下次重试。"""
     from core.memory.path_resolver import resolve_path
@@ -152,6 +179,16 @@ async def _salvage_one(char_id: str, uid: str, date_str: str) -> None:
         log_error(f"event_log_salvage.read.{char_id}.{uid}.{date_str}", e)
         return
 
+    if not raw_text.strip():
+        _mark_salvaged(uid, date_str, char_id=char_id)
+        return
+
+    raw_text, _skipped_blocks = _filter_salvageable_text(raw_text)
+    if _skipped_blocks:
+        logger.info(
+            "[event_log_salvage] 跳过 %d 个带 source 标记的块（外部信息隔离）uid=%s char=%s date=%s",
+            _skipped_blocks, uid, char_id, date_str,
+        )
     if not raw_text.strip():
         _mark_salvaged(uid, date_str, char_id=char_id)
         return
