@@ -2,6 +2,7 @@
 把 mood_state 的结构化数据转成角色视角的软提示文字。
 """
 import json
+import time
 from pathlib import Path
 from core.config_loader import _char_name
 
@@ -19,15 +20,31 @@ MOOD_TEXT = {
 
 PENDING_SUFFIX = "但有什么东西好像在悄悄变得不一样。"
 
+# previous 情绪的残留短句，每情绪一档（不做强度组合）。yandere 不参与残留混合。
+RESIDUAL_TEXT = {
+    "gentle":    "刚才那点平静的余温还在。",
+    "happy":     "刚才的轻快还没散尽。",
+    "sad":       "刚才那点沉还没完全散。",
+    "surprised": "刚才的怔忪还没缓过来。",
+    "angry":     "刚才那点绷着的劲还没松开。",
+    "thinking":  "刚才飘着的心思还没收回来。",
+    "sleepy":    "刚才那点困意还没退干净。",
+}
+
+RESIDUAL_WINDOW_SECONDS = 30 * 60
+
 
 def get_mood_text(mood_state: dict) -> str:
     """
     传入 mood_state dict，返回一句软提示文字。
-    mood_state 结构：{"current": str, "intensity": float, "pending": str|null, ...}
+    mood_state 结构：{"current": str, "intensity": float, "pending": str|null,
+                     "previous": str|null, "updated_at": float, ...}
     """
     current = mood_state.get("current", "neutral")
     intensity = mood_state.get("intensity", 0.5)
     pending = mood_state.get("pending")
+    previous = mood_state.get("previous", "neutral")
+    updated_at = mood_state.get("updated_at", 0.0)
 
     texts = MOOD_TEXT.get(current, MOOD_TEXT["neutral"])
 
@@ -40,5 +57,14 @@ def get_mood_text(mood_state: dict) -> str:
 
     if pending and pending != current:
         return f"{_char_name()}此刻：{base}。{PENDING_SUFFIX}"
-    else:
-        return f"{_char_name()}此刻：{base}。"
+
+    residual = RESIDUAL_TEXT.get(previous)
+    if (
+        residual
+        and previous != current
+        and current != "yandere"
+        and time.time() - updated_at <= RESIDUAL_WINDOW_SECONDS
+    ):
+        return f"{_char_name()}此刻：{base}。{residual}"
+
+    return f"{_char_name()}此刻：{base}。"

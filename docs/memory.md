@@ -772,6 +772,13 @@ mood_text 输出**不是独立的 prompt 层**，而是直接拼入层 1（syste
 
 `yandere` 情绪不在 MOOD_TEXT 里，走 `get_mood_text` 的 fallback 降级为 neutral 描述。
 
+**残留混合（Brief 81）**：零结构改动，纯文本层立体感。当 `previous != current` 且
+`previous != "neutral"` 且距 `updated_at` 未超过 30 分钟时，在主描述后追加一句
+`RESIDUAL_TEXT[previous]` 残留短句（每情绪一档，不做强度组合，全表 ≤8 句，写在
+`core/mood_text.py` 同文件）。`yandere` 不参与残留混合（current 为 yandere 时不追加）。
+pending 与残留同时满足时只出 pending 句（避免一层堆两句情绪旁白）。不新增字段、不动
+`detect_emotion`/漂移数学/consumer（episodic emotion_bonus、nudge、花园）。
+
 mood_state 目前影响：
 1. episodic_memory 召回时的 emotion_bonus 加分
 2. nudge_from_memory 的情绪强度微调
