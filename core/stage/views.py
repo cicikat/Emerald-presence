@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 
+from core.character_name_provider import get_char_name
 from core.memory.scope import MemoryScope
 from core.pipeline import Pipeline
 from core.stage.context import render_presence, render_transcript
@@ -139,10 +140,31 @@ class StageCharacterView:
             )
         return await self.pipeline.run_llm(messages, char_id=self.char_id)
 
+    def _directed_block(self, triggered_by: str, transcript: list[TranscriptEntry]) -> str:
+        """Point at who/what this reply is answering (Brief 85 §2).
+
+        `render_transcript` already prefixes every line with its speaker, so
+        this block is a *directive* reinforcement, not a re-paste of context.
+        """
+        quote = (transcript[-1].content if transcript else "").strip()[:60]
+        if not quote:
+            return ""
+        speaker_name = get_char_name(triggered_by)
+        from core.stage.char_relations import viewer_summary
+
+        summary, _valence = viewer_summary(self.char_id, triggered_by)
+        lines = [f"你在回应 {speaker_name} 刚才那句：「{quote}」"]
+        if summary:
+            lines.append(f"你对{speaker_name}的印象：{summary}")
+        lines.append("可以直接称呼对方，可以同意、反驳、追问或岔开。")
+        return "\n".join(lines)
+
     def _extra_instruction(
         self, stage: Stage, triggered_by: str, transcript: list[TranscriptEntry]
     ) -> str:
         """Content-side hook for directed replies (§2) and topic seeds (§4)."""
+        if triggered_by in stage.roster and triggered_by != self.char_id:
+            return self._directed_block(triggered_by, transcript)
         return ""
 
 

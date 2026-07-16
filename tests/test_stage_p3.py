@@ -116,6 +116,77 @@ async def test_stage_character_view_skips_fetch_context_for_peer_triggered_reply
     assert context["mid_term"] == ""
 
 
+@pytest.mark.asyncio
+async def test_stage_character_view_injects_directed_block_for_peer_reply(sandbox):
+    from core.character_name_provider import get_char_name
+    from core.stage.char_relations import _empty_relation, _save_relation
+    from core.stage.models import Stage, TranscriptEntry
+    from core.stage.views import StageCharacterView
+
+    # view.char_id below is "yexuanJ-5412" (char_b) responding to "yexuan" (char_a):
+    # the directed block must speak in yexuanJ-5412's own voice, i.e. b_of_a.
+    relation = _empty_relation("yexuan", "yexuanJ-5412")
+    relation["b_of_a"]["summary"] = "乙觉得甲很坦率"
+    assert _save_relation(relation)
+
+    captured = {}
+
+    class FakePipeline:
+        async def fetch_context(self, uid, content, *, frozen_scope):
+            raise AssertionError("peer reply must use the lightweight path")
+
+        def build_prompt(self, uid, content, context, **kwargs):
+            captured["content"] = content
+            return ([{"role": "user", "content": content}], {"token_estimate": 1})
+
+        async def run_llm(self, messages, *, char_id=None):
+            return "reply"
+
+    view = object.__new__(StageCharacterView)
+    view.char_id = "yexuanJ-5412"
+    view.pipeline = FakePipeline()
+    stage = Stage("g", "owner", ("yexuan", "yexuanJ-5412"), settings=_settings())
+    transcript = [
+        TranscriptEntry("owner", "聊聊今天", 1, "t", "user"),
+        TranscriptEntry("yexuan", "今天天气不错。", 2, "t", "user"),
+    ]
+
+    await view.generate(stage, transcript, "t", "yexuan")
+
+    speaker_name = get_char_name("yexuan")
+    assert f"你在回应 {speaker_name} 刚才那句：「今天天气不错。」" in captured["content"]
+    assert "乙觉得甲很坦率" in captured["content"]
+
+
+@pytest.mark.asyncio
+async def test_stage_character_view_omits_directed_block_for_owner_reply(sandbox):
+    from core.stage.models import Stage, TranscriptEntry
+    from core.stage.views import StageCharacterView
+
+    captured = {}
+
+    class FakePipeline:
+        async def fetch_context(self, uid, content, *, frozen_scope):
+            return {"history": []}
+
+        def build_prompt(self, uid, content, context, **kwargs):
+            captured["content"] = content
+            return ([{"role": "user", "content": content}], {"token_estimate": 1})
+
+        async def run_llm(self, messages, *, char_id=None):
+            return "reply"
+
+    view = object.__new__(StageCharacterView)
+    view.char_id = "yexuanJ-5412"
+    view.pipeline = FakePipeline()
+    stage = Stage("g", "owner", ("yexuan", "yexuanJ-5412"), settings=_settings())
+    transcript = [TranscriptEntry("owner", "在吗", 1, "t", "user")]
+
+    await view.generate(stage, transcript, "t", "user")
+
+    assert "你在回应" not in captured["content"]
+
+
 def test_lightweight_prompt_context_is_smaller_than_full(sandbox):
     from core import prompt_builder
 

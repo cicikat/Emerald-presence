@@ -232,6 +232,24 @@ async def enqueue_relation_updates(group_id: str, turn_id: str) -> int:
     return len(pairs)
 
 
+def viewer_summary(viewer_id: str, other_id: str) -> tuple[str, float]:
+    """Return (summary, valence) of `viewer_id`'s impression of `other_id`.
+
+    ("", 0.0) when no relation has been learned yet. Used to phrase directed
+    replies (Brief 85 §2) and the arbiter's peer-reply valence modulation
+    (Brief 85 §5) from the current speaker's own perspective, not a generic
+    pair-level summary.
+    """
+    relation = load_relation(viewer_id, other_id)
+    if relation is None:
+        return "", 0.0
+    first, _second = _pair(viewer_id, other_id)
+    side = relation.get("a_of_b") if viewer_id == first else relation.get("b_of_a")
+    if not isinstance(side, dict):
+        return "", 0.0
+    return str(side.get("summary") or ""), _clamp_valence(side.get("valence"))
+
+
 def delete_relation(char_a: str, char_b: str, *, uid: str) -> bool:
     """Explicitly forget one global relation and log it for both characters."""
     relation = load_relation(char_a, char_b)
