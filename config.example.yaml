@@ -385,6 +385,20 @@ output:
   segment_enforce:
     enabled: false          # 发送副本段落硬兜底（含桌面流式 delta）；默认关，便于 A/B 对比
     min_len: 40             # 缺省时回退 anti_collapse.segment_min_len
+pseudo_stream:
+  # 服务器端伪流式打字机回放（Brief 84）：Stage 群聊 / 梦境 / coplay 活动聊天复用
+  # 1v1 已有的 message_stream_* 帧，整段回复按块打字机式回放；不影响 1v1 真流式。
+  enabled: true            # 总开关
+  block_min_chars: 2       # 句内分块最小字数
+  block_max_chars: 6       # 句内分块最大字数
+  interval_min_ms: 30      # 块间间隔下限
+  interval_max_ms: 80      # 块间间隔上限
+  max_duration_ms: 4000    # 单条消息回放总时长上限，超长文本自动加速收敛到该值
+  profiles:
+    dream:                 # 梦境模式更慢一档，贴合气氛
+      interval_min_ms: 50
+      interval_max_ms: 120
+      max_duration_ms: 5000
 context:
   max_turns: 30
 chat:
