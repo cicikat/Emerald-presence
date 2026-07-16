@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -136,8 +137,19 @@ class TestWatchUnifiedGating:
         from core.scheduler.defer_queue import clear_all
         from core.scheduler.triggers import watch
 
+        # on_watch_event() reads datetime.now().hour to skip 06-08 (可能晨跑) and to
+        # pick day/night thresholds; without freezing it these tests are wall-clock
+        # dependent and fail for real whenever CI happens to run in that window.
+        # Fixed to 14:00 — outside both the 06-08 skip and the 22-06 night branch —
+        # matching the existing FakeDatetime convention in test_execute_dryrun.py.
+        class FakeDatetime(datetime):
+            @classmethod
+            def now(cls):
+                return cls(2026, 5, 25, 14, 0)
+
         clear_all()
         monkeypatch.setattr(watch, "WATCH_EXECUTE_MODE", "live")
+        monkeypatch.setattr(watch, "datetime", FakeDatetime)
         monkeypatch.setattr(watch, "_cfg", lambda: {"enabled": True})
         monkeypatch.setattr(watch, "_owner_id", lambda: "u1")
 
