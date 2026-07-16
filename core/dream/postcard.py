@@ -81,7 +81,7 @@ async def generate_postcard(uid: str, dream_id: str, exit_type: str, *, char_id:
         dream_time = datetime.fromtimestamp(dream_ts or datetime.now().timestamp()).strftime("%Y-%m-%d %H:%M")
         dialogue = "\n".join(f"[{t.get('role')}] {str(t.get('content') or '')[:240]}" for t in turns[-12:])
         letter = await llm_client.chat([
-            {"role": "system", "content": template + "\n只输出信正文。信内日期必须是：" + dream_time},
+            {"role": "system", "content": template + invariant_hint + "\n只输出信正文。信内日期必须是：" + dream_time},
             {"role": "user", "content": "梦境归档片段：\n" + dialogue},
         ], max_tokens_override=450)
         letter = str(letter).strip()
