@@ -1194,6 +1194,46 @@ def build(
         })
 
     # ─────────────────────────────────────────────────────────────────────────
+    # 层 6h：storyline 叙事弧（mode=tagged，relevance 门控，非常态注入，Brief 80 §4）。
+    # identity 回答"他是个什么样的人"，storyline 回答"他在经历什么弧线"——只在本轮话题
+    # 触及某条弧线时召回那一条，同 dream 印象/watch/growth_self 的 tagged 惯例，不逐轮刷。
+    # backchannel 低信息轮跳过（同 diary 闸的 recall_gate 用法）。
+    # _drop_priority=65：介于 mid_term(40) 与 episodic(70) 之间——叙事质量高于中期压缩，
+    # 但低于精筛情景记忆。
+    # ─────────────────────────────────────────────────────────────────────────
+    try:
+        from core.recall_gate import is_low_information as _storyline_low_info
+        if not _storyline_low_info(user_message):
+            from core.memory import storyline as _storyline_store
+            _recallable_arcs = _storyline_store.list_recallable_arcs(user_id, char_id=char_id)
+            _best_arc = None
+            _best_overlap: set[str] = set()
+            for _arc in _recallable_arcs:
+                _overlap = _tags & set(_arc.get("tags") or [])
+                if _overlap and len(_overlap) > len(_best_overlap):
+                    _best_arc, _best_overlap = _arc, _overlap
+            if _best_arc is not None:
+                _recent_nodes = _best_arc["nodes"][-3:]
+                _node_text = "；".join(n["summary"] for n in _recent_nodes)
+                _arc_text = f"《{_best_arc['title']}》：{_node_text}"[:300]
+                _layers.append("6h_storyline")
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        f"（这是你记得的一段持续经历，不是此刻发生的事：{_arc_text}）"
+                    ),
+                    "_layer": "6h_storyline",
+                    "_drop_priority": 65,
+                    "_provenance": {
+                        "mode": "tagged",
+                        "triggers_checked": sorted(_best_arc.get("tags") or []),
+                        "matched_tags": sorted(_best_overlap),
+                    },
+                })
+    except Exception:
+        pass
+
+    # ─────────────────────────────────────────────────────────────────────────
     # 层 coplay_context：陪玩模式 active 时的游戏进度 + 最近动态 + 剧透压制硬约束
     # （Brief 41）。已由 core.coplay.game_state.build_coplay_context_text() 整段
     # 拼好（含 <陪玩状态> 定界标签），active 状态才非空。

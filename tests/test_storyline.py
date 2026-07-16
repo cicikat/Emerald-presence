@@ -173,6 +173,20 @@ def test_no_public_api_to_mutate_existing_node(sandbox):
         assert not any(kw in name for kw in forbidden_keywords), f"发现疑似改写既有 node 的公开接口: {name}"
 
 
+# ── list_recallable_arcs：closed 弧线不参与召回 ─────────────────────────────
+
+def test_list_recallable_arcs_excludes_closed(sandbox):
+    uid, char_id = "u13", "yexuan"
+    active_id = sl.open_arc(uid, char_id=char_id, title="活跃弧线", tags=[])
+    closed_id = sl.open_arc(uid, char_id=char_id, title="已完结弧线", tags=[])
+    sl.set_arc_status(uid, char_id=char_id, arc_id=closed_id, status="closed")
+
+    recallable = sl.list_recallable_arcs(uid, char_id=char_id)
+    ids = {a["arc_id"] for a in recallable}
+    assert active_id in ids
+    assert closed_id not in ids
+
+
 # ── 9. 路径一致性 ────────────────────────────────────────────────────────────
 
 def test_storyline_path_matches_resolver(sandbox):
