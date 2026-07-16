@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
+from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -48,3 +50,88 @@ async def test_postcard_system_prompt_omits_invariant_hint_when_none():
 
     system = chat.await_args.args[0][0]["content"]
     assert "跨梦观察" not in system
+
+
+@pytest.mark.asyncio
+async def test_hard_exit_does_not_generate_postcard():
+    from core.dream import postcard
+
+    with patch.object(postcard, "_archive_turns") as archive:
+        await postcard.generate_postcard("u", "d", "hard_exit")
+    archive.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fewer_than_five_assistant_turns_does_not_generate():
+    from core.dream import postcard
+
+    with (
+        patch.object(postcard, "_load_schedule", return_value=[]),
+        patch.object(postcard, "_archive_turns", return_value=_turns(4)),
+        patch("core.llm_client.chat", new=AsyncMock()) as chat,
+    ):
+        await postcard.generate_postcard("u", "d", "soft_exit")
+    chat.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_dream_id_does_not_generate():
+    from core.dream import postcard
+
+    with (
+        patch.object(postcard, "_load_schedule", return_value=[{"dream_id": "d"}]),
+        patch.object(postcard, "_archive_turns") as archive,
+    ):
+        await postcard.generate_postcard("u", "d", "soft_exit")
+    archive.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_qualified_postcard_persists_schedule_entry():
+    from core.dream import postcard
+
+    saved: list[list[dict]] = []
+    with (
+        patch.object(postcard, "_load_schedule", return_value=[]),
+        patch.object(postcard, "_archive_turns", return_value=_turns()),
+        patch.object(postcard, "_save_schedule", side_effect=lambda _cid, rows: saved.append(rows) or True),
+        patch.object(postcard, "_template_text", return_value="template"),
+        patch("core.dream.invariants.select_for_postcard", return_value=None),
+        patch("core.llm_client.chat", new=AsyncMock(return_value="letter")),
+    ):
+        await postcard.generate_postcard("u", "d", "soft_exit")
+    assert saved[0][0]["dream_id"] == "d"
+    assert saved[0][0]["letter_text"] == "letter"
+    assert saved[0][0]["sent"] is False
+
+
+def test_due_date_retries_collision():
+    from core.dream import postcard
+
+    entries = [{"scheduled_date": "2026-01-02", "sent": False}]
+    with patch.object(postcard.random, "randint", side_effect=[1, 2]):
+        assert postcard._due_date(entries, date(2026, 1, 1)) == date(2026, 1, 3)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ok, expected_sent", [(False, False), (True, True)])
+async def test_delivery_records_attempt_and_only_success_marks_sent(ok: bool, expected_sent: bool):
+    from core.dream import postcard
+
+    rows = [{"dream_id": "d", "scheduled_date": "2026-01-01", "sent": False, "attempts": 0, "letter_text": "x"}]
+    with (
+        patch.object(postcard, "_load_schedule", return_value=rows),
+        patch.object(postcard, "_save_schedule", return_value=True),
+        patch("core.mail.mail_sender.send_letter", new=AsyncMock(return_value=ok)),
+    ):
+        sent_count = await postcard.deliver_due_postcards(today=date(2026, 1, 2))
+    assert rows[0]["attempts"] == 1
+    assert rows[0]["sent"] is expected_sent
+    assert sent_count == int(ok)
+
+
+def test_postcard_isolation_contract_has_positive_control():
+    source = Path("core/dream/postcard.py").read_text(encoding="utf-8")
+    for forbidden in ("mid_term", "episodic", "user_identity", "mood_state", "hidden_state"):
+        assert forbidden not in source
+    assert "dreams_archive_dir" in source
