@@ -30,6 +30,7 @@ _DEFAULT_RESPONSE = {
         "embodied_ease": "neutral",
         "memory_cues": [],
     },
+    "trigger_counts": {},
 }
 
 
@@ -65,7 +66,9 @@ def _active_char_id() -> str:
         "- `touch_need`: 接触需求基线 + 当前亏欠量\n"
         "- `embodied_ease`: 体感放松度\n"
         "- `body_memory`: 身体记忆条目（按 weight 降序）\n"
-        "- `dream_snapshot`: Dream 实际注入的 bucket 投影\n\n"
+        "- `dream_snapshot`: Dream 实际注入的 bucket 投影\n"
+        "- `trigger_counts`: integrator 各 event_type / source 累计接受次数"
+        "（进程内计数，重启清零，仅用于验收接线是否在动）\n\n"
         "异常时 fail-closed，返回默认值，不抛 500。"
     ),
     tags=["Debug"],
@@ -74,6 +77,7 @@ async def get_user_hidden_state_debug(auth=Depends(require_scopes("memory.read")
     try:
         from core.memory.user_hidden_state import to_dict, to_dream_snapshot
         from core.memory.user_hidden_state_store import load_hidden_state
+        from core.memory.user_hidden_state_integrator import get_trigger_counts
 
         uid = _owner_uid()
         char_id = _active_char_id()
@@ -119,6 +123,7 @@ async def get_user_hidden_state_debug(auth=Depends(require_scopes("memory.read")
                 for e in body_memory
             ],
             "dream_snapshot": snapshot,
+            "trigger_counts": get_trigger_counts(),
         }
 
     except Exception as exc:
