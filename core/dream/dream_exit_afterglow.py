@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 def wire_afterglow_from_summary(
-    uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_CHAR_ID
+    uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_CHAR_ID, mode: str = "sandbox"
 ) -> None:
     """Save afterglow residue and integrate into hidden state at Dream exit.
 
@@ -44,6 +44,10 @@ def wire_afterglow_from_summary(
     summaries sub-directory is read.  T-06 will use char_id for scoped
     hidden_state writes; for now it is threaded through as a forward seam.
 
+    mode: "sandbox" | "mirror" (Brief 90 §3) — stamped onto the residue for
+    downstream provenance. Does not change gating: integrate_afterglow_and_save()
+    still only ever touches sensitivity.current / embodied_ease regardless of mode.
+
     Steps:
       1. Load summary from dreams/{char_id}/summaries/dream_{dream_id}.summary.json.
       2. Derive tone from afterglow field + exit_type.
@@ -52,7 +56,7 @@ def wire_afterglow_from_summary(
       5. integrate_afterglow_and_save() with stamp_dream_afterglow().
     """
     try:
-        _do_wire(uid, dream_id, exit_type, char_id=char_id)
+        _do_wire(uid, dream_id, exit_type, char_id=char_id, mode=mode)
     except Exception as exc:
         logger.warning(
             "[dream_exit_afterglow] wire_afterglow_from_summary failed "
@@ -61,7 +65,9 @@ def wire_afterglow_from_summary(
         )
 
 
-def _do_wire(uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_CHAR_ID) -> None:
+def _do_wire(
+    uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_CHAR_ID, mode: str = "sandbox"
+) -> None:
     from core.memory.user_hidden_state import AfterglowResidueInput
     from core.memory.user_hidden_state_store import save_afterglow_residue
     from core.memory.user_hidden_state_integrator import integrate_afterglow_and_save
@@ -81,6 +87,7 @@ def _do_wire(uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_
         emotional_tags=emotional_tags,
         tone=tone,
         age_hours=0.0,
+        mode=mode,
     )
 
     now_str = datetime.now(timezone.utc).isoformat()

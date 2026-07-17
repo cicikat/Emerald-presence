@@ -157,7 +157,7 @@ def test_generate_summary_bg_uses_dream_state_char_id(sandbox):
 
     captured_kwargs: list[dict] = []
 
-    async def _mock_distill(uid, did, exit_type, *, char_id="yexuan"):
+    async def _mock_distill(uid, did, exit_type, *, char_id="yexuan", **_kwargs):
         captured_kwargs.append({"uid": uid, "dream_id": did, "char_id": char_id})
 
     async def run():
@@ -201,7 +201,7 @@ def test_generate_summary_bg_char_id_forwarded_directly(sandbox):
 
     captured: list[str] = []
 
-    async def _mock_distill(uid, did, exit_type, *, char_id="yexuan"):
+    async def _mock_distill(uid, did, exit_type, *, char_id="yexuan", **_kwargs):
         captured.append(char_id)
 
     async def run():
@@ -240,7 +240,7 @@ def test_close_uses_session_char_id_not_current_active(sandbox):
 
     captured_char_id: list[str] = []
 
-    async def _mock_distill(uid, did, exit_type, *, char_id="yexuan"):
+    async def _mock_distill(uid, did, exit_type, *, char_id="yexuan", **_kwargs):
         captured_char_id.append(char_id)
 
     async def run():
@@ -280,7 +280,7 @@ def test_legacy_dream_state_missing_char_id_warns_and_fallbacks(sandbox, caplog)
 
     captured_char_id: list[str] = []
 
-    async def _mock_distill(uid, did, exit_type, *, char_id="yexuan"):
+    async def _mock_distill(uid, did, exit_type, *, char_id="yexuan", **_kwargs):
         captured_char_id.append(char_id)
 
     with caplog.at_level(logging.WARNING, logger="core.dream.dream_pipeline"):

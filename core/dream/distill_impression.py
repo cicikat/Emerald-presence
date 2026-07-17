@@ -61,24 +61,66 @@ _DISTILL_SYSTEM = """\
   "weight": 0.2到0.4之间的小数
 }"""
 
+# Mirror-mode addendum (Brief 90 §1): mirror impressions must be feeling-level
+# residue, not scene/plot memory — the write-side counterpart of the DM layer's
+# three prohibitions (not a diagnosis / no direct analysis / no explicit numbers).
+_MIRROR_DISTILL_ADDENDUM = """
+
+【Mirror 模式追加约束】这条印象来自 Mirror 模式的梦，只能是说不清的感受性残象，
+不是剧情记忆：
+- impression_text 只写模糊的感觉，量级参考"梦里有种模糊的贴近感"，不得包含具体
+  情节、场景、动作或人物关系。
+- plot 固定输出空字符串，vivid_lines 固定输出空数组——mirror 不产出剧情。
+- 禁止出现桶标签词（sensitivity、closeness、embodied_ease、guarded、neutral 等）、
+  任何数值或百分比。
+- 禁止分析性措辞（"这说明""看起来是""意味着"之类的推断句）。"""
+
+# Depth-defense second layer for mirror mode (承重墙仍是 prompt 约束 + force-empty
+# plot/vivid_lines；此处只是纵深防御，非替代）。
+_MIRROR_BUCKET_WORDS = (
+    "sensitivity_bucket", "closeness_need_bucket", "embodied_ease_bucket",
+    "association_presence", "sensitivity", "touch_appetite", "embodied_ease",
+    "guarded", "neutral", "unknown", "medium", "low", "high", "easy",
+    "none", "light", "present",
+)
+_NUMERIC_RE = re.compile(r"\d+(\.\d+)?%?")
+
+
+def _strip_mirror_bucket_leak(text: str) -> str:
+    if not text:
+        return text
+    result = _NUMERIC_RE.sub("", text)
+    for term in _MIRROR_BUCKET_WORDS:
+        result = result.replace(term, "")
+    return result
+
 
 async def distill_impression(
-    uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_CHAR_ID
+    uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_CHAR_ID, mode: str = "sandbox"
 ) -> None:
-    """Top-level entry — failure is silently downgraded to a warning."""
+    """Top-level entry — failure is silently downgraded to a warning.
+
+    mode: "sandbox" | "mirror" — stamped onto the entry (Brief 90 §1).
+    Mirror entries carry a heavier depth-defense strip and a forced-empty
+    plot/vivid_lines, since Mirror write-back must stay feeling-level only.
+    """
     try:
-        await _distill(uid, dream_id, exit_type, char_id=char_id)
+        await _distill(uid, dream_id, exit_type, char_id=char_id, mode=mode)
     except Exception as e:
         logger.warning(
             f"[distill_impression] failed uid={uid} dream_id={dream_id}: {e}"
         )
 
 
-async def _distill(uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_CHAR_ID) -> None:
+async def _distill(
+    uid: str, dream_id: str, exit_type: str, *, char_id: str = DEFAULT_CHAR_ID, mode: str = "sandbox"
+) -> None:
     from core.sandbox import get_paths
     from core import llm_client
     from core.dream.impression_store import append_impression
     from core.character_name_provider import get_char_name
+
+    is_mirror = mode == "mirror"
 
     archive_path = get_paths().dreams_archive_dir(char_id=char_id) / f"dream_{dream_id}.jsonl"
     turns = _load_archive(archive_path)
@@ -91,7 +133,7 @@ async def _distill(uid: str, dream_id: str, exit_type: str, *, char_id: str = DE
     except Exception:
         char_name = char_id
     dialogue = _format_dialogue(turns)
-    data = await _llm_distill(dialogue, llm_client, char_name=char_name)
+    data = await _llm_distill(dialogue, llm_client, char_name=char_name, mode=mode)
 
     impression_text = (data.get("impression_text") or "").strip().strip('"')
     if not impression_text:
@@ -119,6 +161,17 @@ async def _distill(uid: str, dream_id: str, exit_type: str, *, char_id: str = DE
     stripped_tags = [_strip_fn(str(t)).strip() for t in raw_tags]
     stripped_tags = [t for t in stripped_tags if t]  # drop empty after strip
 
+    if is_mirror:
+        # Mirror write-back is feeling-level residue only — force-drop any
+        # plot/scene content the LLM produced despite the prompt constraint,
+        # and strip bucket-label vocabulary as depth defense (see docstring).
+        plot_text = ""
+        vivid_lines = []
+        impression_text = _strip_mirror_bucket_leak(impression_text)
+        if not impression_text.strip():
+            logger.info(f"[distill_impression] mirror strip emptied result uid={uid}, no impression written")
+            return
+
     weight = float(data.get("weight") or _WEIGHT_MIN)
     weight = max(_WEIGHT_MIN, min(_WEIGHT_MAX, weight))
 
@@ -135,10 +188,11 @@ async def _distill(uid: str, dream_id: str, exit_type: str, *, char_id: str = DE
         "exit_type": exit_type,
         "decay_after": now + _DECAY_DAYS * 86400,
         "marked": True,
+        "mode": mode,
     }
 
     append_impression(uid, entry, char_id=char_id)
-    logger.info(f"[distill_impression] written uid={uid} dream_id={dream_id}")
+    logger.info(f"[distill_impression] written uid={uid} dream_id={dream_id} mode={mode}")
 
 
 def _load_archive(archive_path: Path) -> list[dict[str, Any]]:
@@ -166,8 +220,12 @@ def _format_dialogue(turns: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-async def _llm_distill(dialogue: str, llm_client, *, char_name: str = "(角色未加载)") -> dict[str, Any]:
+async def _llm_distill(
+    dialogue: str, llm_client, *, char_name: str = "(角色未加载)", mode: str = "sandbox"
+) -> dict[str, Any]:
     system = _DISTILL_SYSTEM.replace("叶瑄", char_name)
+    if mode == "mirror":
+        system += _MIRROR_DISTILL_ADDENDUM
     for attempt in range(3):
         try:
             raw = await llm_client.chat(

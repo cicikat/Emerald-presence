@@ -364,3 +364,66 @@ class TestIsolationGuarantees:
             "touch_need.deficit must not be touched by afterglow"
         assert len(state_after.body_memory.entries) == body_entries_before, \
             "body_memory must not be touched by afterglow"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# G. Mirror mode wiring (Brief 90 §3 — contract ③, mode passthrough)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMirrorModeWiring:
+    """MM-01–MM-04: mode="mirror" is stamped onto the residue and does not
+    change the numeric invariant — only sensitivity.current / embodied_ease
+    may move, same as sandbox."""
+
+    def test_MM01_residue_file_carries_mirror_mode(self, sandbox):
+        """MM-01: residue written with mode="mirror" persists "mode": "mirror" on disk."""
+        from core.sandbox import get_paths
+        _write_summary(sandbox, _DREAM_ID, _make_gentle_summary(weight=0.8))
+        _do_wire(_UID, _DREAM_ID, "soft", mode="mirror")
+        residue_path = get_paths().user_memory_root(_UID) / "afterglow_residue.json"
+        data = json.loads(residue_path.read_text(encoding="utf-8"))
+        assert data.get("mode") == "mirror"
+
+    def test_MM02_read_back_preserves_mirror_mode(self, sandbox):
+        """MM-02: read_afterglow_residue() round-trips mode="mirror"."""
+        _write_summary(sandbox, _DREAM_ID, _make_gentle_summary(weight=0.8))
+        _do_wire(_UID, _DREAM_ID, "soft", mode="mirror")
+        result = read_afterglow_residue(_UID, _NOW)
+        assert result is not None
+        assert result.mode == "mirror"
+
+    def test_MM03_legacy_residue_without_mode_reads_as_sandbox(self, sandbox):
+        """MM-03: a residue file predating the mode field reads back as 'sandbox' (compat)."""
+        from core.sandbox import get_paths
+        residue_path = get_paths().user_memory_root(_UID) / "afterglow_residue.json"
+        residue_path.parent.mkdir(parents=True, exist_ok=True)
+        residue_path.write_text(json.dumps({
+            "emotional_tags": ["温柔"],
+            "tone": "calm",
+            "created_at": _NOW,
+        }), encoding="utf-8")
+        result = read_afterglow_residue(_UID, _NOW)
+        assert result is not None
+        assert result.mode == "sandbox"
+
+    def test_MM04_mirror_comfort_only_touches_sensitivity_and_ease(self, sandbox):
+        """MM-04: mirror comfort tone still only moves sensitivity.current / embodied_ease;
+        baseline / touch_need / body_memory stay untouched (same invariant as sandbox, NE/IG)."""
+        _write_summary(sandbox, _DREAM_ID, _make_gentle_summary(weight=0.9))
+        state_before = default_hidden_state()
+        old_sens = state_before.sensitivity.current.value
+        old_ease = state_before.embodied_ease.value
+        baseline_before = state_before.sensitivity.baseline.value
+        touch_baseline_before = state_before.touch_need.baseline.value
+        touch_deficit_before = state_before.touch_need.deficit.value
+        body_entries_before = len(state_before.body_memory.entries)
+
+        _do_wire(_UID, _DREAM_ID, "soft", mode="mirror")
+
+        state_after = load_hidden_state(_UID)
+        assert state_after.embodied_ease.value > old_ease
+        assert state_after.sensitivity.current.value >= old_sens
+        assert state_after.sensitivity.baseline.value == baseline_before
+        assert state_after.touch_need.baseline.value == touch_baseline_before
+        assert state_after.touch_need.deficit.value == touch_deficit_before
+        assert len(state_after.body_memory.entries) == body_entries_before

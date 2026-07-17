@@ -573,14 +573,15 @@ async def _generate_summary_bg(
     except Exception as e:
         logger.error(f"[dream_pipeline] summary failed uid={uid}: {e}")
 
-    # Phase 6: Wire afterglow residue at Dream exit (Reality-side integrator, fail-closed).
-    # Scenario mode: scripted-story space must never write to User Hidden State.
-    # Mirror v0.1: read-only mirror — no hidden_state write-back this phase.
-    #   Future mirror afterglow must use an explicit mode/source gate.
-    if dream_mode not in ("scenario", "mirror"):
+    # Phase 6 / Brief 90 §3: Wire afterglow residue at Dream exit (Reality-side
+    # integrator, fail-closed). Scenario mode: scripted-story space must never
+    # write to User Hidden State. Mirror v0.2: gate open — mode="mirror" is
+    # threaded through to AfterglowResidueInput; integrate_afterglow_and_save()
+    # still only ever touches sensitivity.current / embodied_ease.
+    if dream_mode != "scenario":
         try:
             from core.dream.dream_exit_afterglow import wire_afterglow_from_summary
-            wire_afterglow_from_summary(uid, dream_id, exit_type, char_id=char_id)
+            wire_afterglow_from_summary(uid, dream_id, exit_type, char_id=char_id, mode=dream_mode)
         except Exception as e:
             logger.warning(f"[dream_pipeline] afterglow wiring failed uid={uid}: {e}")
     else:
@@ -591,15 +592,24 @@ async def _generate_summary_bg(
 
     # Distill impression after summary (failure is warning-only per C7)
     # Scenario mode: must not write impression_store (feeds Reality 6g layer).
-    # Mirror v0.1: impression writes also skipped — no mode/source gate exists yet.
-    #   Future mirror impression must add an independent mode/source tag and a
-    #   Reality integrator gate in impression_loader before writing here.
-    if dream_mode not in ("scenario", "mirror"):
+    # Mirror v0.2 (Brief 90 §1): gate open — entries are stamped mode="mirror"
+    # and impression_loader gates their Reality read-back (contract ①②).
+    if dream_mode != "scenario":
         try:
             from core.dream.distill_impression import distill_impression
-            await distill_impression(uid, dream_id, exit_type, char_id=char_id)
+            await distill_impression(uid, dream_id, exit_type, char_id=char_id, mode=dream_mode)
         except Exception as e:
             logger.warning(f"[dream_pipeline] distill_impression failed uid={uid}: {e}")
+    else:
+        logger.info(
+            "[dream_pipeline] %s mode — distill_impression skipped uid=%s dream_id=%s",
+            dream_mode, uid, dream_id,
+        )
+
+    # Cross-world invariant observation + postcard generation stay sandbox-only:
+    # neither is part of this brief's mirror write-back contract, and both are
+    # independent, never-prompt-facing archive readers unrelated to impression_loader.
+    if dream_mode == "sandbox":
         try:
             from core.dream.invariants import observe
             await observe(uid, dream_id, world_id=world_id, char_id=char_id)
@@ -610,11 +620,6 @@ async def _generate_summary_bg(
             await generate_postcard(uid, dream_id, exit_type, char_id=char_id)
         except Exception as e:
             logger.warning(f"[dream_pipeline] postcard generation failed uid={uid}: {e}")
-    else:
-        logger.info(
-            "[dream_pipeline] %s mode — distill_impression skipped uid=%s dream_id=%s",
-            dream_mode, uid, dream_id,
-        )
 
 
 def _should_retain(state: dict) -> bool:

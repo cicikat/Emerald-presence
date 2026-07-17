@@ -165,6 +165,7 @@ def save_afterglow_residue(
         "emotional_tags": list(residue.emotional_tags),
         "tone": residue.tone,
         "created_at": created_at,
+        "mode": residue.mode,
     }
     ok = safe_write_json(path, data)
     if not ok:

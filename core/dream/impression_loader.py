@@ -19,6 +19,19 @@ _MAX_INJECT = 3
 _PLOT_TOKEN_RE = re.compile(r"[\u4e00-\u9fffA-Za-z0-9]+")
 _COMMON_BIGRAMS = {"我们", "你们", "他们", "这个", "那个", "还是", "只是", "已经", "好像", "什么", "怎么"}
 
+# Brief 90 §2 (contract ②): Mirror entries reflect a hidden-state signal — recall
+# must be more subdued than sandbox. Only fires when the current-turn tag set
+# intersects this frozenset (same trigger vocabulary as the Dream D4.5 gate).
+_MIRROR_RECALL_TAGS: frozenset[str] = frozenset({"body_intimate", "physical_closeness", "emotion.deep"})
+_MIRROR_FRAMING_PREFIX = "梦里残留的模糊感觉，不是事实："
+
+
+def _entry_mode(imp: dict) -> str:
+    """Backward-compat rule (Brief 90 §1): entries without a mode field predate
+    the mode tag and must be treated as sandbox — no data migration."""
+    mode = imp.get("mode")
+    return mode if mode in ("sandbox", "mirror") else "sandbox"
+
 
 def _tag_note(char_name: str) -> str:
     name = char_name or "角色"
@@ -43,7 +56,13 @@ def _render_entry(imp: dict) -> str:
     elif not parts:
         return ""
 
-    return "\n".join(parts)
+    text = "\n".join(parts)
+    if _entry_mode(imp) == "mirror":
+        # Mirror entries only ever reach render via the tag-gated recall path
+        # (forced rounds exclude mirror — see load_impression_text) so this
+        # framing prefix is unconditional here.
+        text = _MIRROR_FRAMING_PREFIX + text
+    return text
 
 
 def _relevance_score(imp: dict, user_text: str, tags: set[str]) -> int:
@@ -92,14 +111,30 @@ def load_impression_text(
         if forced_rounds_left is None:
             selected = active[:_MAX_INJECT]  # compatibility for direct legacy callers
         elif forced_rounds_left > 0:
+            # Brief 90 §2 (contract ②): mirror entries never participate in the
+            # forced 3-round exit injection — only sandbox exits get it.
             selected = [
-                imp for imp in active if imp.get("dream_id") == latest_dream_id
+                imp for imp in active
+                if imp.get("dream_id") == latest_dream_id and _entry_mode(imp) == "sandbox"
             ][:1]
         elif recall_enabled:
-            scored = [
-                (_relevance_score(imp, user_text, tags or set()), imp)
-                for imp in active
-            ]
+            # Brief 90 §2 (contract ②): mirror recall requires the current-turn
+            # tag set to intersect _MIRROR_RECALL_TAGS — no matching tag, no
+            # recall at all, regardless of topic/plot relevance. A gate match
+            # alone is sufficient to surface (score floor), since mirror plot
+            # text is force-emptied at write time (§1) and would otherwise
+            # never clear the topic-bigram scoring sandbox entries rely on.
+            query_tags = {str(t).strip() for t in (tags or set()) if str(t).strip()}
+            mirror_gate_open = bool(query_tags & _MIRROR_RECALL_TAGS)
+            scored = []
+            for imp in active:
+                if _entry_mode(imp) == "mirror":
+                    if not mirror_gate_open:
+                        continue
+                    score = max(1, _relevance_score(imp, user_text, tags or set()))
+                else:
+                    score = _relevance_score(imp, user_text, tags or set())
+                scored.append((score, imp))
             selected = [
                 imp for score, imp in sorted(
                     scored,

@@ -468,7 +468,7 @@ def test_scenario_d_dream_char_id_not_read_from_active(sandbox):
 
     distill_calls: list[dict] = []
 
-    async def _mock_distill(uid_, dream_id_, exit_type_, *, char_id="yexuan"):
+    async def _mock_distill(uid_, dream_id_, exit_type_, *, char_id="yexuan", **_kwargs):
         distill_calls.append({"uid": uid_, "char_id": char_id})
 
     mock_summary = json.dumps({

@@ -820,6 +820,7 @@ class AfterglowResidueInput:
     emotional_tags: list[str] = field(default_factory=list)
     tone: str = ""
     age_hours: float = 0.0
+    mode: str = "sandbox"  # "sandbox" | "mirror" (Brief 90 §3) — provenance only, no gating effect
 
 
 @dataclass
@@ -935,6 +936,7 @@ def read_afterglow_residue(uid: str, now: str, *, char_id: str = DEFAULT_CHAR_ID
             emotional_tags=list(raw.get("emotional_tags", [])),
             tone=str(raw.get("tone", "")),
             age_hours=max(0.0, age_hours),
+            mode=str(raw.get("mode") or "sandbox"),
         )
     except Exception as exc:
         _log.warning("[afterglow] uid=%s: failed to build AfterglowResidueInput: %s", uid, exc)

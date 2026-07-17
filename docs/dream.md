@@ -78,10 +78,11 @@
 - `non_lucid`：他在虚构内不点破"这是梦"，但系统层 + dream_state 仍标记 dream
 - 全开档污染矩阵测试
 
-**Mirror 模式（v0.1）**
+**Mirror 模式（v0.2）**
 - `dream_mode=mirror`：三种模式之一（sandbox / scenario / mirror），入梦时冻结，整场不可切
-- **Mirror 是只读镜子（v0.1）**：Mirror Mode 读取 User Hidden State 的粗粒度 snapshot，
-  转化为隐喻倾向材料注入 DM 层；本版本绝不写回任何现实存储。
+- **Mirror 入梦读只读，出梦写门控（v0.2）**：Mirror Mode 读取 User Hidden State 的粗粒度
+  snapshot，转化为隐喻倾向材料注入 DM 层（读侧不变）；出梦写回三条契约已在 v0.2 落地
+  （见下方"Mirror v0.2 门控写回"），写回强度低于 sandbox、带独立标记、经 Reality 侧门控。
   User Hidden State 是底层状态层，不等于 Mirror Mode。
 - **MirrorCore 入梦冻结**：`enter_dream(dream_mode="mirror")` 时，从
   `context_snapshot["user_hidden_state_snapshot"]` 构建 `MirrorCore`，
@@ -115,15 +116,23 @@
   三条禁令写死在 prompt 开头：不是诊断结论 / 不直接分析用户心理 / 不明说数值。
   sandbox 和 scenario 均不注入此层。
 
-- **Mirror v0.1 写回保护**：`_generate_summary_bg()` 在 `dream_mode in ("scenario", "mirror")` 时
-  同时跳过：
-  - `wire_afterglow_from_summary()` — 不写 afterglow_residue.json，不调用 integrate_afterglow_and_save
-  - `distill_impression()` — 不写 impression_store
-  - `generate_summary()` 仍正常运行（梦境日志保留，不进入 Reality 流）
-
-  未来 Mirror afterglow 必须：①在 impression entry 上增加独立 `mode/source` 标记，
-  ②在 `impression_loader` 侧增加 Reality integrator gate，③通过显式 WriteEnvelope，
-  不得复用 Sandbox 的无标记写入路径。
+- **Mirror v0.2 门控写回（Brief 90）**：`_generate_summary_bg()` 只在 `dream_mode == "scenario"`
+  时跳过写回；sandbox 和 mirror 都会写，但 mirror 的每一跳都比 sandbox 更收敛：
+  - `distill_impression()`：sandbox 与 mirror 都调用，产出 entry 带独立
+    `mode: "sandbox" | "mirror"` 标记（契约①）。mirror 蒸馏 prompt 追加约束——只产出
+    **感受性残象**（"梦里有种模糊的贴近感"量级），`plot`/`vivid_lines` 强制置空，
+    禁止桶标签词/数值/分析性措辞（DM 层三禁令的写回侧对应物，写入前有词表纵深防御）。
+    存量无 `mode` 字段的旧条目视为 `sandbox`（兼容规则在 loader 侧，不做数据迁移）。
+  - `impression_loader.load_impression_text()` 是 Reality 侧 integrator gate（契约②）：
+    sandbox 条目行为完全不变；mirror 条目**不参与出梦强注 3 轮**（强注只发最近一次 sandbox
+    退出），话题召回仅在当前轮 tags 命中 `{body_intimate, physical_closeness, emotion.deep}`
+    时才可能命中，命中后注入文案带框定前缀「梦里残留的模糊感觉，不是事实」。
+  - `wire_afterglow_from_summary()`：sandbox 与 mirror 都调用，走同一条显式 WriteEnvelope +
+    Reality-side integrator 路径（`AfterglowResidueInput` 增加 `mode` 透传字段，落盘 residue
+    带 mode，契约③；本来就不复用 Sandbox 无标记路径，因为两者共用同一条门控路径）。
+    数值影响面维持既有不变量：只碰 `sensitivity.current` / `embodied_ease`，不碰
+    `baseline` / `touch_need` / `body_memory`。
+  - `generate_summary()` 三种模式都正常运行（梦境日志保留，scenario 摘要不进入 Reality 流）。
 
 **Scenario 模式（v0–v0.8）**
 - `dream_mode=scenario`：三种模式之一（sandbox / scenario / mirror），入梦时冻结，整场不可切
@@ -147,8 +156,9 @@
     不写 impression_store。`generate_summary()` 仍正常运行（剧本 summary 保留在梦境日志中供调试，
     但不进入 Reality 流）。
   - Sandbox 保持原有 impression 行为（`distill_impression()` 照常调用）。
-  - Mirror 未来如果要写 mirror_impression，必须在 impression entry 上增加独立 `mode/source` 标记，
-    并在 `impression_loader` 侧增加 Reality integrator gate，不得复用 Sandbox 的无标记写入路径。
+  - Mirror 的 mirror_impression 写回已在 v0.2 落地（见上方"Mirror v0.2 门控写回"）：
+    独立 `mode` 标记 + `impression_loader` 侧 Reality integrator gate，不复用 Sandbox 的
+    无标记路径。Scenario 本身仍然不写——这条隔离墙与 Mirror 是否写回无关。
   - 旧数据清理：历史上已写入的 Scenario impression 条目在 `decay_after` 到期（30 天）后自动失效；
     本轮不做迁移。
 - **Scenario 不注入 D5 body_projection（v0.8.2）**：
@@ -291,7 +301,7 @@ WriteEnvelope 双重门控：
 
 afterglow 完整路径：Dream exit → summary → Reality prompt `6f_dream_afterglow`（0–5h）；同时 `wire_afterglow_from_summary()` → `integrate_afterglow_and_save()` → hidden_state.json（Phase 6 numeric wiring）并写 residue，供 `dream_afterglow_soft_hint` 在详细层结束后接管至 8h。
 
-出梦后的首次现实开口由 scheduler `dream_exit` proposer 负责，而不是 hook 在关闭点：它等待异步 summary/afterglow 就绪后，走正常 Reality `_pipeline_send → fetch_context → build_prompt`，因此直接复用 `6f_dream_afterglow` / soft hint 上下文。触发器只在 `QUIET` 状态报名，按 `dream_state.char_id` 让做梦角色发言，并以 `last_greeted_dream_id` 保证一梦一次。scenario/mirror 不写 afterglow，按中性问候降级；sandbox afterglow 8h 内始终未就绪时，也仅在退出后一个有限清醒时段内降级问候一次。
+出梦后的首次现实开口由 scheduler `dream_exit` proposer 负责，而不是 hook 在关闭点：它等待异步 summary/afterglow 就绪后，走正常 Reality `_pipeline_send → fetch_context → build_prompt`，因此直接复用 `6f_dream_afterglow` / soft hint 上下文。触发器只在 `QUIET` 状态报名，按 `dream_state.char_id` 让做梦角色发言，并以 `last_greeted_dream_id` 保证一梦一次。scenario 不写 afterglow，按中性问候降级；sandbox / mirror（v0.2 起）都写 afterglow，afterglow 8h 内始终未就绪时，也仅在退出后一个有限清醒时段内降级问候一次。
 
 ---
 
@@ -473,7 +483,7 @@ N 由 `dream.reality_context_full_turns` 配置（默认 3）。`dream_turn` 是
 - non_lucid 只改他虚构内自知；系统层仍标记 dream，墙 + 逃生不变
 
 ### CURRENT（当前实现）
-见第二节功能清单。三轴 + 四档 + 六世界 + 软硬双出口已落地；Mirror v0.1 已落地（只读镜子，MirrorCore 入梦冻结，DM 层注入，无写回）；三层产物均会生成，
+见第二节功能清单。三轴 + 四档 + 六世界 + 软硬双出口已落地；Mirror v0.2 已落地（只读镜子，MirrorCore 入梦冻结，DM 层注入；出梦写回已门控开闸——impression 带独立 `mode` 标记、Reality 侧 gate 更收敛、afterglow 走同一条 WriteEnvelope 路径）；三层产物均会生成，
 现实 prompt 接入互斥的 `6f_dream_afterglow` / `dream_afterglow_soft_hint`（只读余韵层）和 `6g_dream_impression`。测试数量以
 `tests/test_dream_*.py` 当前收集结果为准，不在合同文档里固定计数。
 
