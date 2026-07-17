@@ -174,9 +174,20 @@ speaker_id / content / timestamp / _turn_id / triggered_by
 - proactive 群触发与 think-delay 尚未接入；v1 主动群触发按规格保持关闭。Phase T（话题引子）
   不是例外——它仍在 owner 触发的回波窗口内同步产出，config 位 `stage.idle_theater`
   （后台自发群聊/小剧场）默认 false 且未实现，留待未来若开必须走 ProactiveLedger + 每日上限。
-- 角色间私聊（owner 不可见的 char↔char 对话）不做——不可观测的 token 洞，且违背
-  "owner 是唯一现实锚点"。LLM speaker selection（AutoGen manager 式）也不做，arbiter 保持
-  纯规则；Phase R/T 的候选选择同样是规则打分/talkativeness 排序，没有引入额外的选择调用。
+- LLM speaker selection（AutoGen manager 式）不做，arbiter 保持纯规则；Phase R/T 的候选选择
+  同样是规则打分/talkativeness 排序，没有引入额外的选择调用。
+- **角色间私聊（Brief 86，DESIGN.md 决策 9.5 修订版）**：`owner` 不可见的 char↔char 对话
+  在受限形态下**可以做**，但不是 Stage session——它走独立的调度触发器
+  `core/scheduler/triggers/private_exchange.py`（深夜/闲时窗口，同 `memory_janitor` 时段判断），
+  每日 ≤1 对、单次会话 ≤ `max_turns`（默认 6）次轻量 LLM 调用，pair 选择纯规则零 LLM。
+  会话生成复用本文档 §Phase B 的 lightweight 视图（`StageCharacterView.generate_private()`），
+  但用私下语域框定层（两条系统提示：授权私下语气 + 防漂移锚"不隐瞒、不结盟"）取代
+  Stage 的"群聊在场感"框定。产物**只回流关系层**——`char_relations` 摘要投影
+  （经既有 6h 冷却更新路径）+ 12h presence 提示；transcript 全文按决策 3
+  （自产内容不固化）永不进入 short_term / mid_term / episodic / identity / event_log / 向量库，
+  只落 `data/runtime/groups/_private/{char_a}__{char_b}/transcript.jsonl`（管理面板只读端点
+  `GET /relations/private-log`，前端无可视化入口是设计）。任意一方生成失败 → 整段放弃，
+  不落盘、不回流（fail-open，当日额度不返还）。
 
 接入现有 Pipeline 前，必须先构造显式的 per-character view，保证角色卡、prompt scope 和记忆 scope
 都由 `speaker_id` 决定，不能依赖全局 active character。
