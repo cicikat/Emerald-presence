@@ -114,7 +114,17 @@ _IDENTITY_SYSTEM_PROMPT = """\
   ...,
   "address_style": {"text": "...", "confidence": 0.8, "evidence_count": 5, "counter_evidence_count": 0}
 }
-不要输出任何 JSON 之外的文字。"""
+
+如果"最近发生的事"里包含跨角色客观事实（不属于上面 9 个维度、无论哪个角色在场
+都成立的客观信息），额外输出一个可选的顶层字段 "global_facts"，值为数组，
+每个元素 {"key": "...", "value": "..."}，key 只能从以下白名单中选择：
+preferred_language / timezone / device_os / project_paths /
+writing_style_preferences / stable_preferences / known_projects /
+tool_usage_preferences
+角色主观印象、关系、称呼习惯、情绪评价一律不属于 global_facts——那些是上面
+9 个维度（尤其 address_style）的职责。没有可输出的客观事实时省略该字段或给
+空数组。
+不要输出 JSON 之外的文字。"""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1110,11 +1120,14 @@ async def _synthesize_identity(
     new_episodes: list[dict],
     user_profile_data: dict,
     llm_client,
-) -> dict | None:
+) -> tuple[dict, list] | None:
     """
     输入旧 identity + 待固化 episodic 列表，调 LLM 输出新 identity dict。
     计算最终 confidence（含反例惩罚），不做文件 IO。
     LLM 输出格式错误返回 None，由调用方降级处理。
+    返回 (identity_result, global_facts_items)：global_facts_items 是可选
+    输出段 [{key, value}]（Brief 89），解析失败或缺失时为 []，不影响
+    identity_result 的严格校验（该段在校验前从 candidate 中摘除）。
     """
     from core.memory.user_identity import IDENTITY_DIMENSIONS
     from core.llm_output_validator import record_failure as _rf
@@ -1157,6 +1170,7 @@ async def _synthesize_identity(
     _fail_key = f"consolidate_to_identity_{uid}"
     _last_raw = ""
     data = None
+    global_facts_items: list = []
 
     for attempt in range(3):
         suffix = "" if attempt == 0 else "\n\n上次输出格式不符，请严格只输出 JSON，不要有任何其他文字。"
@@ -1173,11 +1187,15 @@ async def _synthesize_identity(
             cleaned = re.sub(r"```json|```", "", _last_raw).strip()
             candidate = json.loads(cleaned)
             if isinstance(candidate, dict) and candidate:
+                # global_facts 是可选分流段，摘除后再校验剩余 9 维结构，
+                # 该段格式错误不得影响主产物解析（Brief 89）
+                _gf_raw = candidate.pop("global_facts", None)
                 if all(
                     isinstance(v, dict) and {"text", "confidence", "evidence_count"} <= v.keys()
                     for v in candidate.values()
                 ):
                     data = candidate
+                    global_facts_items = _gf_raw if isinstance(_gf_raw, list) else []
                     break
         except Exception:
             pass
@@ -1225,7 +1243,7 @@ async def _synthesize_identity(
             "last_conflict_at": last_conflict_at,
         }
 
-    return result
+    return result, global_facts_items
 
 
 async def consolidate_to_identity(uid: str, llm_client, *, char_id: str = DEFAULT_CHAR_ID) -> bool:
@@ -1256,14 +1274,21 @@ async def consolidate_to_identity(uid: str, llm_client, *, char_id: str = DEFAUL
     decayed_identity, decay_events = _decay_counter_evidence(old_identity, time.time())
 
     # LLM 合成（锁外）
-    new_identity = await _synthesize_identity(
+    _synth = await _synthesize_identity(
         uid, decayed_identity, new_episodes, user_profile_data, llm_client
     )
 
-    if new_identity is None:
+    if _synth is None:
         record_failure(_fail_key, "synthesis returned None", uid)
         _log_fixation("consolidate_to_identity", uid, {}, "error", "LLM 合成失败")
         raise RuntimeError(f"consolidate_to_identity LLM 合成失败: uid={uid}")
+
+    new_identity, global_facts_items = _synth
+
+    _trigger_signal = "; ".join(
+        (ep.get("narrative_summary") or ep.get("summary") or "")[:40]
+        for ep in new_episodes[:3]
+    )
 
     # 非空 → 写 identity；空 dict 但有衰减 → 仍写回衰减结果；都没有 → 跳过写入，仍标记 episodes
     if new_identity or decay_events:
@@ -1274,10 +1299,6 @@ async def consolidate_to_identity(uid: str, llm_client, *, char_id: str = DEFAUL
             raise RuntimeError(f"consolidate_to_identity identity 写入失败: uid={uid}")
         # Provenance: record each dimension whose text changed
         from core.memory.provenance_log import append as _prov_append
-        _trigger_signal = "; ".join(
-            (ep.get("narrative_summary") or ep.get("summary") or "")[:40]
-            for ep in new_episodes[:3]
-        )
         for _key, _new_dim in new_identity.items():
             _old_dim = old_identity.get(_key) or {}
             _old_text = _old_dim.get("text", "")
@@ -1302,6 +1323,14 @@ async def consolidate_to_identity(uid: str, llm_client, *, char_id: str = DEFAUL
             )
     else:
         _log_fixation("consolidate_to_identity", uid, {}, "ok", "no dimension updated")
+
+    # global_facts 分流（Brief 89）：与 identity 主产物是否变更无关，独立落盘；
+    # 内部完全防御，坏/空段零动作，不影响上面已完成的主产物写入
+    if global_facts_items:
+        from core.memory import user_facts as _uf
+        _uf.apply_global_facts_patch(
+            uid, char_id, global_facts_items, trigger_signal=_trigger_signal,
+        )
 
     # 标记 episodes + 重置 fixation_state（uid_lock 内原子操作）
     now = time.time()

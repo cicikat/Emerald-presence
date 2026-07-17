@@ -28,6 +28,14 @@ API:
         Returns (updated_facts, list_of_rejected_keys).
     clear_user_facts(uid) -> bool
     format_for_prompt(uid) -> str   (returns '' when empty)
+    apply_global_facts_patch(uid, char_id, items, trigger_signal="") -> None
+        Shared entry point for the fixation-chain writers (Brief 89):
+        consolidate_to_identity / event_log_salvage each emit an optional
+        `global_facts: [{key, value}]` output section; both route it here.
+        Caps to 3 items/run, skips same-value overwrites (no provenance
+        noise), warns on DENIED/unknown keys, logs provenance per accepted
+        key.  Never raises — a malformed section must not affect the
+        caller's main artifact persistence.
 """
 
 from __future__ import annotations
@@ -57,6 +65,9 @@ ALLOWED_FIELDS: frozenset[str] = frozenset({
 })
 
 _VALID_PRONOUNS: frozenset[str] = frozenset({"她", "他", "TA", "它"})
+
+# Brief 89: cap on how many global_facts entries a single fixation/salvage run may persist
+_MAX_GLOBAL_FACTS_PER_RUN = 3
 
 # ── Explicit deny: subjective / relationship / emotional fields ───────────────
 
@@ -237,3 +248,76 @@ def format_for_prompt(uid: str) -> str:
         else:
             lines.append(f"{key}: {value}")
     return "\n".join(lines)
+
+
+def apply_global_facts_patch(
+    uid: str,
+    char_id: str,
+    items: list,
+    *,
+    trigger_signal: str = "",
+) -> None:
+    """Apply an LLM-proposed `global_facts` patch (Brief 89 fixation-chain分流).
+
+    *items* is the parsed `[{key, value}]` list from an optional LLM output
+    section (consolidate_to_identity / event_log_salvage).  Caps to
+    `_MAX_GLOBAL_FACTS_PER_RUN` entries, skips keys whose value is unchanged
+    (no write, no provenance), and routes accepted writes through
+    `update_user_facts` (which enforces ALLOWED/DENIED).  Rejected keys are
+    logged as a warning (observability: did the prompt-side exclusion leak?).
+
+    Defensive by design: never raises.  Called after the caller's main
+    artifact has already been persisted, so a malformed section here must
+    not affect that write.
+    """
+    try:
+        if not isinstance(items, list) or not items:
+            return
+
+        if len(items) > _MAX_GLOBAL_FACTS_PER_RUN:
+            logger.info(
+                "[user_facts] global_facts truncated %d -> %d uid=%s",
+                len(items), _MAX_GLOBAL_FACTS_PER_RUN, uid,
+            )
+            items = items[:_MAX_GLOBAL_FACTS_PER_RUN]
+
+        before = load_user_facts(uid)
+        patch: dict[str, Any] = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            if not isinstance(key, str) or not key:
+                continue
+            if "value" not in item:
+                continue
+            value = item["value"]
+            if key in before and before[key] == value:
+                continue  # same value as current — skip, avoid provenance noise
+            patch[key] = value
+
+        if not patch:
+            return
+
+        updated, rejected = update_user_facts(uid, patch)
+        if rejected:
+            logger.warning(
+                "[user_facts] global_facts rejected keys (prompt exclusion leak?): "
+                "%r uid=%s char_id=%s",
+                rejected, uid, char_id,
+            )
+
+        from core.memory.provenance_log import append as _prov_append
+        for key in patch:
+            if key in rejected:
+                continue
+            _prov_append(
+                uid, char_id,
+                artifact="user_facts",
+                field=key,
+                before_gist=str(before.get(key, ""))[:120],
+                after_gist=str(updated.get(key, ""))[:120],
+                trigger_signal=trigger_signal[:120] if trigger_signal else "",
+            )
+    except Exception as e:
+        log_error("user_facts.apply_global_facts_patch", e)
