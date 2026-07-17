@@ -1068,6 +1068,18 @@ class Pipeline:
             except Exception as e:
                 log_error("post_process.check_conditions", e)
 
+            # ── Brief 88：现实轮 gap 快照（读 short_term，早于 capture_turn 追加本轮）──
+            # 供 post_process_slow 的 user_hidden_state SEEK_COMPANIONSHIP(a) 判定：
+            # 本轮追加历史前，距上一条 owner 消息的秒数。读取失败 → None（判定端
+            # 按"未知"处理，不触发）。
+            _prior_gap_seconds: float | None = None
+            try:
+                from core.memory import short_term as _st_gap
+                from core.presence import get_gap_from_history as _get_gap_from_history
+                _prior_gap_seconds = _get_gap_from_history(_st_gap.load(user_id, char_id=char_id))
+            except Exception:
+                _prior_gap_seconds = None
+
             # ── capture_turn：写 short_term + event_log（含 turn_id 血缘）───
             try:
                 from core.memory.fixation_pipeline import capture_turn as _capture_turn
@@ -1117,6 +1129,7 @@ class Pipeline:
             "scope_payload": scope_payload,
             "should_update_profile": _should_update_profile,
             "profile_recent": _profile_recent,
+            "prior_gap_seconds": _prior_gap_seconds,
         }
 
     async def post_process_slow(
@@ -1167,6 +1180,26 @@ class Pipeline:
             logger.warning(f"[pipeline.post_process_slow] detect_emotion 降级 neutral: {e}")
             _emotion = "neutral"
 
+        # ── Brief 88：user_hidden_state 现实侧信号映射（对话侧，emotion 已可用）──
+        # 判定全用现成数据（tags / emotion / 现实轮 gap 快照 / 常量词表），零 LLM；
+        # fail-open，任何异常不影响主链。trigger 轮零参与（函数内部判断）。
+        from core.tag_rules import get_tags as _get_tags
+        _reality_tags = set(_get_tags(content))
+        try:
+            from core.memory.user_hidden_state_reality_signals import process_reality_turn
+            process_reality_turn(
+                uid=user_id,
+                content=content,
+                tags=_reality_tags,
+                assistant_emotion=_emotion,
+                trigger_name=trigger_name,
+                envelope=envelope,
+                prior_gap_seconds=critical_result.get("prior_gap_seconds"),
+                char_id=char_id,
+            )
+        except Exception as _hs_err:
+            logger.warning(f"[pipeline.post_process_slow] hidden_state reality signal 映射失败: {_hs_err}")
+
         async with _locks.uid_lock(user_id):
             # ── mood_state 更新（全局锁，嵌套在 uid_lock 内；用刚 detect 出的 _emotion）
             _mood_state_after: dict | None = None
@@ -1196,8 +1229,7 @@ class Pipeline:
                 asyncio.create_task(_maybe_heart(reply, char_id))
 
         # ── 入慢队列 ───────────────────────────────────────────
-        from core.tag_rules import get_tags as _get_tags
-        _mt_tags = list(_get_tags(content))
+        _mt_tags = list(_reality_tags)
 
         # Consolidation is silent exactly when this turn is a forced injection
         # or a topic-recall hit. Read before consuming so the third forced turn
