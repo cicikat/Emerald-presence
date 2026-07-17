@@ -121,6 +121,17 @@ async def get_user_pronoun(user_id: str, auth=Depends(require_scopes("admin"))):
     return {"user_id": user_id, "pronoun": _get_pronoun(user_id)}
 
 
+@router.get("/{user_id}/facts", summary="获取用户全局客观事实（只读）")
+async def get_user_facts(user_id: str, auth=Depends(require_scopes("admin"))):
+    """返回该用户完整的 global-scope user_facts（跨角色客观事实，KV）。
+
+    只读观测端点（Brief 89）：确认固化链/抢救链自动写入的 key 落盘可见。
+    写入仍走 update_user_facts（pronoun PATCH 或固化链分流），此端点不提供写。
+    """
+    from core.memory.user_facts import load_user_facts
+    return {"user_id": user_id, "facts": load_user_facts(user_id)}
+
+
 class _PronounBody(BaseModel):
     pronoun: str
 
