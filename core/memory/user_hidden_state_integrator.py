@@ -75,6 +75,18 @@ DEFICIT_ACCRUE_AMOUNT: float = 4.0
 IMPRESSION_MAX_NUDGE: float = 3.0
 """Max sensitivity.current increase per impression (before MAX_NUDGE_PER_EVENT cap)."""
 
+# Brief 88 · 初值，观察期后可调 — 全量映射新增事件的 delta 常量。
+BODY_TOPIC_SENS_NUDGE: float = 2.0
+"""sensitivity.current delta for BODY_TOPIC (tags-only signal, no deficit touch)."""
+
+AFFECTION_SENS_NUDGE: float = 1.0
+"""sensitivity.current delta for AFFECTION_EXPRESSED (paired with a small discharge)."""
+
+AFFECTION_DEFICIT_DISCHARGE_AMOUNT: float = 3.0
+"""touch_need.deficit discharge for AFFECTION_EXPRESSED — smaller than
+DEFICIT_DISCHARGE_AMOUNT because affection words are a weaker signal than an
+explicit companionship/comfort event."""
+
 # Long-term field names guarded against accidental writes from integrate_event /
 # integrate_impression.  The only permitted write path for body_memory in Phase 3
 # is integrate_body_cue* (Reality-side, explicitly opened below).
@@ -84,6 +96,23 @@ _LONG_TERM_FIELDS: frozenset[str] = frozenset({
     "embodied_ease",
     "body_memory",
 })
+
+
+# ── Trigger counters (Brief 88 §4 — observation only, in-process, not persisted) ──
+# Per-source accepted-mutation counters, exposed read-only via hidden_state_debug
+# so "接线后真的在动" can be verified without touching disk. Resets on process
+# restart — this is a liveness signal, not an audit log.
+
+_TRIGGER_COUNTS: dict[str, int] = {}
+
+
+def _bump_trigger_count(source: str) -> None:
+    _TRIGGER_COUNTS[source] = _TRIGGER_COUNTS.get(source, 0) + 1
+
+
+def get_trigger_counts() -> dict[str, int]:
+    """Return a snapshot copy of per-source accepted-mutation counts."""
+    return dict(_TRIGGER_COUNTS)
 
 
 def _assert_not_long_term(field_name: str) -> None:
@@ -113,6 +142,13 @@ class RealityEventType(str, Enum):
 
     RECEIVED_COMFORT = "received_comfort"
     """User was soothed / comforted — discharges touch deficit."""
+
+    BODY_TOPIC = "body_topic"
+    """Reality chat touched a body/intimacy topic — nudges sensitivity.current up."""
+
+    AFFECTION_EXPRESSED = "affection_expressed"
+    """User initiated an affectionate gesture in chat — discharges touch deficit
+    (small amount) and nudges sensitivity.current up (small amount)."""
 
 
 # ── B. Audit types ────────────────────────────────────────────────────────────
@@ -167,6 +203,9 @@ def integrate_event(
       SEEK_COMPANIONSHIP  → touch_need.deficit discharge (−DEFICIT_DISCHARGE_AMOUNT)
       RECEIVED_COMFORT    → touch_need.deficit discharge (−DEFICIT_DISCHARGE_AMOUNT)
       NO_INTERACTION      → touch_need.deficit accrue   (+DEFICIT_ACCRUE_AMOUNT)
+      BODY_TOPIC          → sensitivity.current nudge   (+BODY_TOPIC_SENS_NUDGE)
+      AFFECTION_EXPRESSED → touch_need.deficit discharge (−AFFECTION_DEFICIT_DISCHARGE_AMOUNT)
+                            + sensitivity.current nudge  (+AFFECTION_SENS_NUDGE)
 
     All mutations require write_envelope.can_write_memory == True.
     Long-term fields (sensitivity.baseline, touch_need.baseline,
@@ -221,6 +260,48 @@ def integrate_event(
             "integrator: touch_need.deficit %.2f → %.2f [source=%s]",
             old_val, new_val, event_type.value,
         )
+
+    elif event_type == RealityEventType.BODY_TOPIC:
+        old_sens = hidden_state.sensitivity.current.value
+        nudge_current_sensitivity(hidden_state, BODY_TOPIC_SENS_NUDGE, UpdateSource.REALITY_BEHAVIOR, now)
+        new_sens = hidden_state.sensitivity.current.value
+        result.touched_fields.append(FieldDelta(
+            field="sensitivity.current",
+            old_value=old_sens,
+            new_value=new_sens,
+            source=event_type.value,
+        ))
+        logger.info(
+            "integrator: sensitivity.current %.2f → %.2f [source=%s]",
+            old_sens, new_sens, event_type.value,
+        )
+
+    elif event_type == RealityEventType.AFFECTION_EXPRESSED:
+        old_deficit = deficit.value
+        discharge_touch_deficit(hidden_state, AFFECTION_DEFICIT_DISCHARGE_AMOUNT, UpdateSource.REALITY_BEHAVIOR, now)
+        new_deficit = hidden_state.touch_need.deficit.value
+        result.touched_fields.append(FieldDelta(
+            field="touch_need.deficit",
+            old_value=old_deficit,
+            new_value=new_deficit,
+            source=event_type.value,
+        ))
+        old_sens = hidden_state.sensitivity.current.value
+        nudge_current_sensitivity(hidden_state, AFFECTION_SENS_NUDGE, UpdateSource.REALITY_BEHAVIOR, now)
+        new_sens = hidden_state.sensitivity.current.value
+        result.touched_fields.append(FieldDelta(
+            field="sensitivity.current",
+            old_value=old_sens,
+            new_value=new_sens,
+            source=event_type.value,
+        ))
+        logger.info(
+            "integrator: touch_need.deficit %.2f → %.2f, sensitivity.current %.2f → %.2f [source=%s]",
+            old_deficit, new_deficit, old_sens, new_sens, event_type.value,
+        )
+
+    if result.accepted:
+        _bump_trigger_count(event_type.value)
 
     return hidden_state, result
 
@@ -288,6 +369,9 @@ def integrate_impression(
         "integrator: sensitivity.current %.2f → %.2f [weight=%.3f]",
         old_val, new_val, weight,
     )
+
+    if result.accepted:
+        _bump_trigger_count(UpdateSource.DREAM_IMPRESSION.value)
 
     return hidden_state, result
 
@@ -439,6 +523,7 @@ def integrate_body_cue(
             old_weight if old_weight is not None else 0.0,
             new_weight,
         )
+        _bump_trigger_count("body_cue")
 
     return hidden_state, result
 
@@ -581,6 +666,9 @@ def integrate_afterglow(
             "integrator: afterglow embodied_ease %.2f → %.2f [tone=%r age=%.1fh]",
             old_ease, new_ease, tone, afterglow.age_hours,
         )
+
+    if result.accepted:
+        _bump_trigger_count(UpdateSource.DREAM_AFTERGLOW.value)
 
     return hidden_state, result
 

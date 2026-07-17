@@ -32,6 +32,10 @@ TAG_RULES: list[TagRule] = [
     TagRule("emotion.down",     ["难过", "想哭", "想吐", "恶心", "痛苦", "呃呃", "呕呕", "想似"]),
     TagRule("emotion.positive", ["好耶", "噢噢噢", "喵喵喵"]),
     TagRule("emotion.indirect", ["咪", "好累", "不想动", "没胃口", "吃不下", "今天又没"]),
+    # Brief 88：与 Dream D4.5 门控（dream_prompt._HIDDEN_STATE_TRIGGER_TAGS）同一标签名，
+    # 现实侧 get_tags() 产出，供 user_hidden_state BODY_TOPIC 判定复用。
+    TagRule("body_intimate", ["做爱", "啪啪", "上床", "情趣", "自慰", "高潮"]),
+    TagRule("physical_closeness", ["贴近", "肌肤相亲", "缠绵", "依偎", "拥入怀"]),
 ]
 
 
