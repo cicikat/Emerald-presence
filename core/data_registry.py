@@ -160,6 +160,17 @@ REGISTRY: dict[str, PathMeta] = {
     "stage_meta":             PathMeta("canonical", "shared",          "per_group",     "ignore"),
     "stage_transcript":       PathMeta("canonical", "shared",          "per_group",     "ignore"),
 
+    # ── Private exchange: off-hours char-to-char sessions (Brief 86) ──────────
+    # _private/ root — no per-call params, just the scan root for all pairs.
+    "private_exchange_dir":         PathMeta("runtime",   "shared", "global",   "ignore"),
+    # Sole resting place for a pair's private dialogue — canonical like stage_transcript;
+    # never fed into short_term/mid_term/episodic/identity/event_log/向量库 (决策3).
+    "private_exchange_transcript":  PathMeta("canonical", "shared", "per_group", "ignore"),
+    # 12h TTL "just talked to X" ambient stamp — ephemeral, like proactive_ledger.
+    "private_exchange_presence":    PathMeta("runtime",   "shared", "per_char", "ignore"),
+    # Daily session-count budget counter (logical_day + count).
+    "private_exchange_budget_state": PathMeta("runtime",  "shared", "global",   "ignore"),
+
     # ── authored: lorebooks / jailbreaks (characters/reality/ 目录，不走 data/) ─
     "lorebooks_dir":          PathMeta("authored",  "shared",          "global",        "ignore-but-authored"),
     "jailbreaks_dir":         PathMeta("authored",  "shared",          "global",        "ignore-but-authored"),
