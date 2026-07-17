@@ -122,6 +122,26 @@ async def remove_from_blacklist(user_id: str, auth=Depends(require_scopes("admin
     return {"message": f"用户 {uid} 已从黑名单移除", "blacklist": blacklist}
 
 
+# ── 角色私下往来只读观测（Brief 86，必须在 /{user_id} 之前注册）────────────────
+
+@router.get("/private-log", summary="读取角色私下往来 transcript 尾部")
+async def get_private_exchange_log(
+    char_a: str,
+    char_b: str,
+    limit: int = 50,
+    auth=Depends(require_scopes("memory.read")),
+):
+    """管理面板专用只读端点——前端不做可视化入口是设计（Brief 86 §3）。
+
+    transcript 全文只落这一处磁盘，按决策 3（自产内容不固化）永不进入五大记忆库/
+    event_log/向量库，唯一回流是 char_relations 摘要投影 + presence 提示。
+    """
+    from core.stage.private_exchange import load_transcript
+
+    entries = load_transcript(char_a, char_b, limit=max(1, min(limit, 200)))
+    return {"char_a": char_a, "char_b": char_b, "entries": entries, "count": len(entries)}
+
+
 # ── 关系配置接口 ──────────────────────────────────────────────────────────────
 
 @router.get("/{user_id}", summary="获取单用户关系配置")
