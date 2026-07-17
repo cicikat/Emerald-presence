@@ -97,6 +97,11 @@ def _settings_dict(settings: StageSettings) -> dict:
         "group_memory_strength": settings.group_memory_strength,
         "debug_token_log": settings.debug_token_log,
         "talkativeness": dict(settings.talkativeness),
+        # Brief 85 §3/§4: reaction tier + topic-seed knobs.
+        "speak_threshold": settings.speak_threshold,
+        "react_threshold": settings.react_threshold,
+        "max_reactions": settings.max_reactions,
+        "topic_seed_prob": settings.topic_seed_prob,
     }
 
 
@@ -356,6 +361,10 @@ async def patch_group_settings(group_id: str, body: dict, _auth=Depends(require_
         "memory_strength": {"group": current["memory_strength"]["group"]},
         "debug_token_log": current["debug_token_log"],
         "talkativeness": current["talkativeness"],
+        "speak_threshold": current["speak_threshold"],
+        "react_threshold": current["react_threshold"],
+        "max_reactions": current["max_reactions"],
+        "topic_seed_prob": current["topic_seed_prob"],
     }
     merged = {**current_flat, **{k: v for k, v in body.items() if k in current_flat}}
     try:

@@ -405,6 +405,10 @@ chat:
   mode: chat
   style: chat
   multi_message: true
+stage:
+  # Brief 85「明确不做」：后台自发群聊/小剧场占位。默认关闭，未实现；
+  # 未来若开必须走 ProactiveLedger + 每日上限，不能绕开 owner 触发的回波窗口。
+  idle_theater: false
 group_chat:
   min_responders: 1
   max_responders: 2
@@ -418,6 +422,11 @@ group_chat:
     group: 0.7
     trigger: 0.4
   debug_token_log: true
+  # Brief 85 §3/§4：短反应形态 + 话题引子。
+  speak_threshold: 0.5
+  react_threshold: 0.25
+  max_reactions: 2
+  topic_seed_prob: 0.25
 diary:
   obsidian_path: 日记路径
   characters:

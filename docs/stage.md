@@ -37,16 +37,33 @@ data/runtime/groups/{group_id}/
 
 ## 二、运行合同
 
-`run_owner_turn()` 是 P2 的最小可调用入口：
+`run_owner_turn()` 是 P2 的最小可调用入口。一整轮在同一个回波窗口（Phase B）内跑完
+四个阶段，全部同步于一次 `conversation_lock(stage.owner_uid)`，零后台自发调用（Brief 85）：
 
 1. 读取 active Stage，追加 owner 发言。
-2. 在一次 `conversation_lock(stage.owner_uid)` 内完成整轮。
-3. Phase A 对未发言角色逐条重算，产生 `min_responders..max_responders` 条直接回应。
-4. Phase B 每条后重算，最多产生 `max_ai_chain_depth` 条自主续聊。
-5. 每条有效回复先追加共享 transcript，再调用可选 delivery callback。
+2. **Phase A**（直接回应）：对未发言角色逐条重算，产生 `min_responders..max_responders`
+   条直接回应，走全量 `fetch_context()`——对 owner 的回应值得全套记忆。
+3. **Phase B**（自主续聊）：每条后重算，最多产生 `max_ai_chain_depth` 条续聊；使用
+   `StageCharacterView` 的**轻量 prompt 视图**（只带角色卡核心层 + 群在场感 + transcript
+   尾部 ≤12 条，跳过 episodic/mid_term/diary/lore/history/relation/profile 检索），并注入
+   **定向接话块**（"你在回应 {speaker} 刚才那句：「quote」" + 该 pair 的关系印象/往事）。
+4. **Phase R**（短反应，可选）：Phase A+B 之后一次性扫描未发言、评分落在
+   `[react_threshold, speak_threshold)` 区间的候选，最多 `max_reactions` 条 ≤15 字迷你回应
+   （专用迷你 prompt，`max_tokens≈40`），不占用 `max_ai_chain_depth` 名额，也不重新计分链式
+   续聊。调用方不传 `generate_reaction` 时此阶段整体跳过（向后兼容）。
+5. **Phase T**（话题引子，可选）：轮末条件触发——本轮 Phase A+B 实际发言 <2 条，或最后一条
+   无问句且无 vocative——以概率 `topic_seed_prob` 选本轮未发言、talkativeness 最高的角色抛一个
+   新话头（素材：`activity_manager` 当前动向、`scheduler_user_state.followed_topics`、
+   `char_relations.recent_moments`、当前时间，零新检索）。`triggered_by="topic_seed"`；这是
+   本轮的最后一步，不会再触发新的 Phase B 链，天然无递归。
+6. 每条有效回复（含 Phase R/T）先追加共享 transcript，再调用可选 delivery callback。
 
-生成由调用方提供 `generate_reply(stage, speaker_id, transcript, turn_id, triggered_by)` callback。
-它可以同步或异步返回文本。delivery callback 同样支持同步或异步。
+一轮总 LLM 调用数上限 = `max_responders + max_ai_chain_depth + max_reactions + 1`（Phase T
+至多一条）——硬预算，`tests/test_stage_85.py::test_round_llm_call_budget_hard_cap` 断言。
+
+生成由调用方提供 `generate_reply(stage, speaker_id, transcript, turn_id, triggered_by)` callback
+（Phase A/B/T 共用）；Phase R 走独立可选的 `generate_reaction` callback，签名相同。
+两者都可以同步或异步返回文本。delivery callback 同样支持同步或异步。
 
 共享 transcript 每条包含：
 
@@ -71,8 +88,11 @@ speaker_id / content / timestamp / _turn_id / triggered_by
 - 每轮完成后，未投影 transcript 按 roster 逐角色入 `summarize_to_midterm` slow queue；
   输入保留说话人名前缀，且按本段的发言/被点名次数计算 `memory_strength`（0.4–0.9）。
   mid-term 记录仍携带 `source="group:{group_id}"`，后续由原 fixation pipeline 晋升。
-- 同轮 AI↔AI 的直接接话会异步更新全局双向关系记录；冷却 6h，关系仅作为 presence 提示，
-  不参与仲裁打分，也绝不存 owner↔角色关系。
+- 同轮 AI↔AI 的直接接话会异步更新全局双向关系记录；冷却 6h，同一次 LLM 调用顺带产出
+  `recent_moments`（滚动 ≤5 条定性事实，如"上次他帮我调琴"）。关系除了作为 presence 提示与
+  定向接话块的素材外，也参与仲裁打分（Brief 85 §5）：arbiter 的 `peer_reply` 项按
+  `(1 + 0.2 × valence)`（valence ∈ [-1,1] → 系数 ∈ [0.8,1.2]）调制——互有好感的角色更爱接
+  对方的话，但关系**只微调 eagerness，不决定能否发言**；仍绝不存 owner↔角色关系。
 - `projection_cursor` 保证投影幂等；transcript 裁剪时游标同步回退，避免漏掉后续新消息。
 - scheduler cooldown 支持显式 `char_id` 键。统一执行层双写角色键与旧全局键，旧触发器兼容，
   新的多角色 proposal 可按角色隔离。
@@ -96,12 +116,35 @@ speaker_id / content / timestamp / _turn_id / triggered_by
 
 `POST /group/{id}/send` 触发 `run_reality_stage_turn()` 作为异步 task，不阻塞 HTTP 返回。
 
+### 群设置字段（`GET`/`PATCH /group/{id}/settings`）
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `min_responders` / `max_responders` | 1 / 2 | Phase A 直接回应条数区间 |
+| `max_ai_chain_depth` | 2 | Phase B 自主续聊上限 |
+| `respond_threshold` | 0.5 | Phase A/B "是否接话" 的仲裁分数门槛 |
+| `spontaneous_threshold` | 0.7 | 预留（主动群触发未接入，v1 不消费） |
+| `addressed_exclusive` | false | 命中 vocative 时是否只留被点名角色候选 |
+| `allow_silent_rounds` | true | 允许整轮沉默（配合 recall_gate 低信息量判定） |
+| `transcript_limit` | 200 | 共享 transcript 滚动上限 |
+| `memory_strength.group` | 0.7 | 群聊摘要投影写 mid_term 时的记忆强度 |
+| `debug_token_log` | true | 是否记录每条 Phase prompt 的 token 估算 |
+| `talkativeness` / `keywords` | `{}` | 逐角色话痨度 / 话题关键词，供 arbiter 打分 |
+| `speak_threshold` | 0.5 | Phase R 分档上界：总分 ≥ 此值走正常接话（非短反应） |
+| `react_threshold` | 0.25 | Phase R 分档下界：`[react_threshold, speak_threshold)` 触发短反应 |
+| `max_reactions` | 2 | Phase R 每轮短反应条数上限，0 关闭该阶段 |
+| `topic_seed_prob` | 0.25 | Phase T 轮末条件满足时，抛新话头的概率 |
+
+`speak_threshold`/`react_threshold` 与 Phase A/B 自身的 `respond_threshold` 是两套独立阈值——
+决定"是否说话"仍只看 `respond_threshold`；`speak_threshold`/`react_threshold` 只用来给 Phase A/B
+之外、原本会沉默的候选分档决定是否给一句短反应。
+
 ### WS 群聊帧（`channels/desktop_ws.py`）
 
 | 帧 | 字段 | 触发时机 |
 |---|---|---|
 | `group_round_start` | `round_id, group_id` | 每轮 Phase A 开始前 |
-| `group_round_end` | `round_id, group_id` | Phase B 完成后 |
+| `group_round_end` | `round_id, group_id` | 整轮（含 Phase R 短反应/Phase T 话题引子）完成后 |
 | `message_stream_start` | `msg_id, char_id?, round_id?` | 每条角色回复的伪流式回放开始（Brief 84） |
 | `message_stream_delta` | `msg_id, delta` | 伪流式打字机分块（按标点/句内 2-6 字切块） |
 | `message_stream_end` | `msg_id` | 伪流式回放结束，随后是 canonical 替换 |
@@ -128,7 +171,12 @@ speaker_id / content / timestamp / _turn_id / triggered_by
 - Stage `domain="dream"` 仍拒绝进入 reality view / projection。现有 dream state、body tracker、
   dream log 与 exit afterglow 均绑定单角色；在这些状态改为 per-character dream view 前，不允许
   用 reality 适配器伪装梦境群聊。
-- proactive 群触发与 think-delay 尚未接入；v1 主动群触发按规格保持关闭。
+- proactive 群触发与 think-delay 尚未接入；v1 主动群触发按规格保持关闭。Phase T（话题引子）
+  不是例外——它仍在 owner 触发的回波窗口内同步产出，config 位 `stage.idle_theater`
+  （后台自发群聊/小剧场）默认 false 且未实现，留待未来若开必须走 ProactiveLedger + 每日上限。
+- 角色间私聊（owner 不可见的 char↔char 对话）不做——不可观测的 token 洞，且违背
+  "owner 是唯一现实锚点"。LLM speaker selection（AutoGen manager 式）也不做，arbiter 保持
+  纯规则；Phase R/T 的候选选择同样是规则打分/talkativeness 排序，没有引入额外的选择调用。
 
 接入现有 Pipeline 前，必须先构造显式的 per-character view，保证角色卡、prompt scope 和记忆 scope
 都由 `speaker_id` 决定，不能依赖全局 active character。
