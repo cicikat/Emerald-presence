@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from admin.auth import require_scopes
 from core.asset_registry import get_registry, reload_registry, _AVATARS_DIR, _AVATAR_EXTS
 from core.dream.world_loader import discover_worlds, _WORLDS_BASE
+from core.model_registry import resolve_routing_info
 from core.sandbox import get_paths
 from core.safe_write import safe_write_bytes
 
@@ -60,6 +61,22 @@ def _write_active(data: dict):
     p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _character_ui_dict(entry) -> dict:
+    """角色卡 UI dict + 模型路由解析结果（Brief 87 §1，供设置页免 N+1 展示绑定）。
+
+    fail-soft：model_presets 配置缺失/损坏时不影响角色列表本身，只是不带路由字段。
+    """
+    d = entry.as_ui_dict()
+    try:
+        d.update(resolve_routing_info(entry.id))
+    except Exception:
+        logger.warning(
+            "[prompt-assets] resolve_routing_info(%r) 失败，角色列表照常返回，仅省略路由字段",
+            entry.id, exc_info=True,
+        )
+    return d
+
+
 def _load_world_cards() -> list[dict]:
     result = []
     for wid in discover_worlds():
@@ -90,7 +107,9 @@ async def get_prompt_assets(auth=Depends(require_scopes("persona"))):
 
     Response shape:
       {
-        "characters":    [{"id": "yexuan", "label": "叶瑄", "kind": "character"}, ...],
+        "characters":    [{"id": "yexuan", "label": "叶瑄", "kind": "character",
+                           "model_routing": None, "effective_profile": "default",
+                           "resolved_chat_preset": "claude"}, ...],
         "lorebooks":     [{"id": "base",   "label": "base",  "kind": "reality_lorebook"}, ...],
         "jailbreaks":    [{"id": "base",   "label": "base",  "kind": "reality_jailbreak"}, ...],
         "dream_presets": [{"id": "default","label": "default","kind": "dream_preset"}, ...],
@@ -104,7 +123,7 @@ async def get_prompt_assets(auth=Depends(require_scopes("persona"))):
     """
     reg = get_registry()
     return {
-        "characters":    [e.as_ui_dict() for e in reg.list_ui("character")],
+        "characters":    [_character_ui_dict(e) for e in reg.list_ui("character")],
         "lorebooks":     [e.as_ui_dict() for e in reg.list_ui("reality_lorebook")],
         "jailbreaks":    [e.as_ui_dict() for e in reg.list_ui("reality_jailbreak")],
         "dream_presets": [e.as_ui_dict() for e in reg.list_ui("dream_preset")],

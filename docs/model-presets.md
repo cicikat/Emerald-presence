@@ -213,3 +213,7 @@ preset 侧可选字段，供 `config.thinking.mode: auto` 判断该 preset 走 n
 | `PUT /llm-params` | 修改当前 chat preset 的生成参数并热重载（legacy 模式写回 llm: 块） |
 | `GET /character/{char_id}/model-routing` | 读取角色卡 `model_routing` 声明 + 解析结果（`effective_profile`/`resolved_chat_preset`）（Brief 87 §1） |
 | `PATCH /character/{char_id}/model-routing` | 绑定/清除角色卡的 routing profile；`model_routing: null` 清除声明回落全局 `active_routing`；非法 profile 名 422（Brief 87 §1） |
+
+`GET /settings/prompt-assets` 的 `characters[]` 每项也带 `model_routing`/`effective_profile`/`resolved_chat_preset`
+（`resolve_routing_info()` 现算，fail-soft：`model_presets` 配置缺失/损坏时省略这三个字段，不影响角色列表本身），
+设置页角色列表可以直接读，不必对每个角色再单独调一次 `GET /character/{id}/model-routing`。
