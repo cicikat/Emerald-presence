@@ -339,7 +339,10 @@ async def dream_state_get(_auth=Depends(require_scopes("activity"))):
       physiological_arousal — all int 0–100.
     """
     uid = _owner_uid()
-    from core.dream.dream_state import read_state, DreamStatus
+    from core.dream.dream_state import (
+        read_state, DreamStatus, DreamGuardStatus,
+        derive_dream_state_projection, get_reality_guard_status,
+    )
     from core.dream.body_state import BodyState
     from core.dream.dream_settings import load as _load_settings
     from core.dream.dream_hud import derive_hud_v1, load_hud_state, save_hud_state
@@ -375,6 +378,12 @@ async def dream_state_get(_auth=Depends(require_scopes("activity"))):
         "symbolic_anchors": list(state.get("symbolic_anchors") or []),
         "flow_entries": list(state.get("flow_entries") or []),
     }
+
+    # Structured status projection for the desktop client (Brief 94 §2): replaces
+    # the client's own blanket "正在做梦无法聊天" guess with real bucket + timing +
+    # the actual chat-blocking verdict (mirrors chat.py's guard exactly).
+    base.update(derive_dream_state_projection(state))
+    base["blocks_chat"] = get_reality_guard_status(uid) != DreamGuardStatus.ALLOW
 
     # HUD v1: EMA smooth + anchor_charge + world corrections
     # When dream is not active we still compute (using zeroed body), but do not persist.

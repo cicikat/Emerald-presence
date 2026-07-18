@@ -390,7 +390,7 @@ REALITY_CHAT → DREAM_ENTRANCE_AVAILABLE → DREAM_ACTIVE → DREAM_CLOSING →
 
 ### dream_state.json 字段
 
-`user_id` / `status` / `dream_id` / `frozen_world` / `lucid_mode` / `context_snapshot` / `body_state{heat,sensitivity,tension}` / `emotional_tension`(他的，0–1) / `flow_entries`（见下）。关闭后保留 `char_id` / `last_dream_id` / `last_exit_type` / `last_dream_mode` / `last_exited_at` / `last_greeted_dream_id`，供现实侧出梦问候去重与降级判断；`clear_local_state()` 不清这些字段。软挽留相关字段：`retention_offered_dream_id`（标记本场已挽留过，防重复；`clear_local_state()` 不清，因为存在于活跃梦期间的 state dict 外层）。
+`user_id` / `status` / `dream_id` / `dream_started_at`（unix 秒，`enter_dream()` 写入，供 `GET /dream/state` 的 `dream_state=dreaming` 投影用作 `since`；随 `dream_id` 一起被 `clear_local_state()` 清除）/ `frozen_world` / `lucid_mode` / `context_snapshot` / `body_state{heat,sensitivity,tension}` / `emotional_tension`(他的，0–1) / `flow_entries`（见下）。关闭后保留 `char_id` / `last_dream_id` / `last_exit_type` / `last_dream_mode` / `last_exited_at` / `last_greeted_dream_id`，供现实侧出梦问候去重与降级判断；`clear_local_state()` 不清这些字段。软挽留相关字段：`retention_offered_dream_id`（标记本场已挽留过，防重复；`clear_local_state()` 不清，因为存在于活跃梦期间的 state dict 外层）。
 
 ### 梦境流动（`flow_entries`，Brief 25 §2）
 
@@ -454,6 +454,24 @@ N 由 `dream.reality_context_full_turns` 配置（默认 3）。`dream_turn` 是
 - 后端偏好：memory access、感知边界、世界层、清明模式、dream lorebook 走 `/dream/settings`。
 
 当前客户端没有暴露 `jailbreak_preset` 选择器，后端仍保留该 PATCH 字段和默认值。
+
+### `GET /dream/state` 状态透出契约（Brief 94 §2）
+
+desktop 此前把 dream 期间的不可聊状态统一简化成「角色正在做梦因此无法聊天」，但这个
+简化在 `REALITY_AFTERGLOW`（梦后余韵）期间是**错的**——现实聊天在余韵期并不阻塞，
+只有 `DREAM_ACTIVE` / `DREAM_CLOSING` 才被 `get_reality_guard_status()` 硬拒绝（见上方
+"现实窗锁定"）。为让 desktop（Brief 34）精确渲染等待/可聊状态，`GET /dream/state`
+在既有字段基础上追加四个投影字段，不新增轮询端点：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `dream_state` | `idle \| dreaming \| cooldown` | 对 `DreamStatus` 的粗粒度归并。`dreaming` = `DREAM_ACTIVE / DREAM_CLOSING / DREAM_EXIT_REQUESTED / DREAM_LOCKED`；`cooldown` = `REALITY_AFTERGLOW` 且距 `last_exited_at` 未超过 `DREAM_COOLDOWN_SECONDS`（8h，与 afterglow 内容 TTL 同数量级但是独立常量）；其余（含 cooldown 超时后）一律 `idle`。**`status` 原始字段本身永不会自动跳回 `REALITY_CHAT`**（见上方状态机小节），`dream_state` 的 idle 判定专门补上这个界限。 |
+| `since` | float（unix 秒）\| null | 当前 bucket 起点。`dreaming` 取 `dream_started_at`（`enter_dream()` 写入，`clear_local_state()` 清除）；`cooldown` 取 `last_exited_at`；`idle` 恒为 `null`（没有"开始"这回事）。 |
+| `expected_end` | float（unix 秒）\| null | 能估算就给，不能就 `null`。`dreaming` 恒 `null`——梦境时长由用户/LLM 交互决定，不可预估；`cooldown` = `since + DREAM_COOLDOWN_SECONDS`。 |
+| `blocks_chat` | bool | 直接复用 `get_reality_guard_status(uid) != DreamGuardStatus.ALLOW`——与 `chat.py` 拒绝现实回合用的判定**同一函数**，不是重新猜的语义。实测行为是**硬拒绝**（HTTP 409），不是排队延迟；`dream_state=dreaming` 时几乎总为 `true`（`DREAM_EXIT_REQUESTED`/`DREAM_LOCKED` 理论上不在拒绝集合里，但实践中转瞬即逝或未实现，参考价值低于直接读这个字段）。 |
+| `stuck` | bool | 仅当 `dream_state=dreaming` 且 `now - since > DREAM_STUCK_THRESHOLD_SECONDS`（2h，纯启发式）为 `true`。供 desktop 提示"状态异常，可重启后端"；不影响 `hard_exit` 或任何 dream 不变量。 |
+
+常量定义于 `core/dream/dream_state.py`（`DREAM_COOLDOWN_SECONDS` / `DREAM_STUCK_THRESHOLD_SECONDS`），投影逻辑是纯函数 `derive_dream_state_projection(state, now=...)`，`blocks_chat` 在路由层单独调用 `get_reality_guard_status()` 而不是从 `derive_dream_state_projection` 推导——因为 `read_state()` 对损坏状态是 fail-open 到默认值，而 guard 函数是 fail-closed（`BLOCK_UNCERTAIN`），两者语义不能合并，合并会悄悄丢失 fail-closed 保证。
 
 ---
 

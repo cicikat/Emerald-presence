@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from enum import Enum
 from typing import Any
 
@@ -9,6 +10,18 @@ from core.sandbox import get_paths, safe_user_id
 logger = logging.getLogger(__name__)
 
 _FORCED_ROUNDS = 3
+
+# Cooldown window during which REALITY_AFTERGLOW is still projected as "cooldown"
+# rather than "idle" for GET /dream/state (Brief 94 §2). Mirrors the afterglow
+# content TTL (core/dream/dream_afterglow.py _AFTERGLOW_TTL_SECONDS / the 8h
+# dream_afterglow_soft_hint window in docs/dream.md) — kept as an independent
+# constant since it governs UI status semantics, not content injection.
+DREAM_COOLDOWN_SECONDS: float = 8 * 3600
+
+# Heuristic-only: how long a dreaming-bucket status may run before GET /dream/state
+# flags it as `stuck` for the UI ("状态异常，可重启后端" hint). Dream sessions are
+# normally minutes long; this never affects hard_exit or any dream invariant.
+DREAM_STUCK_THRESHOLD_SECONDS: float = 2 * 3600
 
 DREAM_ARTIFACT_SENTINEL = {
     "never_retrieve": True,
@@ -208,7 +221,7 @@ def clear_local_state(state: dict[str, Any]) -> dict[str, Any]:
     for key in (
         "emotional_tension", "scene_state", "symbolic_anchors",
         "body_state",  # her cyber body — dream-local, cleared at close
-        "context_snapshot", "dream_id",
+        "context_snapshot", "dream_id", "dream_started_at",
         "frozen_world",  # re-frozen from settings at next enter_dream
         "lucid_mode",  # session-local, cleared at dream close
         "dream_mode",  # session-local, cleared at dream close
@@ -217,3 +230,69 @@ def clear_local_state(state: dict[str, Any]) -> dict[str, Any]:
     ):
         out.pop(key, None)
     return out
+
+
+# ── UI status projection (Brief 94 §2) ───────────────────────────────────────
+# Coarse, front-end-facing view of the raw DreamStatus state machine for
+# GET /dream/state. Existing desktop client collapses every non-REALITY_CHAT
+# status into "正在做梦无法聊天", which is wrong for REALITY_AFTERGLOW (chat is
+# NOT blocked there — see get_reality_guard_status, which only blocks
+# DREAM_ACTIVE / DREAM_CLOSING). This projection gives the client the real
+# bucket plus enough timing data to render an accurate wait/idle message and
+# to flag a stuck session, without adding a second polling endpoint.
+
+_DREAMING_STATUSES: frozenset[str] = frozenset({
+    DreamStatus.DREAM_ACTIVE.value,
+    DreamStatus.DREAM_CLOSING.value,
+    DreamStatus.DREAM_EXIT_REQUESTED.value,
+    DreamStatus.DREAM_LOCKED.value,
+})
+
+
+def derive_dream_state_projection(state: dict[str, Any], *, now: float | None = None) -> dict[str, Any]:
+    """Project raw dream_state into {dream_state, since, expected_end, stuck}.
+
+    dream_state: "idle" | "dreaming" | "cooldown" — coarse bucket over DreamStatus.
+      cooldown only lasts DREAM_COOLDOWN_SECONDS after REALITY_AFTERGLOW starts;
+      past that it reports "idle" (the raw status field itself never transitions
+      back to REALITY_CHAT — see docs/dream.md §七).
+    since: unix epoch seconds marking the start of the current bucket, or None
+      when there is nothing to time (idle has no meaningful start).
+    expected_end: unix epoch estimate, or None when it cannot be predicted.
+      Dream length is user/LLM-driven and never estimable; cooldown's end is
+      known (since + DREAM_COOLDOWN_SECONDS).
+    stuck: dreaming bucket has run past DREAM_STUCK_THRESHOLD_SECONDS — a
+      heuristic signal only, never affects hard_exit or any dream invariant.
+
+    blocks_chat is intentionally NOT computed here — callers must use
+    get_reality_guard_status(uid), the same fail-closed check chat.py enforces,
+    to avoid the two diverging (this function only sees the already-loaded,
+    fail-open-to-default state dict).
+    """
+    if now is None:
+        now = time.time()
+
+    status = state.get("status", DreamStatus.REALITY_CHAT.value)
+
+    if status in _DREAMING_STATUSES:
+        since = state.get("dream_started_at")
+        stuck = since is not None and (now - float(since)) > DREAM_STUCK_THRESHOLD_SECONDS
+        return {
+            "dream_state": "dreaming",
+            "since": since,
+            "expected_end": None,
+            "stuck": bool(stuck),
+        }
+
+    if status == DreamStatus.REALITY_AFTERGLOW.value:
+        last_exited_at = state.get("last_exited_at")
+        if last_exited_at is not None and (now - float(last_exited_at)) < DREAM_COOLDOWN_SECONDS:
+            since = float(last_exited_at)
+            return {
+                "dream_state": "cooldown",
+                "since": since,
+                "expected_end": since + DREAM_COOLDOWN_SECONDS,
+                "stuck": False,
+            }
+
+    return {"dream_state": "idle", "since": None, "expected_end": None, "stuck": False}

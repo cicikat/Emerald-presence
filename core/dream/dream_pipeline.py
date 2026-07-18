@@ -490,6 +490,7 @@ async def enter_dream(
 
     state["status"] = DreamStatus.DREAM_ACTIVE.value
     state["dream_id"] = dream_id
+    state["dream_started_at"] = time.time()  # GET /dream/state projection (Brief 94 §2)
     state["char_id"] = char_id   # frozen at enter; close/summary/afterglow read from here
     state["dream_mode"] = dream_mode   # frozen for session lifetime — never overwrite mid-session
     state["context_snapshot"] = snapshot
