@@ -1106,6 +1106,12 @@ textarea { resize: vertical; min-height: 72px; }
         <p style="font-size:12px;color:var(--muted);margin-top:8px">支持 .json / .txt / .md</p>
       </div>
 
+      <!-- 与用户关系：只读提示 + 跳转（关系是角色×用户维度的运行时状态，不在角色卡编辑，见用户管理页） -->
+      <div class="card" style="padding:10px 14px;font-size:12px;color:var(--muted)">
+        💡 与用户的关系（称呼、亲密度等）不在角色卡里编辑——那是运行时状态，请去
+        <a href="javascript:void(0)" onclick="goto('users')" style="color:var(--accent)">用户管理</a> 页查看/修改。
+      </div>
+
       <!-- 编辑表单 -->
       <div class="card">
         <div class="card-header">

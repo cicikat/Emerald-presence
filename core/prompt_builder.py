@@ -646,23 +646,27 @@ def build(
     # 层 3：与该用户的关系
     # 来自 UserRelation，说明 bot 该用什么态度对待这个用户
     # ─────────────────────────────────────────────────────────────────────────
-    role = relation.get("role", "stranger")
-    nickname = relation.get("nickname")
-    extra_prompt = relation.get("extra_prompt", "")
+    # 关系数据不存在/仍是硬编码兜底默认值时，该层整体不注入——没有信息就别说，
+    # 胜过注入"陌生人"误导角色对 owner 冷淡（Brief 97 §5，冷启动新用户场景）。
+    from core.user_relation import has_configured_relation
+    if has_configured_relation(user_id):
+        role = relation.get("role", "stranger")
+        nickname = relation.get("nickname")
+        extra_prompt = relation.get("extra_prompt", "")
 
-    if nickname:
-        relation_text = f"该用户是你的{role}，你叫他\"{nickname}\"。"
-    else:
-        relation_text = f"该用户是你的{role}。"
-    if extra_prompt:
-        relation_text += extra_prompt
+        if nickname:
+            relation_text = f"该用户是你的{role}，你叫他\"{nickname}\"。"
+        else:
+            relation_text = f"该用户是你的{role}。"
+        if extra_prompt:
+            relation_text += extra_prompt
 
-    _layers.append("3_relation")
-    messages.append({
-        "role": "system",
-        "content": f"<与用户关系>\n【与该用户的关系】\n{relation_text}\n</与用户关系>",
-        "_layer": "3_relation",
-    })
+        _layers.append("3_relation")
+        messages.append({
+            "role": "system",
+            "content": f"<与用户关系>\n【与该用户的关系】\n{relation_text}\n</与用户关系>",
+            "_layer": "3_relation",
+        })
 
     # ─────────────────────────────────────────────────────────────────────────
     # 层 3.5：生理期感知（mode=tagged，经期相关话题才注入）

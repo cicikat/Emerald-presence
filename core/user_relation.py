@@ -88,6 +88,17 @@ def get_relation(user_id: str) -> dict:
     return dict(_BUILTIN_DEFAULT)
 
 
+def has_configured_relation(user_id: str) -> bool:
+    """是否存在真实配置的关系数据（用户专属条目或 relations.yaml 的全局 default 段）。
+
+    False 表示 get_relation() 返回的是硬编码兜底 _BUILTIN_DEFAULT（stranger/无称呼/
+    无 extra_prompt），不是管理员或用户真实录入的关系状态——调用方（prompt_builder
+    的关系层）据此判断"没有信息就别说，胜过注入陌生人误导角色对 owner 冷淡"（Brief 97 §5）。
+    """
+    relations = _get_relations()
+    return str(user_id) in relations or "default" in relations
+
+
 def has_permission(user_id: str, permission_name: str) -> bool:
     """
     检查用户是否拥有指定权限
