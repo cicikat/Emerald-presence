@@ -118,6 +118,179 @@ async def update_llm_params(body: LlmParamsUpdate, auth=Depends(require_scopes("
 
 
 # ---------------------------------------------------------------------------
+# /settings/base-model — 配置中心 §1「必填」：基础聊天模型连接
+# 透明兼容 model_presets 与 legacy llm: 两种模式，写回目标由现有路由解析规则决定，
+# 不引入第三套真值来源（Brief 93 §1）。
+# ---------------------------------------------------------------------------
+
+def _looks_placeholder(value) -> bool:
+    """config.example.yaml 里的占位符统一 YOUR_ / YOUR- 前缀（见 PLACEHOLDER_ADMIN_SECRET 同一约定）。"""
+    v = str(value or "").strip()
+    if not v:
+        return True
+    upper = v.upper()
+    return upper.startswith("YOUR_") or upper.startswith("YOUR-")
+
+
+def _resolve_base_chat_preset_name(cfg: dict) -> Optional[str]:
+    """当前 chat call_category 解析到的 preset 名；无 model_presets 块时返回 None（走 legacy llm:）。"""
+    mp = cfg.get("model_presets")
+    if not mp:
+        return None
+    active = mp.get("active_routing", "default")
+    profiles = mp.get("routing_profiles", {})
+    profile = profiles.get(active) or (next(iter(profiles.values())) if profiles else {})
+    return profile.get("chat") or next(iter(mp.get("presets", {})), None)
+
+
+def _base_model_view(cfg: dict) -> dict:
+    preset_name = _resolve_base_chat_preset_name(cfg)
+    if preset_name:
+        target = cfg.get("model_presets", {}).get("presets", {}).get(preset_name, {})
+    else:
+        target = cfg.get("llm", {})
+    base_url = target.get("base_url", "")
+    api_key  = target.get("api_key", "")
+    model    = target.get("model", "")
+    configured = not (_looks_placeholder(base_url) or _looks_placeholder(api_key) or _looks_placeholder(model))
+    return {
+        "mode": "preset" if preset_name else "legacy",
+        "preset_name": preset_name,
+        "base_url": "" if _looks_placeholder(base_url) else base_url,
+        "model": "" if _looks_placeholder(model) else model,
+        "api_key_masked": _mask_key(api_key) if api_key and not _looks_placeholder(api_key) else "",
+        "api_key_set": bool(api_key) and not _looks_placeholder(api_key),
+        "configured": configured,
+    }
+
+
+@router.get("/settings/base-model", summary="读取基础聊天模型连接（配置中心 §1 必填项）")
+async def get_base_model(auth=Depends(require_scopes("admin"))):
+    return _base_model_view(get_config())
+
+
+class BaseModelUpdate(BaseModel):
+    base_url: Optional[str] = None
+    api_key:  Optional[str] = None
+    model:    Optional[str] = None
+
+
+@router.put("/settings/base-model", summary="写入基础聊天模型连接并热重载（配置中心 §1 必填项）")
+async def update_base_model(body: BaseModelUpdate, auth=Depends(require_scopes("admin"))):
+    updates = {k: v.strip() for k, v in body.model_dump().items() if v is not None and v.strip() != ""}
+    if not updates:
+        raise HTTPException(status_code=422, detail="至少提供 base_url / api_key / model 之一")
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            full_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {e}")
+
+    preset_name = _resolve_base_chat_preset_name(full_cfg)
+    if preset_name:
+        target = full_cfg.setdefault("model_presets", {}).setdefault("presets", {}).setdefault(preset_name, {})
+    else:
+        target = full_cfg.setdefault("llm", {})
+    target.update(updates)
+
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(full_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入配置文件失败: {e}")
+
+    from core import config_loader, llm_client
+    config_loader.reload_config()
+    llm_client.reload_client()
+    return _base_model_view(get_config())
+
+
+# ---------------------------------------------------------------------------
+# /settings/embedding — 配置中心 §1「强烈建议」：语义 Embedding（长期记忆语义召回）
+# 缺失时召回自动降级为关键词路径，fail-open 不崩，不属于必填项。
+# ---------------------------------------------------------------------------
+
+def _embedding_view(cfg: dict) -> dict:
+    target = cfg.get("embedding", {})
+    base_url = target.get("base_url", "")
+    api_key  = target.get("api_key", "")
+    model    = target.get("model", "")
+    dim      = target.get("dim")
+    configured = not (_looks_placeholder(base_url) or _looks_placeholder(api_key) or _looks_placeholder(model)) and bool(dim)
+    return {
+        "base_url": "" if _looks_placeholder(base_url) else base_url,
+        "model": "" if _looks_placeholder(model) else model,
+        "dim": dim,
+        "api_key_masked": _mask_key(api_key) if api_key and not _looks_placeholder(api_key) else "",
+        "api_key_set": bool(api_key) and not _looks_placeholder(api_key),
+        "configured": configured,
+    }
+
+
+@router.get("/settings/embedding", summary="读取语义 Embedding 配置（配置中心 §1 强烈建议项）")
+async def get_embedding_settings(auth=Depends(require_scopes("admin"))):
+    return _embedding_view(get_config())
+
+
+class EmbeddingSettingsUpdate(BaseModel):
+    base_url: Optional[str] = None
+    api_key:  Optional[str] = None
+    model:    Optional[str] = None
+    dim:      Optional[int] = None
+
+
+@router.put("/settings/embedding", summary="写入语义 Embedding 配置并热重载（配置中心 §1 强烈建议项）")
+async def update_embedding_settings(body: EmbeddingSettingsUpdate, auth=Depends(require_scopes("admin"))):
+    if body.dim is not None and not (1 <= body.dim <= 8192):
+        raise HTTPException(status_code=422, detail="dim 必须在 1~8192 之间（须与 model 实际输出维度一致）")
+
+    updates: dict = {}
+    for key in ("base_url", "api_key", "model"):
+        v = getattr(body, key)
+        if v is not None and v.strip() != "":
+            updates[key] = v.strip()
+    if body.dim is not None:
+        updates["dim"] = body.dim
+    if not updates:
+        raise HTTPException(status_code=422, detail="至少提供 base_url / api_key / model / dim 之一")
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            full_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {e}")
+
+    full_cfg.setdefault("embedding", {}).update(updates)
+
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(full_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入配置文件失败: {e}")
+
+    from core import config_loader
+    config_loader.reload_config()
+    return _embedding_view(get_config())
+
+
+# ---------------------------------------------------------------------------
+# /settings/setup-status — 配置中心整体状态：首启自动跳转 + 顶部缺项横幅判定
+# ---------------------------------------------------------------------------
+
+@router.get("/settings/setup-status", summary="配置中心整体状态（首启自动跳转 + 缺项横幅判定）")
+async def get_setup_status(auth=Depends(require_scopes("admin"))):
+    cfg = get_config()
+    base = _base_model_view(cfg)
+    embedding = _embedding_view(cfg)
+    return {
+        "base_chat": base,
+        "embedding": embedding,
+        "needs_setup": not base["configured"],
+    }
+
+
+# ---------------------------------------------------------------------------
 # /vision-params
 # ---------------------------------------------------------------------------
 
