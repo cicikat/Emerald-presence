@@ -2,9 +2,12 @@
 日记读取模块
 读取 config.yaml diary.obsidian_path 下的日记和心理感悟
 """
+import re
 from pathlib import Path
 from datetime import date, timedelta
 from core.error_handler import log_error
+
+_DIARY_FILENAME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
 
 
 def _diary_root() -> Path:
@@ -39,3 +42,23 @@ def yesterday_missing() -> bool:
     """昨天是否没有日记"""
     yesterday = date.today() - timedelta(days=1)
     return read_diary(yesterday) == ""
+
+
+def has_any_diary_entry() -> bool:
+    """日记目录里是否曾经出现过至少一篇日记（不限昨天/最近几天）。
+
+    未配置 obsidian_path 且本地 diary_fallback/ 目录也从没写过任何一篇时返回
+    False——diary_reminder 类触发器据此判断"用户根本没在用日记功能"，不能把
+    "从没配置/从没写过"当成"漏了一天没写"（Brief 97 追加修复）。
+    """
+    root = _diary_root()
+    if not root.exists():
+        return False
+    try:
+        return any(
+            path.is_file() and _DIARY_FILENAME_RE.match(path.name)
+            for path in root.rglob("*.md")
+        )
+    except Exception as e:
+        log_error("diary_reader.has_any_diary_entry", e)
+        return False

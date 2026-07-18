@@ -982,7 +982,7 @@ has_real_interaction_history(uid, *, char_id=None, min_turns=COLD_START_MIN_REAL
 
 | 触发器 | 接入点 |
 |---|---|
-| `diary_reminder` | `_check_diary_reminder()` / `propose_diary_reminder()`（`diary.py`） |
+| `diary_reminder` | `_check_diary_reminder()` / `propose_diary_reminder()`（`diary.py`），额外接入 `diary_reader.has_any_diary_entry()`：即使聊天轮数够了，只要日记目录（`obsidian_path` 或本地 `diary_fallback/`）从没出现过一篇日记，也不触发——不能把"从没配置/从没写过"读成"漏了一天"（用户复核追加，2026-07-18） |
 | `diary_share_reminder` | `_check_diary_share_reminder()` / `propose_diary_share_reminder()`（`diary.py`），同时把 `_last_diary_share <= 0`（从未分享过）与"分享过但已过 3 天"拆开，前者一律不触发 |
 | `interest_seed` | `_check_interest_seed()`（`interest_seed.py`） |
 

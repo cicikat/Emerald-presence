@@ -158,3 +158,18 @@
   无关的既有 flake（该文件的 `sys.modules["core.sandbox"]` stub 与 `conftest.py`
   的 `_default_sandbox_guard` autouse fixture 在某些 worker 分配下冲突，`git stash`
   验证 main 分支同样复现）——随大批量 `-n auto` 一起跑时不触发，不在本单范围内。
+
+### 追加修复（用户复核发现的缺口，2026-07-18）
+
+用户提问点出：`diary_reminder` 读的是用户真实日记目录（`config.diary.obsidian_path`
+未配置时回落本地 `data/diary_fallback/`），而 §2 的冷启动门控只挡了"聊天轮数不够"
+这一种零数据——一个已经正常聊了很久、但从没配置日记路径/从没写过一篇日记的老用户，
+`yesterday_missing()` 依然永远返回 `True`，`diary_reminder` 会每天照样奇怪地触发。
+
+修复：`core/tools/diary_reader.py` 新增 `has_any_diary_entry()`——判断日记目录里
+是否曾经出现过至少一篇 `YYYY-MM-DD.md`（不限昨天/最近几天，目录不存在或为空一律
+`False`）；`_check_diary_reminder()` / `propose_diary_reminder()` 在 `yesterday_missing()`
+判断之前先查这个，从未有过任何一篇日记时直接 skip，不再要求用户"必须配置/写过
+日记"才能免于被莫名提醒。新增 `tests/test_diary_reader_has_any_entry.py`（5 条用例）
++ `test_rhythm.py` 补的 `test_diary_reminder_propose_skips_when_diary_never_used`；
+`pytest -n auto` 全量复跑通过（4947 passed，失败集与此前一致，均为无关 flake）。

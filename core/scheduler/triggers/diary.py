@@ -32,7 +32,10 @@ async def _check_diary_reminder():
             logger.debug("[scheduler] diary_reminder 冷启动 skip：真实交互轮数不足")
             return
     try:
-        from core.tools.diary_reader import yesterday_missing
+        from core.tools.diary_reader import has_any_diary_entry, yesterday_missing
+        if not has_any_diary_entry():
+            logger.debug("[scheduler] diary_reminder skip：从未读到过任何一篇日记")
+            return
         if yesterday_missing():
             from datetime import timedelta
             yesterday = (date.today() - timedelta(days=1)).strftime("%m月%d日")
@@ -69,7 +72,9 @@ def propose_diary_reminder(ctx: dict | None = None):
     if triggered_on_logical_day("diary_reminder", now):
         return None
     try:
-        from core.tools.diary_reader import yesterday_missing
+        from core.tools.diary_reader import has_any_diary_entry, yesterday_missing
+        if not has_any_diary_entry():
+            return None
         if not yesterday_missing():
             return None
     except Exception as e:

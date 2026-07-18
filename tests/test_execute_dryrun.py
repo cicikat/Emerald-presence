@@ -68,6 +68,7 @@ async def test_native_proposal_executes_dryrun_for_each_registered_trigger(monke
     monkeypatch.setattr(period, "_days_elapsed", lambda uid, today=None: today.day)
     monkeypatch.setattr(time_based, "_user_talked_today", lambda uid: False)
     monkeypatch.setattr(time_based, "_weather_location", lambda: "杭州")
+    monkeypatch.setattr("core.tools.diary_reader.has_any_diary_entry", lambda: True)
     monkeypatch.setattr("core.tools.diary_reader.yesterday_missing", lambda: True)
     monkeypatch.setattr("core.memory.episodic_memory._load_memories", lambda uid: [
         {"id": "ep_exec_recall", "summary": "她说起实习", "yexuan_feeling": "有些在意", "strength": 0.8}

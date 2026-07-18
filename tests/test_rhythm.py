@@ -113,6 +113,7 @@ def test_diary_reminder_propose_keeps_diary_quiet_and_missing_gates(monkeypatch)
     monkeypatch.setattr("core.scheduler.rhythm.has_real_interaction_history", lambda uid, **kw: True)
     monkeypatch.setattr("core.scheduler.rhythm.quiet_floor_elapsed", lambda uid, now_ts=None: True)
     monkeypatch.setattr("core.scheduler.rhythm.triggered_on_logical_day", lambda name, now=None: False)
+    monkeypatch.setattr("core.tools.diary_reader.has_any_diary_entry", lambda: True)
     monkeypatch.setattr("core.tools.diary_reader.yesterday_missing", lambda: True)
 
     proposal = diary.propose_diary_reminder({"now_dt": now, "now_ts": now.timestamp()})
@@ -121,6 +122,22 @@ def test_diary_reminder_propose_keeps_diary_quiet_and_missing_gates(monkeypatch)
     assert 0.50 <= proposal.urgency <= 0.69
 
     monkeypatch.setattr("core.tools.diary_reader.yesterday_missing", lambda: False)
+    assert diary.propose_diary_reminder({"now_dt": now, "now_ts": now.timestamp()}) is None
+
+
+def test_diary_reminder_propose_skips_when_diary_never_used(monkeypatch):
+    """从未配置 obsidian_path / 从未写过一篇日记时，不能把"从没有"读成"漏了一天"。"""
+    from core.scheduler.triggers import diary
+
+    now = datetime(2026, 5, 23, 10, 0)
+    monkeypatch.setattr(diary, "_cfg", lambda: {"enabled": True})
+    monkeypatch.setattr(diary, "_owner_id", lambda: "u1")
+    monkeypatch.setattr("core.scheduler.rhythm.has_real_interaction_history", lambda uid, **kw: True)
+    monkeypatch.setattr("core.scheduler.rhythm.quiet_floor_elapsed", lambda uid, now_ts=None: True)
+    monkeypatch.setattr("core.scheduler.rhythm.triggered_on_logical_day", lambda name, now=None: False)
+    monkeypatch.setattr("core.tools.diary_reader.has_any_diary_entry", lambda: False)
+    monkeypatch.setattr("core.tools.diary_reader.yesterday_missing", lambda: True)
+
     assert diary.propose_diary_reminder({"now_dt": now, "now_ts": now.timestamp()}) is None
 
 
