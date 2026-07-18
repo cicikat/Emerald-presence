@@ -49,6 +49,9 @@ PresenceKit（本仓，后端）
 
 - 独立 Dream Session pipeline：不进入现实对话 post-process，不写现实 history / memory，不触发 scheduler
 - 入梦时冻结现实上下文快照，梦内使用独立 D0-D10 prompt 层栈、世界包和 lorebook
+- 三种梦境模式：sandbox（世界书 + 破限预设自由创作）/ scenario（剧本化阶段推进）/
+  mirror（只读隐喻梦境，倾向材料由用户隐性状态自动生成）；管理面板「梦境设定」页
+  按模式分栏创作，支持世界文件夹与剧本的新建/重命名/删除
 - 支持软退出与不可阻挡的硬退出；退出后归档梦境原文，并提炼低权重梦境印象
 - 现实 prompt 只接收剥离场景细节后的 `6g_dream_impression`，避免把梦境误记成现实
 

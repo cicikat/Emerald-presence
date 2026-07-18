@@ -394,6 +394,30 @@ class DataPaths:
             return self._base / "dream_presets"
         return Path("characters") / "dream_presets"
 
+    def dream_scenarios_dir(self) -> Path:
+        """data/dream/scenarios/ 目录（authored content，剧本 YAML，不走 data/ 沙盒偏移）。
+
+        core/dream/scenario_loader.py 仍用旧的裸 Path("data/dream/scenarios")
+        读取（tests/test_r3_scope_lint.py 里记为已知待迁移违规，未随本次改动
+        一并迁移，避免影响一批不挂 sandbox fixture、直接读真实
+        data/dream/scenarios/prison_demo.yaml 的既有测试）；本 accessor 供
+        Brief 96 新增的 scenario CRUD 端点使用，生产模式落盘路径与
+        scenario_loader 一致。
+        """
+        if self.mode == "test":
+            return self._base / "dream" / "scenarios"
+        return Path("data") / "dream" / "scenarios"
+
+    def default_dream_world_template_dir(self) -> Path:
+        """defaults/dream_worlds/_default/ —— tracked 中性世界模板源。
+
+        characters/dream_worlds/ 整体在 .gitignore 内（用户数据），fresh
+        clone/release 包里不存在任何世界文件，包括 _default/。新建世界端点
+        必须从这里（随仓库发布、始终存在）复制骨架，而不是从可能缺失的
+        characters/dream_worlds/_default/ 复制。
+        """
+        return _DEFAULTS_ROOT / "dream_worlds" / "_default"
+
     def jailbreaks_dir(self) -> Path:
         """characters/reality/jailbreaks/ 目录（authored，不走 data/ 沙盒偏移）"""
         if self.mode == "test":

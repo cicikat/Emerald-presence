@@ -214,6 +214,11 @@ REGISTRY: dict[str, PathMeta] = {
     # ── authored: dream worlds/presets (characters/dream_worlds/、characters/dream_presets/，不走 data/ 沙盒偏移) ─
     "dream_worlds_dir":       PathMeta("authored",  "dream",           "global",        "ignore-but-authored"),
     "dream_presets_dir":      PathMeta("authored",  "dream",           "global",        "ignore-but-authored"),
+    # data/dream/scenarios/{id}.yaml —— authored 剧本内容，同样是私人手写、不可重建
+    "dream_scenarios_dir":    PathMeta("authored",  "dream",           "global",        "ignore-but-authored"),
+    # defaults/dream_worlds/_default/ —— 随仓库发布的 tracked 中性模板源（Brief 96 §1），
+    # 与上面几个不同：这个真的进 git，供新建世界骨架 + fresh 安装兜底复制
+    "default_dream_world_template_dir": PathMeta("canonical", "dream", "global",        "track"),
 
     # ── runtime: X3 自主联网搜索限流状态 ────────────────────────────────────────
     "web_autosearch_state":   PathMeta("runtime",   "shared",          "global",        "ignore"),

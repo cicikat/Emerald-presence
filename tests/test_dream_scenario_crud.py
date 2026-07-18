@@ -1,0 +1,201 @@
+"""
+tests/test_dream_scenario_crud.py — 梦境剧本 CRUD 端点契约测试（Brief 96 §2）
+
+Covers:
+  ① GET /dream/scenarios 空列表（目录不存在）→ 不报错
+  ② POST 新建 → GET 列表 / GET 详情 均可读到
+  ③ POST 重复 id → 409
+  ④ POST/PUT YAML 解析失败 → 422（具体信息，不是 500）
+  ⑤ POST/PUT schema 校验失败（缺 stages）→ 422（复用 scenario_loader 真实 schema）
+  ⑥ YAML 内 id 与路径 id 不一致 → 422
+  ⑦ PUT/DELETE 时若正在被进行中的梦引用该剧本 → 拒绝
+  ⑧ DELETE 后 GET → 404
+"""
+
+import asyncio
+
+import pytest
+from fastapi import HTTPException
+from unittest.mock import patch
+
+_UID = "dream_scenario_crud_test"
+
+_VALID_YAML = """id: crud_demo
+title: CRUD Demo
+stages:
+  - id: s1
+    name: Stage One
+    dramatic_task: task text
+    entry_pressure: pressure text
+"""
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def _as(uid):
+    return patch("admin.routers.dream._owner_uid", return_value=uid)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ① 空列表
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_list_scenarios_empty_when_dir_missing(sandbox):
+    from admin.routers.dream import list_dream_scenarios
+
+    with _as(_UID):
+        result = _run(list_dream_scenarios())
+    assert result == {"scenarios": []}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ② 新建 → 列表 / 详情
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_create_then_list_and_get(sandbox):
+    from admin.routers.dream import create_dream_scenario, list_dream_scenarios, get_dream_scenario
+
+    with _as(_UID):
+        result = _run(create_dream_scenario({"id": "crud_demo", "yaml": _VALID_YAML}))
+        assert result == {"ok": True, "id": "crud_demo"}
+
+        listed = _run(list_dream_scenarios())
+        assert listed["scenarios"] == [{"id": "crud_demo", "title": "CRUD Demo"}]
+
+        detail = _run(get_dream_scenario("crud_demo"))
+        assert detail["id"] == "crud_demo"
+        assert "CRUD Demo" in detail["yaml"]
+
+    on_disk = sandbox.dream_scenarios_dir() / "crud_demo.yaml"
+    assert on_disk.exists()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ③ 重复 id
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_create_duplicate_rejected(sandbox):
+    from admin.routers.dream import create_dream_scenario
+
+    with _as(_UID):
+        _run(create_dream_scenario({"id": "dupe_script", "yaml": _VALID_YAML.replace("crud_demo", "dupe_script")}))
+        with pytest.raises(HTTPException) as exc:
+            _run(create_dream_scenario({"id": "dupe_script", "yaml": _VALID_YAML.replace("crud_demo", "dupe_script")}))
+    assert exc.value.status_code == 409
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ④ YAML 解析失败
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_create_invalid_yaml_syntax_422(sandbox):
+    from admin.routers.dream import create_dream_scenario
+
+    bad_yaml = "id: [unterminated\n  - broken"
+    with _as(_UID):
+        with pytest.raises(HTTPException) as exc:
+            _run(create_dream_scenario({"id": "bad_yaml", "yaml": bad_yaml}))
+    assert exc.value.status_code == 422
+    assert "YAML" in exc.value.detail
+
+
+def test_create_yaml_must_be_mapping_422(sandbox):
+    from admin.routers.dream import create_dream_scenario
+
+    with _as(_UID):
+        with pytest.raises(HTTPException) as exc:
+            _run(create_dream_scenario({"id": "list_not_mapping", "yaml": "- a\n- b\n"}))
+    assert exc.value.status_code == 422
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ⑤ schema 校验失败（复用 scenario_loader 真实 schema，不是另一套）
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_create_missing_stages_rejected_with_field_detail(sandbox):
+    from admin.routers.dream import create_dream_scenario
+
+    yaml_no_stages = "id: no_stages\ntitle: No Stages\n"
+    with _as(_UID):
+        with pytest.raises(HTTPException) as exc:
+            _run(create_dream_scenario({"id": "no_stages", "yaml": yaml_no_stages}))
+    assert exc.value.status_code == 422
+    assert "stage" in exc.value.detail.lower()
+
+
+def test_update_missing_stage_field_rejected(sandbox):
+    from admin.routers.dream import create_dream_scenario, update_dream_scenario
+
+    with _as(_UID):
+        _run(create_dream_scenario({"id": "edit_target", "yaml": _VALID_YAML.replace("crud_demo", "edit_target")}))
+        bad_yaml = "id: edit_target\ntitle: Edit Target\nstages:\n  - id: s1\n    name: only name\n"
+        with pytest.raises(HTTPException) as exc:
+            _run(update_dream_scenario("edit_target", {"yaml": bad_yaml}))
+    assert exc.value.status_code == 422
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ⑥ YAML 内 id 与路径 id 不一致
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_create_id_mismatch_rejected(sandbox):
+    from admin.routers.dream import create_dream_scenario
+
+    with _as(_UID):
+        with pytest.raises(HTTPException) as exc:
+            _run(create_dream_scenario({"id": "path_id", "yaml": _VALID_YAML}))  # yaml declares id: crud_demo
+    assert exc.value.status_code == 422
+    assert "id" in exc.value.detail.lower()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ⑦ 正在被进行中的梦引用 → 拒绝编辑/删除
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_update_and_delete_blocked_while_scenario_active(sandbox):
+    from admin.routers.dream import create_dream_scenario, update_dream_scenario, delete_dream_scenario
+    from core.dream.dream_state import write_state, DreamStatus
+
+    script_id = "active_script"
+    yaml_text = _VALID_YAML.replace("crud_demo", script_id)
+    with _as(_UID):
+        _run(create_dream_scenario({"id": script_id, "yaml": yaml_text}))
+        write_state(_UID, {
+            "status": DreamStatus.DREAM_ACTIVE.value,
+            "dream_mode": "scenario",
+            "scenario_core": {"script_id": script_id, "current_stage_id": "s1"},
+            "dream_id": "d1",
+        })
+
+        with pytest.raises(HTTPException) as exc:
+            _run(update_dream_scenario(script_id, {"yaml": yaml_text}))
+        assert exc.value.status_code == 409
+
+        with pytest.raises(HTTPException) as exc:
+            _run(delete_dream_scenario(script_id))
+        assert exc.value.status_code == 409
+
+        # positive control: after the dream ends, edit/delete succeed
+        write_state(_UID, {"status": DreamStatus.REALITY_CHAT.value})
+        result = _run(update_dream_scenario(script_id, {"yaml": yaml_text}))
+        assert result["ok"] is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ⑧ 删除后 GET → 404
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_delete_then_get_404(sandbox):
+    from admin.routers.dream import create_dream_scenario, delete_dream_scenario, get_dream_scenario
+
+    script_id = "to_be_deleted"
+    with _as(_UID):
+        _run(create_dream_scenario({"id": script_id, "yaml": _VALID_YAML.replace("crud_demo", script_id)}))
+        result = _run(delete_dream_scenario(script_id))
+        assert result == {"ok": True, "deleted": script_id}
+
+        with pytest.raises(HTTPException) as exc:
+            _run(get_dream_scenario(script_id))
+    assert exc.value.status_code == 404

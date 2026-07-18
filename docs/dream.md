@@ -369,6 +369,44 @@ REALITY_CHAT → DREAM_ENTRANCE_AVAILABLE → DREAM_ACTIVE → DREAM_CLOSING →
 | `GET /dream/state` | ✅ 已有 | 只读 UI 投影：状态、身体数值、张力、场景和象征锚、`flow_entries`（梦境流动，见下） |
 | `GET /dream/settings` | ✅ 已有 | 读取 per-uid 偏好默认值 |
 | `PATCH /dream/settings` | ✅ 已有 | 枚举校验后的局部更新；`world_layer` / `lucid_mode` 仅影响下一场梦 |
+| `GET /dream/worlds` | ✅ 已有 | 列出世界文件夹（隐藏名如 `_default` 不列出） |
+| `POST /dream/worlds` | ✅ Brief 96 §1 | 新建世界：建文件夹 + 从 `_default` 复制骨架（`ruleset.md` / `mes_example.md` / `vocab.json` / `lorebook.yaml`）；`_default` 缺失时先从 tracked `defaults/dream_worlds/_default/` 播种 |
+| `PUT /dream/worlds/{world}/rename` | ✅ Brief 96 §1 | 重命名文件夹；同名破限预设文件（`dream_presets/{world}.md`）跟随改名；命中当前 `dream_settings.world_layer` 时同步改写 |
+| `DELETE /dream/worlds/{world}` | ✅ Brief 96 §1 | 删除文件夹 + 同名预设文件；命中当前 `world_layer` 时重置为 `_default` |
+| `GET/POST/PUT/DELETE /dream/worlds/{world}/lorebook[/…]` | ✅ 已有 | 世界书条目 CRUD |
+| `GET/PUT /dream/worlds/{world}/preset` | ✅ 已有 | 该世界的破限预设 Markdown |
+| `GET /dream/scenarios` | ✅ Brief 96 §2 | 列出剧本（`id` + `title`） |
+| `GET /dream/scenarios/{id}` | ✅ Brief 96 §2 | 读取剧本 YAML 原文 |
+| `POST /dream/scenarios` | ✅ Brief 96 §2 | 新建剧本；schema 校验复用 `scenario_loader._validate_script`（与 `dream_turn` 实际加载同一份规则） |
+| `PUT /dream/scenarios/{id}` | ✅ Brief 96 §2 | 修改剧本；正被进行中的梦引用时拒绝（`scenario_core.script_id` 命中 + DREAM_ACTIVE/CLOSING/EXIT_REQUESTED） |
+| `DELETE /dream/scenarios/{id}` | ✅ Brief 96 §2 | 删除剧本；同上引用保护 |
+
+**世界文件夹保留名与保护（Brief 96 §1）**：`_default`（兜底骨架源）与
+`reality_derived`（内建世界之一，`world_loader._FALLBACK_WORLD`）不可新建/改名/删除
+（改名尤其危险——两者是 `world_loader.py` 兜底链的硬编码目录名，改动会让所有世界
+静默回退到空内容）。`world_layer` 合法值取「内建六个世界 ∪ 磁盘上实际发现的世界
+∪ `_default`」并集，保证 CI/fresh 环境里内建六个世界名恒合法（不依赖文件夹是否
+真实存在——`world_loader` 对缺失世界本就 fail-open 回退到 `_default` 内容），同时
+允许选中面板新建的自定义世界。
+
+**新建世界骨架来源（Brief 96 §1 反假绿要点）**：`characters/dream_worlds/` 整体在
+`.gitignore` 内（用户数据），fresh clone / release 包里不存在任何世界文件——包括
+`_default/` 本身。`POST /dream/worlds` 因此不能直接复制运行时的 `_default/`；它先调用
+`_ensure_default_world_template_seeded()`，从随仓库发布的 tracked
+`defaults/dream_worlds/_default/`（中性模板，不含任何具体世界的专属设定）补齐运行时
+`characters/dream_worlds/_default/` 缺失的文件，再从补齐后的目录复制骨架给新世界。
+
+**管理面板三模式创作栏（Brief 96 §3）**：`admin/static/index.html` 的「梦境设定」页
+第一行为模式选择（sandbox / scenario / mirror，默认 sandbox），只切换本页显示哪套
+创作栏，**不改变入梦时 `dream_mode` 的选择逻辑**（那由 desktop 客户端的
+`DreamPrefsPane`「世界」标签页独立负责，两处刻意不联动）：
+- **sandbox**：世界选择下拉 + 新建/重命名/删除按钮（接 `POST/PUT rename/DELETE
+  /dream/worlds`）+ 世界书条目 + 破限预设文本，行为对既有 sandbox 创作零回归。
+- **scenario**：剧本列表 + 新建/编辑/删除（接 `/dream/scenarios` CRUD）；编辑器 v0.1
+  是「表单化关键字段（ID / 标题，仅用于快速生成骨架模板）+ 原始 YAML 文本区」双栏，
+  不做完整可视化编排，保存时以 YAML 文本为最终内容。
+- **mirror**：无创作物的只读说明（mirror 的倾向材料由 User Hidden State 快照自动
+  生成，全程只读不诊断），避免用户误以为功能缺失。
 
 **软挽留（`/dream/wake`）设计约束**：
 - `/dream/exit` 保持纯硬退，**零改动**（Invariant D）。

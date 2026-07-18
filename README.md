@@ -49,6 +49,10 @@ The backend is the single source of truth: long-term memory, emotional state, th
 
 - An isolated Dream Session pipeline: doesn't enter the waking-conversation post-process, doesn't write to waking history/memory, doesn't trigger the scheduler
 - A snapshot of the waking context is frozen on dream entry; dreams run their own D0–D10 prompt layer stack, world pack, and lorebook
+- Three dream modes: sandbox (free-form world lore + jailbreak preset authoring) / scenario
+  (scripted stage progression) / mirror (read-only figurative dreams, tendency material
+  auto-derived from the user's hidden state); the admin panel's "Dream Settings" page
+  authors each mode in its own tab, including create/rename/delete for world folders and scripts
 - Supports a soft exit and an unstoppable hard exit; on exit the raw dream text is archived and a low-weight dream impression is distilled
 - The waking prompt only ever receives the scene-stripped `6g_dream_impression`, so dream content can't be misremembered as reality
 
