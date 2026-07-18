@@ -57,10 +57,12 @@ body {
 .auth-card .err { color: var(--danger); font-size: 13px; margin-top: -8px; margin-bottom: 12px; min-height: 18px; }
 
 /* ── Layout ── */
-#app { display: flex; height: 100vh; }
+#app { display: flex; height: 100vh; overflow: hidden; }
 
 nav {
   width: 200px; min-width: 200px;
+  height: 100vh; min-height: 0;
+  overflow-y: auto;
   background: var(--surface);
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
