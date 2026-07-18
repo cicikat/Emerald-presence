@@ -668,9 +668,9 @@ window 拦截、LLM 空回复或发送前异常时，不调用 execute 的 `afte
 | `dlq_monitor` | 24h | 低 | time_based | 扫 DLQ 目录，文件数 > 0 时 log warning；R8-A：legacy task 超 30 天自动归档到 `expired/` |
 | `log_maintenance` | 24h | 维护 | loop.py 内联 | 清理 event_log、done reminders、dream archive、inbox/image cache，并压缩 observations |
 | `activity_remind` | 20h | 低 | — | 仅预留冷却位，尚无对应实现 |
-| `diary_reminder` | 20h | 低 | diary | 提醒用户写日记 |
+| `diary_reminder` | 20h | 低 | diary | 提醒用户写日记；冷启动门控见下 |
 | `diary_inject` | 6h | 低 | diary | 日记上下文注入 |
-| `diary_share_reminder` | 8h | 低 | diary | 很久没看到日记时提一句 |
+| `diary_share_reminder` | 8h | 低 | diary | 很久没看到日记时提一句；冷启动门控见下 |
 | `period_reminder` | 24h | **高** | period | 生理期关心 |
 | `topic_followup` | 24h | 低 | memory | 未完结话题追问 |
 | `birthday_midnight` | 365天 | **高** | birthday | 生日零点告白 |
@@ -955,3 +955,49 @@ curl -H "Authorization: Bearer <token>" \
 ### dream_postcards
 
 `dream_postcards` proposer 每日扫描梦境 archive 出站明信片的 schedule；到期未发送的条目复用 Gmail 链路投递。SMTP 失败只递增 attempts 并保留 last_error，后续 tick 持续重试，成功后才标记 sent。
+
+---
+
+## 冷启动门控（Brief 97）
+
+> 背景：全新 `data/` 首启实测复现——`diary_reminder` 首轮就说"你好久没写日记了"，
+> 根因是 `yesterday_missing()` 只判断"昨天有没有日记文件"，零数据时恒为 True；
+> `diary_share_reminder` 同理，`_last_diary_share` 初始为 0，`now - 0` 恒大于三天
+> 阈值。两者都把"从未有过记录"误读成"有记录但很久没更新"。
+
+`core/scheduler/rhythm.py` 新增两个 helper：
+
+```python
+real_turn_count(uid, *, char_id=None) -> int
+    # 统计 short_term 里 role="user" 的真实条目数。trigger 侧种子旁白从不写入
+    # short_term 的 user 位（fixation_pipeline.capture_turn 的 P0 边界规则），
+    # 所以这个计数只反映真实用户交互，不会被调度器自己的主动轮污染。
+
+has_real_interaction_history(uid, *, char_id=None, min_turns=COLD_START_MIN_REAL_TURNS) -> bool
+    # real_turn_count(uid) >= min_turns（默认 5，常量 COLD_START_MIN_REAL_TURNS）
+```
+
+依赖"久未见/久未写"语义的触发器，在自己的时间窗判断之前先查 `has_real_interaction_history`，
+不满足直接 skip（记 debug 日志，不算异常）：
+
+| 触发器 | 接入点 |
+|---|---|
+| `diary_reminder` | `_check_diary_reminder()` / `propose_diary_reminder()`（`diary.py`） |
+| `diary_share_reminder` | `_check_diary_share_reminder()` / `propose_diary_share_reminder()`（`diary.py`），同时把 `_last_diary_share <= 0`（从未分享过）与"分享过但已过 3 天"拆开，前者一律不触发 |
+| `interest_seed` | `_check_interest_seed()`（`interest_seed.py`） |
+
+`festival`/`timenode`/`holiday_boost`/`overflow`/`letter_writer`/`presence_nag` 未接入：
+前三者只依赖真实日历日期 + `owner_id` 是否存在，不引用"上次交互"时间差，对全新用户
+不构成虚假记忆；后三者的时间差信号已经用 `if timestamps:` / `last_owner_turn <= 0 →
+None` 等方式正确区分"没有数据"与"很久以前"，本就不受冷启动误判影响，不需要重复加门控。
+
+同一原则也用在 `desktop_wake` Path B 的首轮种子 prompt（见下）和关系层注入判断
+（`core/user_relation.has_configured_relation()`，见 `docs/prompt-layers.md` `3_relation`）。
+
+### desktop_wake 首轮专用种子
+
+`admin/routers/chat.py::desktop_wake()` Path B 原种子固定是"用户重新打开了和你对话
+的软件，请结合真实记忆自然接续"——零记忆时这句话等于点名要求角色编造往事。
+现在用 `real_turn_count(uid, char_id=_wake_scope.character_id) == 0` 判断冷启动，
+为真时换用首见版种子："用户第一次打开和你对话的软件。说出你想说的话吧：打个招呼，
+礼貌地询问，或者随便说几句。不要假装拥有与用户过去的记忆。"非首次仍走原种子。

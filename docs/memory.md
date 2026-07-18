@@ -633,6 +633,17 @@ LLM 异常时降级 warning，不阻塞主流程。
 （早期版本只看 user_msg < 10 字，并且 fallback 完全忽略 reply，
 导致角色扮演里的短动作描写被当成 summary 写入，等于无效记忆，已修复。）
 
+**trigger 轮种子隔离（Brief 97）**：`summarize_to_midterm(trigger_name=...)` 非空时，
+`is_trigger_turn=True` 一路透传到 `summarize_turn()` / `_rule_fallback()`：user_msg 此时
+是 scheduler/sensor 的种子旁白，不是真实用户发言，改用专门的系统 prompt +
+消息框定（"场景旁白（非用户发言，不代表已发生的事）:..."），阻止旁白被当成"已发生
+的事"概括进 mid_term。此前的泄漏路径是 `post_process_slow` 把 `content`（即触发器的
+括号旁白文本）原样当 `user_content` 塞进 `summarize_to_midterm` payload，
+`_SUMMARIZE_SYSTEM` 又要求"主语用「用户」，只描述发生了什么"，两者叠加后
+LLM 会把旁白编成"已发生的事"（冷启动首轮典型产出："她收到日记分析提醒并回复了
+近况"）。`reflect_to_episodic` 早已用 `is_trigger_turn` 过滤 trigger 轮不铸造 episodic
+（P0 trigger boundary），但 mid_term 本身此前没有同等隔离。
+
 ### 注入
 
 prompt 层位于 `6c_episodic` 和 `6d_diary` 之间，参数名 `mid_term_context`。
