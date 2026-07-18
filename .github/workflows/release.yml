@@ -23,6 +23,10 @@ jobs:
 
       - name: Build release package
         run: python scripts/build_release.py --version ${{ github.ref_name }}
+        env:
+          # windows-latest 默认非 UTF-8 控制台代码页，脚本自身也会 reconfigure
+          # stdout/stderr，这里再加一层保险。
+          PYTHONUTF8: "1"
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2

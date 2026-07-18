@@ -20,6 +20,12 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+# Windows CI 跑者默认非 UTF-8 控制台代码页（如 cp1252），print() 中文日志
+# 会直接 UnicodeEncodeError 崩掉整个构建；本机中文 Windows 不会暴露这个问题。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DIST_DIR = REPO_ROOT / "dist"
 
