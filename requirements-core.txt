@@ -1,7 +1,14 @@
 # Core runtime — imported unconditionally at startup, no fallback if missing.
 aiohttp>=3.10.0
-fastapi>=0.115.0
+# fastapi<0.137.0: 0.137.0 起 include_router() 改为惰性展开（app.routes 里
+# APIRoute 被 _IncludedRouter 包装），tests/test_final_p1_blockers.py 的路由清单
+# 断言依赖旧的即时展开语义，升级前需先改掉该测试的路由自省方式。
+fastapi>=0.115.0,<0.137.0
 uvicorn>=0.30.0
+# admin_server 的 /ws/desktop、/ws/device 等 WebSocket 端点是无条件挂载的核心通道
+# （standalone_mode 靠它们对接桌宠/手机端），uvicorn 本身不带 WS 实现，缺这个包
+# 会在握手时报 "No supported WebSocket library detected" 而非启动期报错。
+websockets>=13.0
 httpx>=0.27.0
 openai>=1.40.0
 sqlite-vec>=0.1.0

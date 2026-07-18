@@ -31,7 +31,9 @@ jobs:
           python -m pip install -r requirements.txt
 
       # v0.1 smoke subset: the full suite includes checks that require private,
-      # unshipped runtime assets/config, plus a few currently stale R2/R7/R8 tests.
+      # unshipped runtime assets/config. This list is pruned to files that
+      # currently exist (see cc-tasks/92 §1 — several R2/R4/R8 entries were
+      # stale references to tests removed by earlier refactors).
       - name: Run v0.1 pytest smoke subset
         run: >
           python -m pytest -q
@@ -43,20 +45,13 @@ jobs:
           tests/test_scope_freeze_r1_n1_n10.py
           tests/test_memory_direct_path_lint.py
           tests/test_r1b_qq_convergence_audit.py
-          tests/test_r1c_qq_reality_reply_adapter.py
           tests/test_r1d_qq_reality_reply_adapter.py
-          tests/test_r2a_scheduler_execution_surface_audit.py
-          tests/test_r2c_legacy_trigger_migration.py
           tests/test_r2d_defer_queue_dnd.py
           tests/test_r3_scope_lint.py
           tests/test_r4_prompt_layer_boundary.py
-          tests/test_r4b_prompt_drop_priority.py
-          tests/test_r4c_prompt_layer_contract.py
           tests/test_r5_author_note_tool_alignment.py
           tests/test_r6_reality_scrub_audit.py
           tests/test_r6b_reality_scrub_contract.py
           tests/test_r6c_reality_scrub_final.py
-          tests/test_r8a_dlq_expiry.py
           tests/test_r8b_trait_tracker_queue.py
           tests/test_r8c_author_note_rotator_scope.py
-          tests/test_r8e2_character_growth_retirement.py
