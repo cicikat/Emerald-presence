@@ -93,7 +93,7 @@ vision:
   model: glm-4v-flash
   base_url: https://open.bigmodel.cn/api/paas/v4/
 qq:
-  enabled: true
+  enabled: false  # 需要 QQ 机器人再开，并配置 NapCat；纯桌宠用户保持关闭即可
   host: 127.0.0.1
   port: 3001
 admin:

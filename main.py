@@ -916,7 +916,7 @@ async def main():
     logger.info("主动行为调度器已启动")
 
     standalone_mode = cfg.get("standalone_mode", False)
-    qq_enabled = cfg.get("qq", {}).get("enabled", True)
+    qq_enabled = cfg.get("qq", {}).get("enabled", False)
     qq_runtime_enabled = (not standalone_mode) and qq_enabled
 
     # 注册通道
