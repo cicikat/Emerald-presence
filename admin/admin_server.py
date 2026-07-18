@@ -38,12 +38,20 @@ from admin.routers import (
     scheduler, watch, sensor,
     garden, mobile, diary, chat_log,
     mood, activity, dream,
-    reading, gomoku, chess, dream_seed,
+    reading, gomoku, dream_seed,
     hidden_state_debug, hardware, observe,
     group, relationship_facts,
     transcribe, provenance,
     auth_tokens, coplay, perception, spend, growth,
 )
+
+# chess 路由依赖 python-chess（requirements-full.txt 的可选依赖，见 cc-tasks/92 §1），
+# core-only 环境下缺失时该功能不可用而非拖垮整个 admin_server。
+try:
+    from admin.routers import chess
+except ImportError as _e:
+    chess = None
+    logger.warning(f"[admin_server] 国际象棋活动路由未加载（缺少依赖: {_e}），该功能不可用")
 
 app.include_router(users.router,          prefix="/users",     tags=["用户"])
 app.include_router(memory.router,         prefix="/memory",    tags=["记忆"])
@@ -70,7 +78,8 @@ app.include_router(mood.router,     prefix="/mood",     tags=["情绪状态"])
 app.include_router(activity.router, prefix="/activity", tags=["活动状态"])
 app.include_router(reading.router,  prefix="/activity", tags=["阅读活动"])
 app.include_router(gomoku.router,   prefix="/activity", tags=["五子棋活动"])
-app.include_router(chess.router,    prefix="/activity", tags=["国际象棋活动"])
+if chess is not None:
+    app.include_router(chess.router, prefix="/activity", tags=["国际象棋活动"])
 app.include_router(dream_seed.router, prefix="/activity", tags=["梦境预构活动"])
 app.include_router(diary.router,     prefix="/diary",     tags=["日记"])
 app.include_router(chat_log.router,  prefix="/chat-log",  tags=["聊天日志"])

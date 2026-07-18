@@ -1,0 +1,8 @@
+# Test-only deps. Not part of the release package (see requirements.lock);
+# used for local dev and CI.
+-r requirements-full.txt
+
+pytest>=8.2.0
+pytest-asyncio>=0.23.7
+pytest-xdist>=3.5.0
+pytest-testmon>=2.1.0

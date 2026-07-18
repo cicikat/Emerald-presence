@@ -1,0 +1,10 @@
+[project]
+name = "presencekit"
+version = "0.1.0"
+description = "PresenceKit — AI companion backend service"
+requires-python = ">=3.10,<3.13"
+license = { text = "PolyForm-Noncommercial-1.0.0" }
+
+# Runtime dependencies stay in requirements*.txt (see cc-tasks/92 §1); this
+# file only carries metadata + the requires-python constraint used by `uv`
+# for interpreter selection and lock resolution.
