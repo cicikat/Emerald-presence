@@ -394,3 +394,152 @@ async def update_prompt_ablation(body: PromptAblationUpdate, auth=Depends(requir
         "disabled_layers": sorted(state["disabled_layers"]),
         "perception_block_disabled": state["perception_block_disabled"],
     }
+
+
+# ---------------------------------------------------------------------------
+# /settings/mail — 配置中心「可选」层：邮件通道完整配置（用户反馈补遗）
+# enabled 总开关已经过 /settings/feature-flags 暴露；这里补齐 smtp 明细字段，
+# 不然用户只能手改 config.yaml。占位符/掩码处理复用 settings_llm 的既有约定。
+# ---------------------------------------------------------------------------
+
+class MailSettingsUpdate(BaseModel):
+    enabled:        Optional[bool] = None
+    smtp_host:      Optional[str]  = None
+    smtp_port:      Optional[int]  = None
+    proxy_url:      Optional[str]  = None
+    smtp_user:      Optional[str]  = None
+    smtp_password:  Optional[str]  = None
+    from_addr:      Optional[str]  = None
+    from_name:      Optional[str]  = None
+    to_addr:        Optional[str]  = None
+    subject_prefix: Optional[str]  = None
+
+
+def _mail_view(cfg: dict) -> dict:
+    from admin.routers.settings_llm import _looks_placeholder, _mask_key
+
+    target = cfg.get("mail", {})
+    password = str(target.get("smtp_password") or "")
+    required_filled = not any(
+        _looks_placeholder(target.get(k, ""))
+        for k in ("smtp_host", "smtp_user", "smtp_password", "to_addr")
+    )
+    return {
+        "enabled":         bool(target.get("enabled", False)),
+        "smtp_host":       "" if _looks_placeholder(target.get("smtp_host", "")) else target.get("smtp_host", ""),
+        "smtp_port":       int(target.get("smtp_port", 587) or 587),
+        "proxy_url":       "" if _looks_placeholder(target.get("proxy_url", "")) else target.get("proxy_url", ""),
+        "smtp_user":       "" if _looks_placeholder(target.get("smtp_user", "")) else target.get("smtp_user", ""),
+        "smtp_password_masked": _mask_key(password) if password and not _looks_placeholder(password) else "",
+        "smtp_password_set":    bool(password) and not _looks_placeholder(password),
+        "from_addr":       "" if _looks_placeholder(target.get("from_addr", "")) else target.get("from_addr", ""),
+        "from_name":       target.get("from_name", ""),
+        "to_addr":         "" if _looks_placeholder(target.get("to_addr", "")) else target.get("to_addr", ""),
+        "subject_prefix":  target.get("subject_prefix", ""),
+        "configured":      required_filled,
+    }
+
+
+@router.get("/settings/mail", summary="读取邮件通道完整配置（配置中心可选层）")
+async def get_mail_settings(auth=Depends(require_scopes("admin"))):
+    return _mail_view(get_config())
+
+
+@router.put("/settings/mail", summary="写入邮件通道完整配置并热重载（配置中心可选层）")
+async def update_mail_settings(body: MailSettingsUpdate, auth=Depends(require_scopes("admin"))):
+    if body.smtp_port is not None and not (1 <= body.smtp_port <= 65535):
+        raise HTTPException(status_code=422, detail="smtp_port 必须在 1~65535 之间")
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            full_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {e}")
+
+    mail_cfg = full_cfg.setdefault("mail", {})
+    updates: dict = {}
+    for key, value in body.model_dump(exclude_none=True).items():
+        if isinstance(value, str):
+            value = value.strip()
+            if value == "":
+                continue  # 留空 = 不修改已有值，与 base-model/embedding 约定一致
+        updates[key] = value
+    if not updates:
+        raise HTTPException(status_code=422, detail="至少提供一个要修改的字段")
+    mail_cfg.update(updates)
+
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(full_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入配置文件失败: {e}")
+
+    from core import config_loader
+    config_loader.reload_config()
+    return _mail_view(get_config())
+
+
+# ---------------------------------------------------------------------------
+# /settings/anniversaries — 配置中心「可选」层：自定义纪念日 CRUD（用户反馈补遗）
+# 顶层 anniversaries: 列表此前只有 letter_writer/festival 消费，config.example.yaml
+# 完全未文档化，面板也没有入口——只能手改 yaml。整体替换语义与 /scheduler/config 的
+# signatures 字段一致。
+# ---------------------------------------------------------------------------
+
+class AnniversaryItem(BaseModel):
+    key:          str
+    month:        int
+    day:          int
+    year_start:   Optional[int] = None  # 起算年份；留空 = 每年都当作"当年"（不计年数，只年年重复 prompt_zero）
+    prompt_zero:  str = ""              # years==0 时使用（year_start 留空时恒定使用这条）
+    prompt_years: str = ""              # years>0 时使用，可用 {char}/{years} 占位符
+
+
+class AnniversariesUpdate(BaseModel):
+    anniversaries: list[AnniversaryItem]
+
+
+@router.get("/settings/anniversaries", summary="读取自定义纪念日列表（配置中心可选层）")
+async def get_anniversaries(auth=Depends(require_scopes("admin"))):
+    return {"anniversaries": get_config().get("anniversaries", [])}
+
+
+@router.put("/settings/anniversaries", summary="整体替换自定义纪念日列表并热重载（配置中心可选层）")
+async def update_anniversaries(body: AnniversariesUpdate, auth=Depends(require_scopes("admin"))):
+    from datetime import date as _date
+
+    for item in body.anniversaries:
+        if not item.key.strip():
+            raise HTTPException(status_code=422, detail="纪念日 key 不能为空")
+        try:
+            _date(2000, item.month, item.day)  # 2000 闰年，允许 02-29
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"日期非法: {item.month:02d}-{item.day:02d}")
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            full_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {e}")
+
+    saved = []
+    for item in body.anniversaries:
+        entry = {"key": item.key.strip(), "month": item.month, "day": item.day}
+        if item.year_start is not None:
+            entry["year_start"] = item.year_start
+        if item.prompt_zero.strip():
+            entry["prompt_zero"] = item.prompt_zero.strip()
+        if item.prompt_years.strip():
+            entry["prompt_years"] = item.prompt_years.strip()
+        saved.append(entry)
+    full_cfg["anniversaries"] = saved
+
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(full_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入配置文件失败: {e}")
+
+    from core import config_loader
+    config_loader.reload_config()
+    return {"anniversaries": saved}

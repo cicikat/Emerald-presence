@@ -470,6 +470,17 @@ character:
 # 用户显示名（可选）：梦境等 prompt 层用它称呼用户；留空则用无名称写法（只用"你"）。
 user:
   display_name: ""
+# 自定义纪念日（可选，面板「配置」页可选层可编辑）：letter_writer/festival 消费，命中当天时
+# 优先于硬编码节日。角色卡若自带 anniversaries 字段则完全覆盖这里（不合并）。
+# 字段：key 唯一标识；month/day 日期；year_start 可留空（留空 = 每年都当作第 0 年，只用
+# prompt_zero）；填具体年份则从第二年起改用 prompt_years（可含 {char}/{years} 占位符）。
+anniversaries: []
+# - key: first_date
+#   month: 6
+#   day: 14
+#   year_start: 2024
+#   prompt_zero: 今天是你们认识的日子
+#   prompt_years: 在一起{years}年了
 session:
   timeout_minutes: 10
 scheduler:

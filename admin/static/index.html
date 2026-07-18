@@ -448,6 +448,92 @@ textarea { resize: vertical; min-height: 72px; }
         </p>
         <div id="setup-optional-body"><div class="loading">加载中…</div></div>
       </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>邮件通道 <span class="badge">可选</span></h3>
+          <span id="setup-mail-status" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
+          角色写信功能的 SMTP 发信配置；默认关闭，纯增值功能。总开关也可以在「Token」页「通道开关」区切换。
+        </p>
+        <div class="form-row">
+          <label class="checkbox-row" style="gap:8px;font-size:14px">
+            <input type="checkbox" id="setup-mail-enabled" style="width:16px;height:16px;accent-color:var(--accent)">
+            <span>启用邮件通道</span>
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="field">
+            <span>smtp_host</span>
+            <input type="text" id="setup-mail-host" placeholder="smtp.gmail.com">
+          </label>
+          <label class="field">
+            <span>smtp_port</span>
+            <input type="number" id="setup-mail-port" placeholder="587">
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="field">
+            <span>smtp_user</span>
+            <input type="text" id="setup-mail-user" placeholder="发信邮箱账号">
+          </label>
+          <label class="field">
+            <span>smtp_password <span id="setup-mail-password-state" style="font-size:11px;color:var(--muted)"></span></span>
+            <input type="password" id="setup-mail-password" placeholder="留空=不修改已有值">
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="field">
+            <span>from_addr</span>
+            <input type="text" id="setup-mail-from-addr" placeholder="发送邮箱地址">
+          </label>
+          <label class="field">
+            <span>from_name</span>
+            <input type="text" id="setup-mail-from-name" placeholder="角色名">
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="field">
+            <span>to_addr</span>
+            <input type="text" id="setup-mail-to-addr" placeholder="接收邮箱地址">
+          </label>
+          <label class="field">
+            <span>subject_prefix</span>
+            <input type="text" id="setup-mail-subject-prefix" placeholder="【来信】">
+          </label>
+        </div>
+        <div class="form-row col-1">
+          <label class="field">
+            <span>proxy_url <span style="font-size:11px;color:var(--muted)">（可选，SMTP 端口被墙时用）</span></span>
+            <input type="text" id="setup-mail-proxy-url" placeholder="http://127.0.0.1:7897">
+          </label>
+        </div>
+        <div class="modal-footer" style="justify-content:flex-start;padding-top:4px">
+          <button class="btn btn-primary" onclick="saveSetupMail()">保存</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>自定义纪念日 <span class="badge">可选</span></h3></div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
+          letter_writer / festival 消费；命中当天会主动提起。JSON 数组编辑，字段：
+          <code style="font-family:var(--mono)">key/month/day</code> 必填，
+          <code style="font-family:var(--mono)">year_start</code> 留空=每年都当作第 0 年（只用 prompt_zero），
+          <code style="font-family:var(--mono)">prompt_zero/prompt_years</code> 可选（prompt_years 支持 <code style="font-family:var(--mono)">{char}</code>/<code style="font-family:var(--mono)">{years}</code> 占位符）。
+        </p>
+        <div class="form-row col-1">
+          <label class="field">
+            <span>anniversaries（JSON 数组）</span>
+            <textarea id="setup-anniversaries-json" rows="8" style="font-family:var(--mono);font-size:12px" placeholder='[
+  {"key": "first_date", "month": 6, "day": 14, "year_start": 2024, "prompt_years": "在一起{years}年了"}
+]'></textarea>
+          </label>
+        </div>
+        <div class="modal-footer" style="justify-content:flex-start;padding-top:4px">
+          <button class="btn btn-primary" onclick="saveSetupAnniversaries()">保存</button>
+        </div>
+      </div>
     </div>
 
     <!-- ── 系统状态 ── -->
@@ -2081,9 +2167,92 @@ async function loadSetupPage() {
       ? '<span class="badge badge-success">● 已配置</span>'
       : '<span class="badge">○ 未配置（召回自动降级为关键词匹配，不影响聊天）</span>';
 
-    await _loadSetupOptional();
+    await Promise.all([_loadSetupOptional(), _loadSetupMail(), _loadSetupAnniversaries()]);
   } catch (e) {
     toast('加载配置中心失败: ' + _setupErrMsg(e), 'err');
+  }
+}
+
+async function _loadSetupMail() {
+  try {
+    const mail = await api('GET', '/settings/mail');
+    document.getElementById('setup-mail-enabled').checked = !!mail.enabled;
+    document.getElementById('setup-mail-host').value = mail.smtp_host || '';
+    document.getElementById('setup-mail-port').value = mail.smtp_port || '';
+    document.getElementById('setup-mail-user').value = mail.smtp_user || '';
+    document.getElementById('setup-mail-password').value = '';
+    document.getElementById('setup-mail-password-state').textContent =
+      mail.smtp_password_set ? `（已配置 ${mail.smtp_password_masked}）` : '（未配置）';
+    document.getElementById('setup-mail-from-addr').value = mail.from_addr || '';
+    document.getElementById('setup-mail-from-name').value = mail.from_name || '';
+    document.getElementById('setup-mail-to-addr').value = mail.to_addr || '';
+    document.getElementById('setup-mail-subject-prefix').value = mail.subject_prefix || '';
+    document.getElementById('setup-mail-proxy-url').value = mail.proxy_url || '';
+    document.getElementById('setup-mail-status').innerHTML = mail.configured
+      ? '<span class="badge badge-success">● 已配置</span>'
+      : '<span class="badge">○ 未配置</span>';
+  } catch (e) {
+    toast('加载邮件通道配置失败: ' + _setupErrMsg(e), 'err');
+  }
+}
+
+async function saveSetupMail() {
+  const body = {
+    enabled: document.getElementById('setup-mail-enabled').checked,
+  };
+  const host   = document.getElementById('setup-mail-host').value.trim();
+  const port   = document.getElementById('setup-mail-port').value.trim();
+  const user   = document.getElementById('setup-mail-user').value.trim();
+  const pass   = document.getElementById('setup-mail-password').value.trim();
+  const from_a = document.getElementById('setup-mail-from-addr').value.trim();
+  const from_n = document.getElementById('setup-mail-from-name').value.trim();
+  const to_a   = document.getElementById('setup-mail-to-addr').value.trim();
+  const prefix = document.getElementById('setup-mail-subject-prefix').value.trim();
+  const proxy  = document.getElementById('setup-mail-proxy-url').value.trim();
+  if (host)   body.smtp_host = host;
+  if (port)   body.smtp_port = parseInt(port, 10);
+  if (user)   body.smtp_user = user;
+  if (pass)   body.smtp_password = pass;
+  if (from_a) body.from_addr = from_a;
+  if (from_n) body.from_name = from_n;
+  if (to_a)   body.to_addr = to_a;
+  if (prefix) body.subject_prefix = prefix;
+  if (proxy)  body.proxy_url = proxy;
+  try {
+    await api('PUT', '/settings/mail', body);
+    toast('邮件通道配置已保存', 'ok');
+    _loadSetupMail();
+  } catch (e) {
+    toast('保存失败: ' + _setupErrMsg(e), 'err');
+  }
+}
+
+async function _loadSetupAnniversaries() {
+  try {
+    const { anniversaries } = await api('GET', '/settings/anniversaries');
+    document.getElementById('setup-anniversaries-json').value =
+      anniversaries && anniversaries.length ? JSON.stringify(anniversaries, null, 2) : '';
+  } catch (e) {
+    toast('加载自定义纪念日失败: ' + _setupErrMsg(e), 'err');
+  }
+}
+
+async function saveSetupAnniversaries() {
+  const raw = document.getElementById('setup-anniversaries-json').value.trim();
+  let anniversaries;
+  try {
+    anniversaries = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(anniversaries)) throw new Error('必须是数组');
+  } catch (e) {
+    toast('JSON 格式错误: ' + e.message, 'err');
+    return;
+  }
+  try {
+    await api('PUT', '/settings/anniversaries', { anniversaries });
+    toast('自定义纪念日已保存', 'ok');
+    _loadSetupAnniversaries();
+  } catch (e) {
+    toast('保存失败: ' + _setupErrMsg(e), 'err');
   }
 }
 
