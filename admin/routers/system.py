@@ -6,6 +6,7 @@
   settings_misc.py   — 工具开关 / 上下文 / 破限 / TTS
 """
 
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
@@ -138,6 +139,53 @@ async def get_data_path(auth=Depends(require_scopes("admin"))):
     cfg = get_config()
     prefix = cfg.get("data_prefix", "data")
     return {"data_prefix": prefix}
+
+
+# ── 密钥本快捷入口（Brief 93 §2）───────────────────────────────────────────────
+
+_SECRETS_LOCAL_PATH = Path("secrets.local.yaml")
+
+
+def _is_localhost_request(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1", "localhost")
+
+
+@router.get("/system/secrets-book", summary="密钥本快捷入口是否可用（本机判定，供面板悬浮按钮显隐）")
+async def get_secrets_book_status(request: Request, auth=Depends(require_scopes("admin"))):
+    return {
+        "available": _is_localhost_request(request),
+        "exists": _SECRETS_LOCAL_PATH.exists(),
+    }
+
+
+@router.post("/system/secrets-book/open", summary="用系统默认程序打开 secrets.local.yaml（仅本机请求）")
+async def open_secrets_book(request: Request, auth=Depends(require_scopes("admin"))):
+    from fastapi import HTTPException
+
+    if not _is_localhost_request(request):
+        raise HTTPException(status_code=403, detail="仅本机可用")
+    if not _SECRETS_LOCAL_PATH.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="secrets.local.yaml 不存在，请先运行 python scripts/setup_auth.py 完成鉴权初始化",
+        )
+
+    resolved = str(_SECRETS_LOCAL_PATH.resolve())
+    try:
+        import sys
+        if sys.platform == "win32":
+            os.startfile(resolved)  # type: ignore[attr-defined]
+        else:
+            import subprocess
+            opener = "open" if sys.platform == "darwin" else "xdg-open"
+            subprocess.Popen([opener, resolved])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"打开失败: {e}")
+
+    from admin.audit import log_event
+    log_event("secrets_book_opened", label=auth.label)
+    return {"message": "已用系统默认程序打开 secrets.local.yaml"}
 
 
 @router.get("/system/health", summary="静默失败计数 + 进程启动时间")
