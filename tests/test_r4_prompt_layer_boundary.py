@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from core.model_registry import ModelClient
 from core.prompt_layer import (
     PromptLayer,
     prompt_layer_to_message,
@@ -155,7 +156,22 @@ class TestSanitizeMessages:
 
 class TestLLMBoundaryStrip:
     """Verify that when chat() is called with _layer fields, the mocked API
-    never sees them."""
+    never sees them.
+
+    Patching strategy (post multi-model preset refactor, cc-tasks/98):
+      chat() no longer resolves its client via the legacy core.llm_client._get_client
+      shim — it calls core.model_registry.get_model_client() directly (see
+      core/llm_client.py::chat()). Patching _get_client is therefore a no-op: the
+      call falls through to a real ModelClient built from this machine's real
+      config.yaml, silently making a live network call instead of hitting the
+      mock. With a 2-message (system+user) payload that live call can succeed
+      and the assertions pass vacuously (captured stays empty); with a
+      system-only payload some providers reject it outright ("at least one
+      message is required"), and the test fails for a reason unrelated to
+      _layer/_debug stripping. Fixed by patching core.llm_client.get_model_client
+      to inject a fake ModelClient (same pattern as tests/test_detect_emotion.py),
+      so no real client/config is ever touched.
+    """
 
     def _make_mock_response(self, text: str):
         choice = MagicMock()
@@ -165,6 +181,19 @@ class TestLLMBoundaryStrip:
         resp = MagicMock()
         resp.choices = [choice]
         return resp
+
+    def _make_fake_model_client(self, fake_create) -> ModelClient:
+        client_mock = MagicMock()
+        client_mock.chat.completions.create = AsyncMock(side_effect=fake_create)
+        return ModelClient(
+            name="test",
+            provider_kind="openai",
+            model="test-model",
+            tool_call_mode="plain",
+            prompt_style="narrative",
+            params={"temperature": 0.7, "top_p": 0.9, "max_tokens": 100},
+            client=client_mock,
+        )
 
     def test_layer_stripped_before_api(self):
         captured: list[dict] = []
@@ -178,27 +207,14 @@ class TestLLMBoundaryStrip:
             {"role": "user", "content": "hello", "_layer": "12_user_message"},
         ]
 
-        with patch("core.llm_client._get_client") as mock_get_client, \
-             patch("core.llm_client.get_config") as mock_cfg:
-            mock_cfg.return_value = {
-                "llm": {
-                    "api_key": "test",
-                    "base_url": "http://localhost",
-                    "model": "test-model",
-                    "tool_call_mode": "plain",
-                    "temperature": 0.7,
-                    "top_p": 0.9,
-                    "max_tokens": 100,
-                    "frequency_penalty": 0.0,
-                }
-            }
-            client_mock = MagicMock()
-            client_mock.chat.completions.create = AsyncMock(side_effect=fake_create)
-            mock_get_client.return_value = client_mock
-
+        with patch(
+            "core.llm_client.get_model_client",
+            return_value=self._make_fake_model_client(fake_create),
+        ):
             from core.llm_client import chat
             asyncio.get_event_loop().run_until_complete(chat(messages_with_layer))
 
+        assert captured, "fake_create was never invoked — chat() bypassed the mock"
         for m in captured:
             assert "_layer" not in m, f"_layer leaked to API: {m}"
 
@@ -213,27 +229,14 @@ class TestLLMBoundaryStrip:
             {"role": "system", "content": "sys", "_layer": "1", "_debug": "verbose"},
         ]
 
-        with patch("core.llm_client._get_client") as mock_get_client, \
-             patch("core.llm_client.get_config") as mock_cfg:
-            mock_cfg.return_value = {
-                "llm": {
-                    "api_key": "test",
-                    "base_url": "http://localhost",
-                    "model": "test-model",
-                    "tool_call_mode": "plain",
-                    "temperature": 0.7,
-                    "top_p": 0.9,
-                    "max_tokens": 100,
-                    "frequency_penalty": 0.0,
-                }
-            }
-            client_mock = MagicMock()
-            client_mock.chat.completions.create = AsyncMock(side_effect=fake_create)
-            mock_get_client.return_value = client_mock
-
+        with patch(
+            "core.llm_client.get_model_client",
+            return_value=self._make_fake_model_client(fake_create),
+        ):
             from core.llm_client import chat
             asyncio.get_event_loop().run_until_complete(chat(messages_with_internal))
 
+        assert captured, "fake_create was never invoked — chat() bypassed the mock"
         for m in captured:
             for key in m:
                 assert not key.startswith("_"), f"internal key {key!r} leaked to API"
@@ -256,27 +259,14 @@ class TestLLMBoundaryStrip:
             },
         ]
 
-        with patch("core.llm_client._get_client") as mock_get_client, \
-             patch("core.llm_client.get_config") as mock_cfg:
-            mock_cfg.return_value = {
-                "llm": {
-                    "api_key": "test",
-                    "base_url": "http://localhost",
-                    "model": "test-model",
-                    "tool_call_mode": "plain",
-                    "temperature": 0.7,
-                    "top_p": 0.9,
-                    "max_tokens": 100,
-                    "frequency_penalty": 0.0,
-                }
-            }
-            client_mock = MagicMock()
-            client_mock.chat.completions.create = AsyncMock(side_effect=fake_create)
-            mock_get_client.return_value = client_mock
-
+        with patch(
+            "core.llm_client.get_model_client",
+            return_value=self._make_fake_model_client(fake_create),
+        ):
             from core.llm_client import chat
             asyncio.get_event_loop().run_until_complete(chat(messages_with_meta))
 
+        assert captured, "fake_create was never invoked — chat() bypassed the mock"
         for m in captured:
             for key in m:
                 assert not key.startswith("_"), f"metadata key {key!r} leaked to API"
@@ -292,24 +282,10 @@ class TestLLMBoundaryStrip:
         async def fake_create(**kwargs):
             return self._make_mock_response("reply")
 
-        with patch("core.llm_client._get_client") as mock_get_client, \
-             patch("core.llm_client.get_config") as mock_cfg:
-            mock_cfg.return_value = {
-                "llm": {
-                    "api_key": "test",
-                    "base_url": "http://localhost",
-                    "model": "test-model",
-                    "tool_call_mode": "plain",
-                    "temperature": 0.7,
-                    "top_p": 0.9,
-                    "max_tokens": 100,
-                    "frequency_penalty": 0.0,
-                }
-            }
-            client_mock = MagicMock()
-            client_mock.chat.completions.create = AsyncMock(side_effect=fake_create)
-            mock_get_client.return_value = client_mock
-
+        with patch(
+            "core.llm_client.get_model_client",
+            return_value=self._make_fake_model_client(fake_create),
+        ):
             from core.llm_client import chat
             asyncio.get_event_loop().run_until_complete(chat(original))
 
