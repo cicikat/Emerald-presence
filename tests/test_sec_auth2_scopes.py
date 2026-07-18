@@ -202,11 +202,13 @@ def client():
 def test_missing_credentials_401(client, sandbox):
     resp = client.get("/admin-only")
     assert resp.status_code == 401
+    assert "打开密钥本" in resp.json()["detail"]["hint"]
 
 
 def test_invalid_token_401(client, sandbox):
     resp = client.get("/admin-only", headers={"Authorization": "Bearer nonsense"})
     assert resp.status_code == 401
+    assert "打开密钥本" in resp.json()["detail"]["hint"]
 
 
 def test_insufficient_scope_403(client, sandbox):

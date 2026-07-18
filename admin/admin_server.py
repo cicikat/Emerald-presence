@@ -21,6 +21,9 @@ _STATIC_DIR = Path(__file__).parent / "static"
 # ── 鉴权：从独立模块导入，避免与 routers 的循环导入 ──────────────────────────
 from admin.auth import verify_token, security, get_admin_secret, authenticate_ws  # noqa: F401 (re-exported for legacy imports)
 
+# Brief 93 §6：WS 鉴权失败 close reason 人话化（RFC 6455 reason 上限 123 字节，UTF-8 中文需精简）。
+_WS_UNAUTHORIZED_REASON = "token 未配置或已失效，请到管理面板打开密钥本获取"
+
 # ── FastAPI 应用 ──────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Emerald-Presence 运维控制台",
@@ -107,7 +110,7 @@ from channels.desktop_ws import handle_connection as _ws_desktop_handler
 async def ws_desktop_endpoint(websocket: _WebSocket):
     # WebSocket auth only accepts Authorization: Bearer. Query tokens are rejected.
     if authenticate_ws(websocket, "ws.desktop") is None:
-        await websocket.close(code=1008)
+        await websocket.close(code=1008, reason=_WS_UNAUTHORIZED_REASON)
         return
     await _ws_desktop_handler(websocket)
 
@@ -120,7 +123,7 @@ from channels.device_ws import handle_connection as _ws_device_handler
 async def ws_device_endpoint(websocket: _WebSocket):
     # 与 /ws/desktop 相同鉴权：仅 Authorization: Bearer
     if authenticate_ws(websocket, "ws.device") is None:
-        await websocket.close(code=1008)
+        await websocket.close(code=1008, reason=_WS_UNAUTHORIZED_REASON)
         return
     await _ws_device_handler(websocket)
 

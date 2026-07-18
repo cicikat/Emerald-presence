@@ -19,6 +19,10 @@ security = HTTPBearer(auto_error=False)
 
 _LEGACY_LABEL = "legacy-admin"
 
+# Brief 93 §6：401 响应体人话化。桌面端（Brief 34）直接透传 detail.hint 显示。
+_UNAUTHORIZED_HINT = "token 未配置或已失效，请到后端管理面板右下角『打开密钥本』获取对应 token"
+_UNAUTHORIZED_DETAIL = {"message": "Unauthorized", "hint": _UNAUTHORIZED_HINT}
+
 # ── §7 限速：进程内存态，按来源 IP 统计 401 失败次数 ─────────────────────────────
 _RATE_WINDOW_SECONDS = 60
 _RATE_FAILURE_THRESHOLD = 10
@@ -118,12 +122,12 @@ def require_scopes(*scopes: str):
         if not credentials:
             _note_auth_failure(ip)
             audit.log_event("auth_failed", path=request.url.path, ip=ip)
-            raise HTTPException(status_code=401, detail="Unauthorized")
+            raise HTTPException(status_code=401, detail=_UNAUTHORIZED_DETAIL)
         info = resolve_token(credentials.credentials)
         if info is None:
             _note_auth_failure(ip)
             audit.log_event("auth_failed", path=request.url.path, ip=ip)
-            raise HTTPException(status_code=401, detail="Unauthorized")
+            raise HTTPException(status_code=401, detail=_UNAUTHORIZED_DETAIL)
         if not _scopes_ok(info.scopes, scopes):
             audit.log_event("scope_denied", label=info.label, path=request.url.path, ip=ip)
             raise HTTPException(

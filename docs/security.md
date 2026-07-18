@@ -54,7 +54,10 @@
 ## 鉴权语义
 
 - **HTTP**：无效 / 缺失 token → `401 Unauthorized`；有效 token 但 scope 不足 → `403`
-  （`detail` 中给出所需 scope，这个信息可公开）。
+  （`detail` 中给出所需 scope，这个信息可公开）。401 的 `detail` 是 `{"message": "Unauthorized",
+  "hint": "..."}`（Brief 93 §6，非纯字符串）：`hint` 指引去管理面板右下角「打开密钥本」拿
+  token，desktop 客户端（Brief 34）直接透传该字段显示。`/ws/desktop`/`/ws/device` 鉴权失败时
+  同语义文案放进 WS close 的 `reason`（RFC 6455 上限 123 字节，文案比 HTTP hint 精简）。
 - **WS**：`/ws/desktop` 要求 `ws.desktop`，`/ws/device` 要求 `ws.device`；scope 不足或无
   token 一律 `close(code=1008)`，不做区分（WS 没有 403 的等价物）。
 - **legacy 兼容**：env `YEXUAN_ADMIN_SECRET`（优先）或 `config.admin.secret_key` 的值永远
