@@ -121,6 +121,12 @@ cd PresenceKit
 pip install -r requirements.txt
 ```
 
+**Windows shortcut**: instead of the manual steps below, double-click
+`AA1安装并启动.bat` (installs deps, generates `config.yaml`), fill in
+`config.yaml`, then `AA2鉴权初始化.bat` (auth init, required before the
+first run) and `AA3启动.bat` (start). `AA更新.bat` does `git pull` +
+reinstall deps for later updates.
+
 **Configure**
 
 ```bash

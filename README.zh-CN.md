@@ -121,6 +121,11 @@ cd PresenceKit
 pip install -r requirements.txt
 ```
 
+**Windows 快捷方式**：也可以不走下面的手工步骤，直接双击 `AA1安装并启动.bat`
+（装依赖、生成 `config.yaml`），填好 `config.yaml` 后依次双击
+`AA2鉴权初始化.bat`（首次运行前必做的鉴权初始化）与 `AA3启动.bat`（启动）。
+后续更新用 `AA更新.bat`（`git pull` + 重装依赖）。
+
 **配置**
 
 ```bash

@@ -15,7 +15,7 @@ if not exist "config.yaml" (
     copy config.example.yaml config.yaml
     echo.
     echo 已生成config.yaml，请用记事本打开填写配置
-    echo 填写完成后双击"启动.bat"运行
+    echo 填写完成后依次双击 "AA2鉴权初始化.bat"（首次运行前必做）与 "AA3启动.bat"
     pause
     exit
 )
