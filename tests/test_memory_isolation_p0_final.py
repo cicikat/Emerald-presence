@@ -60,6 +60,12 @@ def chars_tree(tmp_path):
     jb = chars / "reality" / "jailbreaks"
     jb.mkdir(parents=True)
     (jb / "base.json").write_text(json.dumps({"entries": []}), encoding="utf-8")
+    # `registry` fixture below chdir's into this dir; core.config_loader resolves the
+    # bare relative Path("config.yaml") against cwd, so one must exist here too — otherwise
+    # the first get_config() call after the chdir (e.g. via capture_turn -> _scrub ->
+    # _char_name) hard-raises RuntimeError. Self-contained stub, independent of whatever
+    # real config.yaml a dev machine happens to have at the repo root.
+    (tmp_path / "config.yaml").write_text("character:\n  name: Companion\n", encoding="utf-8")
     return tmp_path
 
 

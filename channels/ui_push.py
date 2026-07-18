@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 import re
 
@@ -12,6 +13,10 @@ from channels import desktop_ws, device_ws
 logger = logging.getLogger(__name__)
 
 _SENTENCE_SPLIT_RE = re.compile(r"[^\n。！？…]*[\n。！？…]+")
+
+# asyncio.sleep() 的真实调度粒度在不同平台差异很大——Windows 默认定时器精度约 15ms，
+# 远小于此值的请求会被系统拉长到最近的 tick（见 pseudo_stream_push 内注释）。
+_MIN_PRACTICAL_SLEEP_S = 0.01
 
 _PSEUDO_STREAM_DEFAULTS: dict = {
     "enabled": True,
@@ -138,6 +143,13 @@ async def pseudo_stream_push(
             interval_min *= scale
             interval_max *= scale
 
+        # 缩放后单块间隔若低于系统能可靠调度的 sleep 粒度，就把多块合并进一次
+        # delta+sleep，保证每次 sleep 不小于这个下限——总耗时目标不变（合并后块数
+        # 减半、每次 sleep 时长对应翻倍），代价是超长文本末尾的分块效果变粗，可接受。
+        group_size = 1
+        if 0 < interval_max < _MIN_PRACTICAL_SLEEP_S:
+            group_size = max(1, math.ceil(_MIN_PRACTICAL_SLEEP_S / interval_max))
+
         kw: dict = {}
         if char_id:
             kw["char_id"] = char_id
@@ -148,10 +160,11 @@ async def pseudo_stream_push(
         try:
             await push_stream_start(msg_id, **kw)
             started = True
-            for block in blocks:
-                await push_stream_delta(msg_id, block)
+            for i in range(0, len(blocks), group_size):
+                chunk = "".join(blocks[i : i + group_size])
+                await push_stream_delta(msg_id, chunk)
                 if interval_max > 0:
-                    await asyncio.sleep(random.uniform(interval_min, interval_max))
+                    await asyncio.sleep(random.uniform(interval_min, interval_max) * group_size)
         finally:
             if started:
                 await push_stream_end(msg_id)
