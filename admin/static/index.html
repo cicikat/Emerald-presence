@@ -1314,6 +1314,26 @@ textarea { resize: vertical; min-height: 72px; }
     <div class="page" id="page-model-routing">
       <h1 class="page-title">模型路由</h1>
 
+      <div class="card" style="border-color:var(--accent)">
+        <div class="card-header"><h3>这个页面是干什么的？</h3></div>
+        <p style="font-size:13px;color:var(--text);line-height:1.8">
+          三个概念，从下往上理解：<br>
+          ① <strong>Preset</strong>（模型连接）= 一个"你能用的模型"：服务商地址 + 密钥 + 模型名，
+          填一个 preset 相当于告诉后端"这里有一个能调用的模型"。<br>
+          ② <strong>Routing Profile</strong>（分配方案）= 一套"谁用谁"的表：把不同用途的调用
+          （比如角色正式回复 vs. 后台判断/摘要这类不需要用户看到的杂活）分别指给某个 preset。
+          不是每类都要填——留空的类别会自动回退用这套方案里的 <code style="font-family:var(--mono)">chat</code>，
+          所以新手只填 <code style="font-family:var(--mono)">chat</code> 一项就能跑起来。<br>
+          ③ <strong>当前生效路由方案</strong> = 现在实际在用的那一套分配方案。可以配多套（比如「日常省钱」
+          「重要场合上强模型」），需要时切换。
+        </p>
+        <p style="font-size:13px;color:var(--muted);margin-top:10px">
+          配置顺序：先在下方「Presets」新建至少一个模型连接 → 再到「Routing Profiles」新建/编辑一套方案，
+          把 <code style="font-family:var(--mono)">chat</code> 指向刚才建的 preset → 最上方「当前生效路由方案」
+          切换到这套方案即可生效。
+        </p>
+      </div>
+
       <div class="card" id="mr-legacy-banner" style="display:none">
         <p style="font-size:13px;color:var(--muted);margin:0">
           当前配置未开启 <code style="font-family:var(--mono)">model_presets</code> 块（legacy 模式，等价合成了单个
@@ -1328,6 +1348,11 @@ textarea { resize: vertical; min-height: 72px; }
           <h3>当前生效路由方案</h3>
           <button class="btn btn-ghost btn-sm" onclick="loadModelRouting()">刷新</button>
         </div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
+          下拉框选一个下方已建好的 routing profile，点「切换」立即对全局生效。
+          注：如果某个角色卡自己单独绑定了一套方案（在「角色卡」页设置），该角色对话时优先用它自己绑定的那套，
+          不受这里的全局选择影响。
+        </p>
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <select id="mr-active-routing-select" style="min-width:200px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)"></select>
           <button class="btn btn-primary btn-sm" onclick="switchActiveRouting()">切换</button>
@@ -1340,6 +1365,10 @@ textarea { resize: vertical; min-height: 72px; }
           <h3>Presets</h3>
           <button class="btn btn-primary btn-sm" onclick="openPresetModal()">+ 新建 Preset</button>
         </div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
+          一个 preset 就是一个"模型连接"：填好服务商地址、密钥、模型名，就能在下方 Routing Profiles 里被指派任务。
+          新建后建议先点「测试」，确认这组配置真的能打通再拿去用。
+        </p>
         <div id="mr-presets-body"><div class="loading">加载中…</div></div>
       </div>
 
@@ -1348,7 +1377,25 @@ textarea { resize: vertical; min-height: 72px; }
           <h3>Routing Profiles</h3>
           <button class="btn btn-primary btn-sm" onclick="openProfileModal()">+ 新建/编辑 Profile</button>
         </div>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">call_category → preset 映射；未声明的 category 会回退到该 profile 的 <code style="font-family:var(--mono)">chat</code>。</p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:8px">
+          一个 profile 就是一套"把哪类调用交给哪个 preset"的分配表（call_category → preset）。
+          没单独指定的类别会自动回退用这套方案里的 <code style="font-family:var(--mono)">chat</code>，
+          所以只填 <code style="font-family:var(--mono)">chat</code> 也能正常跑；其余类别都是不面向用户的后台
+          "杂活"，想省钱可以单独指到便宜模型。
+        </p>
+        <details style="margin-bottom:12px">
+          <summary style="cursor:pointer;font-size:12px;color:var(--muted)">各 category 是干什么的？点开看</summary>
+          <div style="margin-top:8px;font-size:12px;color:var(--muted);line-height:1.9">
+            <div><code style="font-family:var(--mono)">chat</code> —— 角色的正式回复，用户实际看到的每一句话。质量要求最高，建议配主力模型。</div>
+            <div><code style="font-family:var(--mono)">intent</code> —— 判断"要不要触发某个动作"的轻量辅助判断，不面向用户，配便宜模型即可。</div>
+            <div><code style="font-family:var(--mono)">probe</code> —— 每轮先判断要不要调用工具的轻量"探针"调用，配便宜模型即可。</div>
+            <div><code style="font-family:var(--mono)">summary</code> —— 生成摘要（压缩长对话、总结一局陪玩/一场梦），配便宜模型即可。</div>
+            <div><code style="font-family:var(--mono)">detect_emotion</code> —— 识别文字里的情绪标签，配便宜模型即可。</div>
+            <div><code style="font-family:var(--mono)">consolidation</code> —— 把短期记忆整理沉淀为长期记忆、提炼关系事实等后台整理，配便宜模型即可。</div>
+            <div><code style="font-family:var(--mono)">perform</code> —— 把回复文字映射成动作/表情演出指令（只有开启"表演意图映射"功能时才会用到）。</div>
+            <div><code style="font-family:var(--mono)">monologue</code> —— 角色说话前的内心独白/思考草稿（只有开启"思考链"功能时才会用到）。</div>
+          </div>
+        </details>
         <div id="mr-profiles-body"><div class="loading">加载中…</div></div>
       </div>
     </div>
@@ -1365,43 +1412,43 @@ textarea { resize: vertical; min-height: 72px; }
         </div>
         <div class="form-row">
           <label class="field">
-            <span>provider_kind</span>
+            <span>provider_kind <span style="font-size:11px;color:var(--muted)">（按服务商选，决定怎么拼请求）</span></span>
             <select id="mr-preset-kind">
-              <option value="openai">openai</option>
-              <option value="deepseek">deepseek</option>
-              <option value="anthropic_compat">anthropic_compat</option>
-              <option value="local">local</option>
+              <option value="openai">openai（OpenAI 官方 / 兼容 OpenAI 协议的中转、代理）</option>
+              <option value="deepseek">deepseek（DeepSeek 官方 / 兼容 DeepSeek 协议）</option>
+              <option value="anthropic_compat">anthropic_compat（Claude 官方 / 兼容 Claude 协议的中转）</option>
+              <option value="local">local（自己本地部署，如 Ollama/vLLM）</option>
             </select>
           </label>
           <label class="field">
-            <span>tool_call_mode</span>
+            <span>tool_call_mode <span style="font-size:11px;color:var(--muted)">（模型支不支持"工具调用"）</span></span>
             <select id="mr-preset-tool-mode">
-              <option value="function_calling">function_calling</option>
-              <option value="xml_fallback">xml_fallback</option>
+              <option value="function_calling">function_calling（大多数新模型选这个）</option>
+              <option value="xml_fallback">xml_fallback（模型不支持函数调用时选这个，退化用文字协议模拟）</option>
             </select>
           </label>
         </div>
         <div class="form-row col-1">
           <label class="field">
-            <span>base_url</span>
+            <span>base_url <span style="font-size:11px;color:var(--muted)">（服务商文档里的 API 地址，不是网页地址）</span></span>
             <input type="text" id="mr-preset-base-url" placeholder="https://api.deepseek.com">
           </label>
         </div>
         <div class="form-row col-1">
           <label class="field">
-            <span>api_key <span style="font-size:11px;color:var(--muted)">（留空=不修改已有值）</span></span>
+            <span>api_key <span style="font-size:11px;color:var(--muted)">（服务商给你的密钥，通常 sk- 开头；留空=不修改已有值）</span></span>
             <input type="password" id="mr-preset-api-key" placeholder="sk-...">
           </label>
         </div>
         <div class="form-row col-1">
           <label class="field">
-            <span>model</span>
+            <span>model <span style="font-size:11px;color:var(--muted)">（具体模型名，照抄服务商文档，不能瞎填）</span></span>
             <input type="text" id="mr-preset-model" placeholder="claude-sonnet-4-6">
           </label>
         </div>
         <div class="form-row col-1">
           <label class="field">
-            <span>params <span style="font-size:11px;color:var(--muted)">（可选，JSON 对象，如 {"temperature":0.8}）</span></span>
+            <span>params <span style="font-size:11px;color:var(--muted)">（可选，覆盖生成参数，如 {"temperature":0.8}；新手不填就用默认值，能正常跑）</span></span>
             <textarea id="mr-preset-params" rows="2" placeholder="{}" style="font-family:var(--mono);font-size:12px"></textarea>
           </label>
         </div>
@@ -3782,6 +3829,16 @@ async function loadFeatureFlags() {
 async function saveFeatureFlags() { const flags = {}; document.querySelectorAll('[data-feature-flag]').forEach(el => flags[el.dataset.featureFlag] = el.checked); try { await api('PUT', '/settings/feature-flags', { flags }); toast('Saved', 'ok'); loadFeatureFlags(); } catch (e) { toast(e.message, 'err'); } }
 let _mrData = { presets: {}, routing_profiles: {}, active_routing: 'default' };
 const MR_CATEGORIES = ['chat', 'intent', 'probe', 'summary', 'detect_emotion', 'consolidation', 'perform', 'monologue'];
+const MR_CATEGORY_DESC = {
+  chat:           '角色的正式回复，用户实际看到的每一句话（建议配主力模型）',
+  intent:         '判断要不要触发某个动作的轻量辅助判断（便宜模型即可）',
+  probe:          '每轮先判断要不要调用工具的轻量探针（便宜模型即可）',
+  summary:        '生成摘要，如压缩长对话/总结一局陪玩（便宜模型即可）',
+  detect_emotion: '识别文字里的情绪标签（便宜模型即可）',
+  consolidation:  '短期记忆整理沉淀为长期记忆等后台整理（便宜模型即可）',
+  perform:        '回复文字映射成动作/表情演出指令（仅开启该功能时用到）',
+  monologue:      '说话前的内心独白/思考草稿（仅开启思考链功能时用到）',
+};
 
 async function loadModelRouting() {
   document.getElementById('mr-presets-body').innerHTML = '<div class="loading">加载中…</div>';
@@ -3976,9 +4033,9 @@ function openProfileModal(name) {
   const catsEl = document.getElementById('mr-profile-categories');
   catsEl.innerHTML = MR_CATEGORIES.map(cat => `
     <label class="field" style="margin-bottom:8px">
-      <span>${cat}</span>
+      <span>${cat} <span style="font-size:11px;color:var(--muted);font-weight:normal">—— ${MR_CATEGORY_DESC[cat] || ''}</span></span>
       <select id="mr-profile-cat-${cat}">
-        <option value="">（不修改 / 沿用已有）</option>
+        <option value="">（不修改 / 沿用已有，缺省时自动回退用 chat）</option>
         ${presetNames.map(p => `<option value="${p}" ${existing[cat] === p ? 'selected' : ''}>${p}</option>`).join('')}
       </select>
     </label>
