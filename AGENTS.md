@@ -219,6 +219,11 @@ python tests/run_eval.py             # validate prompt tag/layer activation afte
    本机运行项目 pytest 的正确入口是 Python 3.14 环境：
    `<用户目录>\AppData\Local\Python\pythoncore-3.14-64\Scripts\pytest.exe`。
    workspace dependency discovery 返回的 bundled Python 可能没有安装 pytest，不能据此判定测试不可运行。
+   注意：本机该 3.14 环境里的 `rapidocr-onnxruntime` 实际装的是 1.2.3（早于
+   `requirements.txt` 声明的 `>=1.3.0`）——`rapidocr-onnxruntime>=1.3.21` 起
+   `requires_python` 都是 `<3.13`，在 3.14 上 `pip install -r requirements.txt`
+   装不出满足约束的版本；本机能跑只是因为历史遗留装的旧版本还在。项目实际支持区间
+   是 Python 3.10–3.12（推荐 3.12，CI 覆盖 3.10/3.12 两端），3.13+ 暂不支持。
 2. pytest 默认临时目录可能因沙箱权限报 `PermissionError`；把 `TEMP` / `TMP` 临时指向仓库内 `.tmp`，测试后安全清理。
 3. `PresenceKit-desktop`（当前目录名通常为 `Emerald-client`）的 Vite build 可能因沙箱禁止写 `node_modules/.vite-temp` 报 `EPERM`；应申请权限后原命令重跑。
 4. 跨仓执行 git 时可能遇到 `dubious ownership`；优先按命令使用

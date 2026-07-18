@@ -110,7 +110,8 @@ Python · FastAPI · NapCat (OneBot 11，可选) · DeepSeek / 任意兼容 LLM 
 
 **环境要求**
 
-- Python 3.10+
+- Python 3.10–3.12（推荐 3.12；暂不支持 3.13+ —— `rapidocr-onnxruntime` 声明要求
+  `<3.13`）
 
 **安装**
 

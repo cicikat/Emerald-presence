@@ -110,7 +110,8 @@ Python · FastAPI · NapCat (OneBot 11, optional) · DeepSeek / any OpenAI-compa
 
 **Requirements**
 
-- Python 3.10+
+- Python 3.10–3.12 (3.12 recommended; 3.13+ not yet supported — `rapidocr-onnxruntime`
+  caps at `<3.13`)
 
 **Install**
 
