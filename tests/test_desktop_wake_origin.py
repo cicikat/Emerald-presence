@@ -87,8 +87,10 @@ def _patch_common(monkeypatch, pipeline=None, rpe_accepted=True):
     import core.perceive_event as _pe_mod
     monkeypatch.setattr(_pe_mod, "_resolve_char_id", lambda uid, cid: "char-a")
 
+    # 5 条真实用户轮，模拟老用户重开——这些用例测的是 capture_origin 记账，不是
+    # Brief 97 的冷启动首见种子分支（见 test_desktop_wake_origin_seed_prompt_is_wake_text）。
     import core.memory.short_term as _st
-    monkeypatch.setattr(_st, "load", lambda uid, char_id=None: [])
+    monkeypatch.setattr(_st, "load", lambda uid, char_id=None: [{"role": "user", "content": "hi"}] * 5)
 
     import core.response_processor as _rp
     monkeypatch.setattr(_rp, "strip_render_tags", lambda s: s)
@@ -224,6 +226,36 @@ async def test_desktop_wake_origin_seed_prompt_is_wake_text(monkeypatch):
     assert "桌宠" in seed or "重新打开" in seed, (
         f"seed_prompt should reference the wake scenario; got {seed!r}"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 3b（Brief 97 §4）：真实用户轮数为 0（冷启动首次打开）时，种子换成首见版，
+# 且必须带"不要假装拥有与用户过去的记忆"这句防幻觉约束。
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_desktop_wake_origin_seed_prompt_is_first_open_text_when_no_history(monkeypatch):
+    _patch_common(monkeypatch)
+
+    import core.memory.short_term as _st
+    monkeypatch.setattr(_st, "load", lambda uid, char_id=None: [])
+
+    captured_origins: list[dict] = []
+
+    import core.observe.prompt_capture as _pc
+
+    def _spy(info: dict):
+        captured_origins.append(info)
+
+    monkeypatch.setattr(_pc, "set_capture_origin", _spy)
+
+    from admin.routers.chat import desktop_wake
+    await desktop_wake({})
+
+    assert captured_origins, "set_capture_origin was not called"
+    seed = captured_origins[0].get("seed_prompt", "")
+    assert "第一次打开" in seed
+    assert "不要假装拥有与用户过去的记忆" in seed
+    assert "重新打开" not in seed
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -720,7 +720,6 @@ async def desktop_wake(body: dict = Body(default={}), _auth=Depends(require_scop
             return {"reply": None, "source": "no_pipeline"}
 
         from core.conversation_gate import conversation_lock as _conv_lock
-        prompt = "（用户重新打开了和你对话的软件，请结合真实记忆自然接续）"
 
         async with _conv_lock(uid):
             logger.info(
@@ -729,6 +728,17 @@ async def desktop_wake(body: dict = Body(default={}), _auth=Depends(require_scop
             )
             # N1: turn-level scope freeze（与 run_owner_chat_turn / _pipeline_send 一致）
             _wake_scope = pipeline._current_reality_scope(uid)
+            # Brief 97 §4：冷启动首轮不能用"结合真实记忆自然接续"——零记忆时这句话
+            # 等于点名要求角色编造往事（诊断链路见 docs/scheduler.md）。真实用户轮数
+            # 为 0 时换用首见版种子，明确禁止假装拥有过去的记忆。
+            from core.scheduler.rhythm import real_turn_count as _real_turn_count
+            _is_first_open = _real_turn_count(uid, char_id=_wake_scope.character_id) == 0
+            prompt = (
+                "（用户第一次打开和你对话的软件。说出你想说的话吧：打个招呼，礼貌地询问，"
+                "或者随便说几句。不要假装拥有与用户过去的记忆。）"
+                if _is_first_open
+                else "（用户重新打开了和你对话的软件，请结合真实记忆自然接续）"
+            )
             context = await pipeline.fetch_context(
                 uid, prompt, frozen_scope=_wake_scope
             )
