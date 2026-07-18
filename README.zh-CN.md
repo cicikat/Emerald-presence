@@ -176,7 +176,7 @@ python run_test.py
 ## 可选接入
 
 - **QQ / NapCat**：见上方「运行」一节；不需要 QQ 机器人时用 `standalone_mode: true` 跳过。
-- **桌面端**：见 [PresenceKit-desktop](https://github.com/cicikat/PresenceKit-desktop)，需要后端保持运行。
+- **桌面端**：见 [PresenceKit-desktop](https://github.com/cicikat/PresenceKit-desktop)，需要后端保持运行。下载安装器前建议先看它的 [Download 区](https://github.com/cicikat/PresenceKit-desktop#下载)：安装器未签名会触发 SmartScreen 提示，Edge 有时会直接拦截下载，建议装到非系统盘。
 - **手机端**：见 [PresenceKit-mobile](https://github.com/cicikat/PresenceKit-mobile)，通过局域网 IP 或 `adb reverse` 连接。
 - **TTS**：GPT-SoVITS，配置见 `config.example.yaml` 中 TTS 相关字段。
 - **Apple Watch**：通过 iPhone 捷径把心率 / 睡眠数据推送到后端接口，具体字段见 `config.example.yaml` 与 [docs/known-issues.md](docs/known-issues.md)。

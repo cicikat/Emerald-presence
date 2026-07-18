@@ -176,7 +176,7 @@ Admin panel: `http://127.0.0.1:8080`
 ## Optional integrations
 
 - **QQ / NapCat**: see "Run" above; skip it entirely with `standalone_mode: true` if you don't need the QQ bot.
-- **Desktop client**: [PresenceKit-desktop](https://github.com/cicikat/PresenceKit-desktop) — requires the backend to be running.
+- **Desktop client**: [PresenceKit-desktop](https://github.com/cicikat/PresenceKit-desktop) — requires the backend to be running. Before grabbing a release build, check its [Download section](https://github.com/cicikat/PresenceKit-desktop#download) for installer caveats (unsigned installer → SmartScreen prompt, Edge sometimes blocks the download outright, install to a non-system drive if you have one).
 - **Mobile client**: [PresenceKit-mobile](https://github.com/cicikat/PresenceKit-mobile) — connects over a LAN IP or `adb reverse`.
 - **TTS**: GPT-SoVITS; see the TTS-related fields in `config.example.yaml`.
 - **Apple Watch**: push heart-rate/sleep data to the backend via an iPhone Shortcut; see the relevant fields in `config.example.yaml` and [docs/known-issues.md](docs/known-issues.md).
