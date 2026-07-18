@@ -32,6 +32,7 @@ async def run_owner_chat_turn(
     channel_name: str,
     *,
     trusted_user_text: str | None = None,
+    reply_to: dict | None = None,
 ) -> dict:
     """
     手机/桌宠共用的 owner 对话入口。
@@ -41,6 +42,13 @@ async def run_owner_chat_turn(
     trusted_user_text: 媒体拼接前的原始用户文本，仅用于 probe；
       不传时退化为 message（纯文字消息两者相同）。
       media 端点须显式传入原始 message（在 full_message 拼接前捕获）。
+
+    reply_to: 引用回复契约（Brief 98 §2），可选 {text, ts}。校验通过则把
+      「用户回复了你{相对时间}发送的这条消息「{text}」：」前缀拼进 message，
+      随后 fetch_context / build_prompt / capture_turn 全部消费拼接后的
+      message，short_term / mid_term / event_log 自然捕获，无需额外改造。
+      探针（_probe_text）刻意使用拼接前的原始文本，避免引用原文里的操作性
+      短语被探针误判为当轮指令。非法/缺失时静默降级为普通消息。
     """
     from core.pipeline_registry import get as _get_pipeline
     pipeline = _get_pipeline()
@@ -61,6 +69,9 @@ async def run_owner_chat_turn(
         logger.exception("[owner_chat] trigger state notify_owner_turn 失败")
 
     _probe_text = trusted_user_text if trusted_user_text is not None else message
+
+    from core.reply_context import apply_reply_prefix
+    message = apply_reply_prefix(message, reply_to)
 
     from core.conversation_gate import conversation_lock
 
@@ -506,12 +517,13 @@ async def desktop_chat(body: dict, _auth=Depends(require_scopes("chat"))):
     message = (body.get("message") or "").strip()
     if not message:
         raise HTTPException(status_code=422, detail="message 不能为空")
+    reply_to = body.get("reply_to")
 
     from core.config_loader import get_config as _cfg
     _uid = str(_cfg().get("scheduler", {}).get("owner_id", "owner"))
     _check_reality_not_in_dream(_uid)
 
-    result = await run_owner_chat_turn(message, "desktop")
+    result = await run_owner_chat_turn(message, "desktop", reply_to=reply_to)
 
     from core.scheduler.sensor_events import notify_chat_happened
     notify_chat_happened()

@@ -5,6 +5,7 @@
 客户端调用点，避免各客户端各自维护一份端点表。
 
 桌面 WebSocket 消息与 action 契约不由 OpenAPI 描述，统一见 [desktop-client-protocol.md](desktop-client-protocol.md)。
+desktop / mobile 共用的聊天请求体可选字段（如 reply_to 引用回复）见 [backend-integration.md](backend-integration.md)。
 
 ## 鉴权与连接
 
