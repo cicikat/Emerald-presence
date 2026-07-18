@@ -108,6 +108,11 @@ tool loop 才可能激活；`intent` / `probe` 等轻量 preset 的 `tool_call_m
    preset（参照下方 `claude-main` 样例）。
 1. 取 `routing_profiles[active_routing]`（第 0 步可能已替换）。
 2. 用 `call_category` 查 preset 名；查不到 → 回退到该 profile 的 `chat`；再查不到 → 第一个 preset。
+   **`probe`/`summary` 等轻量角色未在某个 profile 里单独声明时走的就是这条回退**：
+   缺失不报错、不阻塞聊天，直接落到该 profile 的主聊天 preset（Brief 93 §5 核实项，见
+   `tests/test_model_presets.py::TestRoutingFallback`）。管理面板「配置」页 §1 的
+   probe/summary 只读展示（`GET /character/{char_id}/model-routing` /
+   `resolve_routing_info()`）读的就是这份真实解析结果，不是另一套展示专用逻辑。
 3. `vision` 不进 routing_profiles：继续用独立的 `vision:` 块。
 
 ModelClient 缓存（`core.model_registry._model_clients`）以**解析出的 preset 名**为 key，不是
