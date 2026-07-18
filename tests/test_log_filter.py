@@ -7,9 +7,11 @@ import pytest
 
 from admin.log_filter import (
     DropSuccessfulAccessFilter,
+    SuppressRepeatedAuthFailureFilter,
     _IgnoreWin10054ProactorFilter,
     install_access_noise_filter,
     install_asyncio_proactor_noise_filter,
+    install_auth_failure_dedup_filter,
     install_console_quiet_mode,
 )
 
@@ -187,3 +189,54 @@ def test_install_console_quiet_mode_does_not_affect_token_logger():
     # cleanup
     lg = logging.getLogger("uvicorn.access")
     lg.filters = [f for f in lg.filters if not isinstance(f, DropSuccessfulAccessFilter)]
+
+
+# ── SuppressRepeatedAuthFailureFilter（Brief 97 §6）───────────────────────────
+
+def test_suppress_auth_failure_passes_non_auth_status():
+    f = SuppressRepeatedAuthFailureFilter()
+    assert f.filter(_access_record(404)) is True
+    assert f.filter(_access_record(200)) is True
+
+
+@pytest.mark.parametrize("status", [401, 429])
+def test_suppress_auth_failure_first_hit_passes(status):
+    f = SuppressRepeatedAuthFailureFilter()
+    assert f.filter(_access_record(status)) is True
+
+
+@pytest.mark.parametrize("status", [401, 429])
+def test_suppress_auth_failure_repeated_within_window_suppressed(status):
+    f = SuppressRepeatedAuthFailureFilter()
+    assert f.filter(_access_record(status)) is True
+    assert f.filter(_access_record(status)) is False
+    assert f.filter(_access_record(status)) is False
+
+
+def test_suppress_auth_failure_different_ip_not_conflated():
+    f = SuppressRepeatedAuthFailureFilter()
+    assert f.filter(_access_record(401)) is True
+    other = _access_record(401)
+    other.args = ("10.0.0.2:1", "GET", "/lorebook", "1.1", 401)
+    assert f.filter(other) is True
+
+
+def test_suppress_auth_failure_flushes_summary_after_window():
+    f = SuppressRepeatedAuthFailureFilter(window_seconds=0.05)
+    assert f.filter(_access_record(401)) is True
+    assert f.filter(_access_record(401)) is False
+    import time as _time
+    _time.sleep(0.1)
+    record = _access_record(401)
+    assert f.filter(record) is True
+    assert record.args[-1] == 1  # 上一窗口抑制了 1 次
+
+
+def test_install_auth_failure_dedup_filter_idempotent():
+    lg = logging.getLogger("uvicorn.access")
+    lg.filters = [f for f in lg.filters if not isinstance(f, SuppressRepeatedAuthFailureFilter)]
+    install_auth_failure_dedup_filter()
+    install_auth_failure_dedup_filter()
+    count = sum(1 for f in lg.filters if isinstance(f, SuppressRepeatedAuthFailureFilter))
+    assert count == 1
+    lg.filters = [f for f in lg.filters if not isinstance(f, SuppressRepeatedAuthFailureFilter)]

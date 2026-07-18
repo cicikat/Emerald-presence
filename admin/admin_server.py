@@ -154,9 +154,10 @@ def _weak_password_warning(host: str, secret: str) -> None:
 async def start_admin_server():
     """在当前事件循环中启动 uvicorn（由 main.py 以 asyncio.create_task 调用）"""
     import uvicorn
-    from admin.log_filter import install_access_log_sanitizer
+    from admin.log_filter import install_access_log_sanitizer, install_auth_failure_dedup_filter
 
     install_access_log_sanitizer()
+    install_auth_failure_dedup_filter()
 
     from admin.log_filter import install_console_quiet_mode
     if get_config().get("logging", {}).get("console_quiet", True):
