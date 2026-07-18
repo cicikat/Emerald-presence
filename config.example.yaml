@@ -87,7 +87,7 @@ llm:
   frequency_penalty: 0.3
   presence_penalty: 0.4
 vision:
-  enabled: true
+  enabled: false  # 纯增值功能(图片识别)，默认关；面板「系统状态」页可开，需自备 api_key
   provider: glm
   api_key: YOUR_VISION_API_KEY
   model: glm-4v-flash
@@ -173,7 +173,7 @@ dream:
 watch:
   fresh_days: 3             # 3.6_watch 睡眠摘要最大新鲜度；超过即不注入
 tts:
-  enabled: true
+  enabled: false  # 纯增值功能(QQ 概率语音)，默认关；依赖本机部署的 GPT-SoVITS，面板「系统状态」页可开
   desktop_enabled: false  # 桌面端按需语音条；独立于 QQ 概率语音，默认关闭
   probability: 0.1
   api_url: http://127.0.0.1:9872
@@ -219,7 +219,7 @@ hardware:
   enabled: false
   buttplug_ws: ws://127.0.0.1:12345
 mail:
-  enabled: true
+  enabled: false  # 纯增值功能(角色写信)，默认关；面板「通道开关」可开，需自备 SMTP 凭据
   smtp_host: smtp.gmail.com
   smtp_port: 587
   proxy_url: http://127.0.0.1:YOUR-端口
@@ -478,8 +478,12 @@ scheduler:
   presence_nag: true
   presence_nag_minutes: 60
   activity_level: high
-  owner_id: ''  # 留空 = 未配置，调度器会跳过主动触发；填你的 QQ 号或 desktop/mobile 用的 uid（仅 A-Za-z0-9_- ）
-  owner_birthday: MM-DD  # 格式示例：01-01
+  # 必填②（面板「配置」页同步标红）：留空 = 未配置，主动触发调度器会静默跳过，且 desktop/standalone
+  # 场景下记忆文件会挂在错误/缺省 uid 下。建议直接填你的 QQ 号——若此处用了别的 id，之后接 QQ 时会
+  # 按 QQ 号另起一套记忆，与桌宠期记忆不互通。仅接受 A-Za-z0-9_- 字符。
+  owner_id: ''
+  # 可选，格式 MM-DD（如 04-24）；留空或保持占位符 MM-DD 视为未填，不会触发生日相关主动消息。
+  owner_birthday: MM-DD
   morning_greeting: true
   night_reminder: true
   random_message: true
@@ -529,22 +533,3 @@ performance_mapping:
   enabled: true        # false = enrich_say_segments 直接透传，行为与现在完全一致
   provider: rules       # rules | llm
   llm_timeout_sec: 3.0   # llm provider 外层超时，超时放弃标注直接下发
-
-toy_autogrow:
-  enabled: true
-  min_interval_hours: 6
-  target: diary
-
-embedding:
-  provider_kind: openai_compat
-  base_url: https://api.siliconflow.cn/v1
-  api_key: sk-YOUR-EMBEDDING-API-KEY-HERE
-  model: BAAI/bge-m3
-  dim: 1024
-
-recall:
-  weights:
-    sem: 0.4
-    kw: 0.3
-    strength: 0.3
-  batch_size: 32
