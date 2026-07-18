@@ -15,6 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SENSITIVE_KEY = re.compile(r"(api_key|secret|password|owner_id|target_qq|qq_number|(?<![a-z_])token(?!s))", re.I)
 PATH_KEY = re.compile(r"(path|dir|root)$", re.I)
 PERSONAL_KEY = re.compile(r"(birthday|anniversar|location|nickname|real_name)", re.I)
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def redact(obj, keypath=""):
@@ -33,6 +34,8 @@ def redact(obj, keypath=""):
         if isinstance(obj, str):
             return ""
         return obj
+    if isinstance(obj, str) and EMAIL_RE.match(obj):
+        return "YOUR-EMAIL@example.com"
     if isinstance(obj, str) and (
         PATH_KEY.search(key) and any(c in obj for c in (":\\", ":/"))
         or re.match(r"^[A-Za-z]:[\\/]", obj)
@@ -57,7 +60,13 @@ def main():
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, dst)
-    leaks = [p for p in [r"sk-[A-Za-z0-9]{10,}", r"@gmail", r"[A-Za-z]:\\\\"] if re.search(p, out)]
+    leaks = []
+    if re.search(r"sk-[A-Za-z0-9]{10,}", out):
+        leaks.append("sk-*** api key")
+    if any("example.com" not in m for m in re.findall(r"[^@\s]+@[^@\s]+\.[^@\s]+", out)):
+        leaks.append("email")
+    if re.search(r"[A-Za-z]:\\\\", out):
+        leaks.append("windows path")
     print(f"written: {dst}")
     print("leak self-check:", leaks or "clean")
     print("NOTE: 人工审查后再重命名为 config.yaml.example")

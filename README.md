@@ -142,6 +142,8 @@ cp config.example.yaml config.yaml
 
 Fill in the required fields per the comments in `config.example.yaml`: your LLM API key, an admin-panel secret, and `scheduler.owner_id`; add a QQ number only if you're using the QQ bot. You can also skip editing the yaml directly and fill both required fields from the admin panel's "配置" (Setup) page.
 
+`config.yaml` is the only file the app actually reads and writes — the admin panel's Setup/Settings pages persist directly to it. `config.example.yaml` is only a first-install template; it stays comment-annotated and is what you should check for field meanings. The two files' key sets are kept in sync by `scripts/gen_config_example.py`, so `config.yaml` growing longer and losing comments over time (from panel writes expanding defaults and YAML re-dumping) is expected, not a sign of corruption.
+
 For `owner_id`, use your QQ number if you have one — using a different id here means connecting QQ later will start a separate memory thread that won't merge with the desktop-pet memories. Leaving it empty makes the proactive-message scheduler silently skip all triggers.
 
 Drop character card files into `characters/`; the loader currently supports `.json`, `.txt`, and `.md` — see `examples/character_template.json`. The repo ships a neutral `default` character card that works out of the box.
