@@ -122,6 +122,14 @@ class StageCharacterView:
         extra_block = self._extra_instruction(stage, triggered_by, transcript)
         if extra_block:
             stage_instruction = extra_block + "\n\n" + stage_instruction
+        from core.observe.prompt_capture import set_capture_origin
+
+        set_capture_origin({
+            "origin": "stage",
+            "group_id": stage.group_id,
+            "speaker": self.char_id,
+            "round_id": turn_id,
+        })
         messages, debug = self.pipeline.build_prompt(
             stage.owner_uid,
             stage_instruction,
@@ -178,6 +186,13 @@ class StageCharacterView:
 
         from core.tag_rules import get_tags
         seed_text = turns[-1][1] if turns else instruction
+        from core.observe.prompt_capture import set_capture_origin
+
+        set_capture_origin({
+            "origin": "private_exchange",
+            "pair": sorted((self.char_id, other_id)),
+            "speaker": self.char_id,
+        })
         messages, _debug = self.pipeline.build_prompt(
             owner_uid,
             instruction,

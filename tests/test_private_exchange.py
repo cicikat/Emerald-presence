@@ -102,6 +102,7 @@ def test_private_domain_framing_has_both_required_lines():
 @pytest.mark.asyncio
 async def test_generate_private_skips_fetch_context():
     from core.stage.views import StageCharacterView
+    from unittest.mock import patch
 
     captured = {}
 
@@ -122,9 +123,15 @@ async def test_generate_private_skips_fetch_context():
     view.char_id = _A
     view.pipeline = FakePipeline()
 
-    reply = await view.generate_private(_B, [], owner_uid="owner")
+    with patch("core.observe.prompt_capture.set_capture_origin") as set_origin:
+        reply = await view.generate_private(_B, [], owner_uid="owner")
 
     assert reply == "回复内容"
+    set_origin.assert_called_once_with({
+        "origin": "private_exchange",
+        "pair": sorted((_A, _B)),
+        "speaker": _A,
+    })
     assert captured["stage_transcript"] == ""
     assert "看不到" in captured["stage_presence"]
 

@@ -174,7 +174,7 @@ async def list_prompt_layer_uids(auth=Depends(require_scopes("memory.read"))):
         "返回最近 N 轮 build_prompt() 的层级明细。每轮包含：\n"
         "- 各层名称、注入位置、字符数、估算 token、drop_priority、是否被裁剪\n"
         "- 顶层：token 估算 vs 三条阈值线、激活 tags、被裁层列表\n\n"
-        "快照在内存中保存最近 5 轮，进程重启后清空。\n"
+        "快照在内存中保存最近 10 轮，进程重启后清空。\n"
         "使用 `?n=` 参数指定查看第几轮（0=最新，1=次新…）。"
     ),
     tags=["观测"],

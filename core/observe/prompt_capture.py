@@ -44,7 +44,7 @@ def set_capture_origin(info: dict) -> None:
     """
     _capture_origin.set(info)
 
-RING_SIZE = 5
+RING_SIZE = 10
 SOFT_WARN = 15000
 HARD_TRIGGER = 20000
 PRUNE_TARGET = 18000

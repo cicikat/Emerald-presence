@@ -133,6 +133,16 @@ def test_update_llm_output():
     assert pc.get_snapshots("u5")[-1]["llm_output"] == "回复内容"
 
 
+def test_prompt_capture_keeps_ten_recent_snapshots():
+    pc = _make_capture()
+    for i in range(12):
+        _do_capture(pc, uid="u-ring", layers=[_make_msg(content=str(i))])
+
+    snaps = pc.get_snapshots("u-ring")
+    assert len(snaps) == 10
+    assert [snap["layers"][0]["content"] for snap in snaps] == [str(i) for i in range(2, 12)]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # C-1  get_latest_proactive_by_trigger ignores non-proactive snapshots
 # ─────────────────────────────────────────────────────────────────────────────

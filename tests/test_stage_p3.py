@@ -67,9 +67,16 @@ async def test_stage_character_view_uses_explicit_scope_and_prompt_context(sandb
     stage = Stage("g", "owner", ("yexuan", "yexuanJ-5412"), settings=_settings())
     transcript = [TranscriptEntry("owner", "hello", 1, "t", "user")]
 
-    reply = await view.generate(stage, transcript, "t", "user")
+    with patch("core.observe.prompt_capture.set_capture_origin") as set_origin:
+        reply = await view.generate(stage, transcript, "t", "user")
 
     assert reply == "reply"
+    set_origin.assert_called_once_with({
+        "origin": "stage",
+        "group_id": "g",
+        "speaker": "yexuanJ-5412",
+        "round_id": "t",
+    })
     assert captured["scope"].character_id == "yexuanJ-5412"
     assert captured["context"]["stage_presence"]
     assert "owner：hello" in captured["context"]["stage_transcript"]
