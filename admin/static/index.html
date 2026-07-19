@@ -5380,9 +5380,7 @@ function _renderPrivateExchangePair(groupId, relation, log) {
   </details>`;
 }
 
-function _renderGroupPromptSnapshot(groupId, snapshot) {
-  const origin = snapshot.origin || {};
-  const speaker = _observeGroupCharacterLabel(groupId, origin.speaker);
+function _renderPromptLayersHtml(snapshot) {
   const present = new Set((snapshot.layers || []).map(layer => layer.layer));
   const layers = [
     ...(snapshot.layers || []),
@@ -5390,7 +5388,7 @@ function _renderGroupPromptSnapshot(groupId, snapshot) {
       .filter(layer => !present.has(layer))
       .map(layer => ({layer, chars: 0, content: '', pruned: true})),
   ];
-  const layerHtml = layers.length ? layers.map(layer => {
+  return layers.length ? layers.map(layer => {
     const pruned = !!layer.pruned;
     const state = pruned
       ? `<span class="badge badge-danger">${escapeHtml(t('group.prompt_pruned', '被裁'))}</span>`
@@ -5403,9 +5401,32 @@ function _renderGroupPromptSnapshot(groupId, snapshot) {
       <pre style="font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:260px;overflow:auto;margin:8px 0 0">${escapeHtml(content)}</pre>
     </details>`;
   }).join('') : observeEmpty(t('group.prompt_no_layers', '本轮没有可展示的层'));
+}
+
+function _renderGroupPromptSnapshot(groupId, snapshot) {
+  const origin = snapshot.origin || {};
+  const speaker = _observeGroupCharacterLabel(groupId, origin.speaker);
   return `<details style="padding:9px 0;border-bottom:1px solid var(--border)">
     <summary style="cursor:pointer"><strong>${escapeHtml(speaker)}</strong> · ${escapeHtml(origin.round_id || '—')} · ${escapeHtml(observeTime(snapshot.captured_at))}</summary>
-    <div style="padding:8px 0 0 18px">${layerHtml}</div>
+    <div style="padding:8px 0 0 18px">${_renderPromptLayersHtml(snapshot)}</div>
+  </details>`;
+}
+
+function _isPrivatePromptForGroup(snapshot, groupId) {
+  const origin = snapshot?.origin || {};
+  if (origin.origin !== 'private_exchange') return false;
+  const roster = new Set((_observeGroupSummaries[groupId]?.roster || []).map(item => item.char_id));
+  const pair = origin.pair || [];
+  return pair.length === 2 && pair.every(charId => roster.has(charId));
+}
+
+function _renderPrivatePromptSnapshot(groupId, snapshot) {
+  const origin = snapshot.origin || {};
+  const pairLabel = (origin.pair || []).map(charId => _observeGroupCharacterLabel(groupId, charId)).join(' ↔ ');
+  const speaker = _observeGroupCharacterLabel(groupId, origin.speaker);
+  return `<details style="padding:9px 0;border-bottom:1px solid var(--border)">
+    <summary style="cursor:pointer"><strong>${escapeHtml(pairLabel)}</strong> · ${escapeHtml(t('group.private_prompt_speaker', '发言：{name}', {name: speaker}))} · ${escapeHtml(observeTime(snapshot.captured_at))}</summary>
+    <div style="padding:8px 0 0 18px">${_renderPromptLayersHtml(snapshot)}</div>
   </details>`;
 }
 
@@ -5434,6 +5455,7 @@ async function loadObserveGroupArbiter(){
     }));
     const snapshots = await _loadRecentPromptSnapshots(String(scheduler.owner_id || '').trim(), 10);
     const groupSnapshots = snapshots.filter(snapshot => _isStagePromptForGroup(snapshot, id));
+    const privatePromptSnapshots = snapshots.filter(snapshot => _isPrivatePromptForGroup(snapshot, id));
     const dreamSnapshots = await _loadRecentDreamPromptSnapshots(String(scheduler.owner_id || '').trim(), 5);
     const groupDreamSnapshots = dreamSnapshots.filter(snapshot => _isStagePromptForGroup(snapshot, id));
     const privateEnabled = !!flags.private_exchange?.enabled;
@@ -5446,12 +5468,15 @@ async function loadObserveGroupArbiter(){
     const promptHtml = groupSnapshots.length
       ? groupSnapshots.map(snapshot => _renderGroupPromptSnapshot(id, snapshot)).join('')
       : observeEmpty(t('group.prompt_none','最近 10 轮没有当前群的 Prompt 快照；群聊跑一轮后刷新'));
+    const privatePromptHtml = privatePromptSnapshots.length
+      ? privatePromptSnapshots.map(snapshot => _renderPrivatePromptSnapshot(id, snapshot)).join('')
+      : observeEmpty(t('group.private_prompt_none','最近 10 轮没有当前群角色间的私下往来 Prompt 快照；触发一次私下往来后刷新'));
     const dreamPromptHtml = groupDreamSnapshots.length
       ? groupDreamSnapshots.map(snapshot => _renderGroupDreamPromptSnapshot(id, snapshot)).join('')
       : observeEmpty(t('group.dream_prompt_none','最近 5 轮没有当前群的梦境 Prompt 快照；群聊梦境跑一轮后刷新'));
     const echoCutBadge = `<span class="badge">${escapeHtml(t('group.echo_cut','回声截断'))}</span>`;
     const silentRoundBadge = `<span class="badge">${escapeHtml(t('group.silent_round','静默轮次'))}</span>`;
-    el.className='';el.innerHTML=`<h4>${escapeHtml(t('group.trace','仲裁轨迹'))}</h4>${rows.length?rows.slice().reverse().map(r=>`<div style="padding:10px 0;border-bottom:1px solid var(--border)"><div>${escapeHtml(observeTime(r.ts))} · ${escapeHtml(t('group.phase','阶段'))} ${escapeHtml(r.phase||'—')} ${r.echo_cut?echoCutBadge:''} ${r.silent_round?silentRoundBadge:''}</div>${(r.candidates||[]).map(c=>`<div style="margin-top:6px">${escapeHtml(_observeGroupCharacterLabel(id,c.char_id))} · ${Number(c.total||0).toFixed(2)}${observeBar(Number(c.total||0),1.5)}</div>`).join('')}</div>`).join(''):observeEmpty(t('group.no_trace','暂无仲裁轨迹'))}<h4 style="margin-top:18px">${escapeHtml(t('group.impressions','角色双向印象'))}</h4>${rels.length?rels.map(r=>{const labelA=_observeGroupCharacterLabel(id,r.char_a),labelB=_observeGroupCharacterLabel(id,r.char_b);return `<div style="padding:9px 0;border-bottom:1px solid var(--border)"><strong>${escapeHtml(labelA)} ↔ ${escapeHtml(labelB)}</strong><div>${escapeHtml(labelA)} → ${escapeHtml(labelB)}：${escapeHtml(r.a_of_b?.summary||'—')} (${Number(r.a_of_b?.valence||0).toFixed(2)})</div><div>${escapeHtml(labelB)} → ${escapeHtml(labelA)}：${escapeHtml(r.b_of_a?.summary||'—')} (${Number(r.b_of_a?.valence||0).toFixed(2)})</div></div>`;}).join(''):observeEmpty(t('group.no_impressions','暂无角色双向印象'))}<h4 style="margin-top:18px">${escapeHtml(t('group.private','角色私下往来'))} ${privateBadge}</h4>${privateHtml}<h4 style="margin-top:18px">${escapeHtml(t('group.prompt','群聊 Prompt 检视'))} <span style="font-size:12px;font-weight:400;color:var(--muted)">${escapeHtml(t('group.prompt_subtitle','最近 10 轮，仅显示当前群'))}</span></h4>${promptHtml}<h4 style="margin-top:18px">${escapeHtml(t('group.dream_prompt','群聊梦境 Prompt 检视'))} <span style="font-size:12px;font-weight:400;color:var(--muted)">${escapeHtml(t('group.dream_prompt_subtitle','最近 5 轮，仅显示当前群 · 与现实 Prompt 相互独立'))}</span></h4>${dreamPromptHtml}`;
+    el.className='';el.innerHTML=`<h4>${escapeHtml(t('group.trace','仲裁轨迹'))}</h4>${rows.length?rows.slice().reverse().map(r=>`<div style="padding:10px 0;border-bottom:1px solid var(--border)"><div>${escapeHtml(observeTime(r.ts))} · ${escapeHtml(t('group.phase','阶段'))} ${escapeHtml(r.phase||'—')} ${r.echo_cut?echoCutBadge:''} ${r.silent_round?silentRoundBadge:''}</div>${(r.candidates||[]).map(c=>`<div style="margin-top:6px">${escapeHtml(_observeGroupCharacterLabel(id,c.char_id))} · ${Number(c.total||0).toFixed(2)}${observeBar(Number(c.total||0),1.5)}</div>`).join('')}</div>`).join(''):observeEmpty(t('group.no_trace','暂无仲裁轨迹'))}<h4 style="margin-top:18px">${escapeHtml(t('group.impressions','角色双向印象'))}</h4>${rels.length?rels.map(r=>{const labelA=_observeGroupCharacterLabel(id,r.char_a),labelB=_observeGroupCharacterLabel(id,r.char_b);return `<div style="padding:9px 0;border-bottom:1px solid var(--border)"><strong>${escapeHtml(labelA)} ↔ ${escapeHtml(labelB)}</strong><div>${escapeHtml(labelA)} → ${escapeHtml(labelB)}：${escapeHtml(r.a_of_b?.summary||'—')} (${Number(r.a_of_b?.valence||0).toFixed(2)})</div><div>${escapeHtml(labelB)} → ${escapeHtml(labelA)}：${escapeHtml(r.b_of_a?.summary||'—')} (${Number(r.b_of_a?.valence||0).toFixed(2)})</div></div>`;}).join(''):observeEmpty(t('group.no_impressions','暂无角色双向印象'))}<h4 style="margin-top:18px">${escapeHtml(t('group.private','角色私下往来'))} ${privateBadge}</h4>${privateHtml}<h4 style="margin-top:18px">${escapeHtml(t('group.private_prompt','私下往来 Prompt 检视'))} <span style="font-size:12px;font-weight:400;color:var(--muted)">${escapeHtml(t('group.private_prompt_subtitle','最近 10 轮，仅显示当前群成员间的 pair'))}</span></h4>${privatePromptHtml}<h4 style="margin-top:18px">${escapeHtml(t('group.prompt','群聊 Prompt 检视'))} <span style="font-size:12px;font-weight:400;color:var(--muted)">${escapeHtml(t('group.prompt_subtitle','最近 10 轮，仅显示当前群'))}</span></h4>${promptHtml}<h4 style="margin-top:18px">${escapeHtml(t('group.dream_prompt','群聊梦境 Prompt 检视'))} <span style="font-size:12px;font-weight:400;color:var(--muted)">${escapeHtml(t('group.dream_prompt_subtitle','最近 5 轮，仅显示当前群 · 与现实 Prompt 相互独立'))}</span></h4>${dreamPromptHtml}`;
   }catch(e){el.innerHTML=observeEmpty(t('group.load_failed','加载失败：{error}',{error:e.message}));}
 }
 
