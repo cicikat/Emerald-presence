@@ -578,3 +578,30 @@ import（它只传递预加载文本给 prompt，不读 dream 数据）。
 
 `data/runtime/dreams/{char_id}/invariants/{uid}.json` 与 impressions 物理分离，记录世界无关的处境到反应模式。它只供 `GET /dream/invariants` 管理面和明信片出站生成读取，绝不进现实或梦境 prompt，不延长 impression 窗口。
 
+---
+
+## 十一、群聊梦境（Dream Stage，Brief 100）
+
+> 本节只讲"和单人梦境相比变了什么"；完整架构（编排复用、per-char prompt 层、HTTP 契约、
+> 隔离守卫）的权威文档在 `docs/stage.md` §六，因为群聊梦境的编排骨架属于 Stage 系统，
+> 不属于本文档描述的单人 pipeline。
+
+三轴模型（身份/世界/身体）与本文档 §八「独立 pipeline by construction」「隔离靠没接线」两条
+设计原则原样成立，只是身份轴从"一个角色"变成"roster 里逐个角色各自的 D1"，世界轴从"per-uid"
+变成"per-group 全局冻结"。v1 边界：
+
+- 仅 sandbox；scenario / mirror 硬禁用；D4.5（用户隐性状态快照）硬禁用，不是 tag 未命中式的
+  软性关闭。
+- 零回流：不写 afterglow / impression / hidden_state，出梦只留 archive——即本文档 §四"三层
+  回流"里的后两层（afterglow summary / impression residue）在群聊梦境里**不存在**，只有
+  archive 原文这一层。
+- `memory_access` 固定 `card_only`，不像单人版可选三档。
+- `hard_exit` 绝对，但 v1 没有 §七"软挽留"那一套（`/dream/wake` / `/dream/resume` 等价物不存在）。
+- 情绪张力从单值 `emotional_tension` 变成 `char_tension: {char_id: float}`；`body_state`
+  仍是单份共享（同一个用户身体，被多个角色共同感知）。
+
+数据目录独立于本文档 §五描述的 `data/runtime/dreams/{char_id}/` 单人树，落在
+`data/runtime/dreams/_stage/{group_id}/`（见 `docs/data-taxonomy.md`）。状态机也不复用本文档
+§六的完整状态图——v1 没有 `DREAM_EXIT_REQUESTED` / `DREAM_LOCKED` / `REALITY_AFTERGLOW`，
+硬退直接回 `REALITY_CHAT`。
+

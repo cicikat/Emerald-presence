@@ -49,7 +49,7 @@ from admin.routers import (
     mood, activity, dream,
     reading, gomoku, dream_seed,
     hidden_state_debug, hardware, observe,
-    group, relationship_facts,
+    group, group_dream, relationship_facts,
     transcribe, provenance,
     auth_tokens, coplay, perception, spend, growth,
 )
@@ -98,6 +98,7 @@ app.include_router(hidden_state_debug.router, prefix="", tags=["观测"])
 app.include_router(observe.router,            prefix="", tags=["观测"])
 app.include_router(hardware.router, prefix="/hardware", tags=["硬件"])
 app.include_router(group.router,    prefix="/group",    tags=["群聊"])
+app.include_router(group_dream.router, prefix="/group", tags=["群聊梦境"])
 app.include_router(relationship_facts.router, prefix="", tags=["关系事实"])
 app.include_router(transcribe.router,          prefix="", tags=["语音转写"])
 app.include_router(provenance.router,          prefix="", tags=["观测"])

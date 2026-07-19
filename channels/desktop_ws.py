@@ -231,22 +231,32 @@ async def _handle_message(msg: dict) -> None:
         logger.debug(f"[desktop_ws] 未知消息类型: {mtype}")
 
 
-async def push_group_round_start(round_id: str, group_id: str) -> bool:
-    """群聊回合开始标记。前端锁输入框，显示「成员陆续回应中…」。"""
-    return await _send_json({
+async def push_group_round_start(round_id: str, group_id: str, *, domain: str | None = None) -> bool:
+    """群聊回合开始标记。前端锁输入框，显示「成员陆续回应中…」。
+
+    domain: 可选 "reality" | "dream"（Brief 100 §3）。省略时前端按旧行为
+    视为 reality —— 旧客户端忽略未知字段，零破坏。
+    """
+    payload: dict = {
         "type": "group_round_start",
         "round_id": round_id,
         "group_id": group_id,
-    })
+    }
+    if domain is not None:
+        payload["domain"] = domain
+    return await _send_json(payload)
 
 
-async def push_group_round_end(round_id: str, group_id: str) -> bool:
-    """群聊回合结束标记。前端解锁输入框。"""
-    return await _send_json({
+async def push_group_round_end(round_id: str, group_id: str, *, domain: str | None = None) -> bool:
+    """群聊回合结束标记。前端解锁输入框。domain 语义同 push_group_round_start。"""
+    payload: dict = {
         "type": "group_round_end",
         "round_id": round_id,
         "group_id": group_id,
-    })
+    }
+    if domain is not None:
+        payload["domain"] = domain
+    return await _send_json(payload)
 
 
 async def _heartbeat_loop() -> None:

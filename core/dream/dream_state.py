@@ -67,8 +67,12 @@ def get_reality_guard_status(user_id: str | int) -> DreamGuardStatus:
     """
     Fail-closed dream guard for reality turns.
 
-    ALLOW:           File missing (normal no-dream state) or dream is inactive.
-    BLOCK_ACTIVE:    Dream is DREAM_ACTIVE or DREAM_CLOSING — reject reality turn.
+    ALLOW:           File missing (normal no-dream state) or dream is inactive,
+                     AND no group dream (Dream Stage, Brief 100) owned by this
+                     user is active either.
+    BLOCK_ACTIVE:    Solo dream is DREAM_ACTIVE/DREAM_CLOSING, OR any group
+                     dream owned by this user is ACTIVE/CLOSING — reject
+                     reality turn.
     BLOCK_UNCERTAIN: File exists but unreadable / corrupt / invalid status —
                      caller must treat as fail-closed (reject reality turn).
 
@@ -78,7 +82,7 @@ def get_reality_guard_status(user_id: str | int) -> DreamGuardStatus:
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return DreamGuardStatus.ALLOW
+        return DreamGuardStatus.ALLOW if not _has_active_group_dream(user_id) else DreamGuardStatus.BLOCK_ACTIVE
     except Exception as exc:
         logger.error("[dream_guard] state unreadable uid=%s: %s", user_id, exc)
         return DreamGuardStatus.BLOCK_UNCERTAIN
@@ -101,7 +105,25 @@ def get_reality_guard_status(user_id: str | int) -> DreamGuardStatus:
     if status in (DreamStatus.DREAM_ACTIVE.value, DreamStatus.DREAM_CLOSING.value):
         return DreamGuardStatus.BLOCK_ACTIVE
 
+    if _has_active_group_dream(user_id):
+        return DreamGuardStatus.BLOCK_ACTIVE
+
     return DreamGuardStatus.ALLOW
+
+
+def _has_active_group_dream(user_id: str | int) -> bool:
+    """Cross-domain check (Brief 100 §3): does this owner have an active Dream
+    Stage (group dream) anywhere? Kept as a lazy import — core/stage/ depends
+    on core/dream/ elsewhere (e.g. sentinel reuse), so importing it back here
+    at module load time would create a cycle; deferring the import avoids that
+    without weakening the check itself.
+    """
+    try:
+        from core.stage.dream_state import has_active_group_dream_for_owner
+        return has_active_group_dream_for_owner(user_id)
+    except Exception as exc:
+        logger.error("[dream_guard] group dream scan failed uid=%s: %s", user_id, exc)
+        return True  # fail-closed: cannot rule out an active group dream
 
 
 def apply_dream_artifact_sentinel(record: dict[str, Any]) -> dict[str, Any]:

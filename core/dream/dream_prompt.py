@@ -257,6 +257,9 @@ def build_dream_prompt(
     _capture_hook: "Any | None" = None,
     dream_turn: int = 0,
     reality_context_full_turns: int = 3,
+    dream_domain: str = "solo",
+    dg_layer_text: str | None = None,
+    shared_transcript_block: str | None = None,
 ) -> list[dict[str, str]]:
     """
     Assemble the complete dream prompt as a D0-D10 layer stack.
@@ -311,6 +314,21 @@ def build_dream_prompt(
     system_layers.append(_d1)
     _records.append(_LayerRec("D1_identity_core", len(_d1), _est_tokens(_d1), content=_d1))
 
+    # ── DG: group in-scene presence (group domain only) ──────────────────────
+    # Extends the D1 single-side pronoun contract to a multi-character scene:
+    # "only perform your own turn, don't ventriloquize other characters or the
+    # user" (Brief 100 §2). Placed right after D1 — like D1, this is an
+    # identity/behavior constraint, not a world-layer concern, so it stays
+    # above D2 in precedence. Hard-disabled outside dream_domain="group"
+    # (scenario-style guard, mirrors the D4.5/D5/DS/DM pattern below).
+    if dream_domain == "group" and dg_layer_text:
+        _dg = f"# DG·梦内在场感\n{dg_layer_text}"
+        system_layers.append(_dg)
+        _records.append(_LayerRec("DG_group_presence", len(_dg), _est_tokens(_dg), content=_dg))
+    else:
+        _dg_note = "no_text" if dream_domain == "group" else "solo_domain"
+        _records.append(_LayerRec("DG_group_presence", flags=["DISABLED"], note=_dg_note))
+
     # ── D2: world_ruleset (loaded from world package, subordinate to D1) ─────
     if world.ruleset:
         _d2 = f"# D2·今晚梦的世界规则\n{world.ruleset}"
@@ -344,8 +362,10 @@ def build_dream_prompt(
     # Priority: lower than D4_frozen_reality; prune D4.5 before D4 if budget exceeded.
     # Dream NEVER writes back — DREAM_DIRECT_WRITABLE = frozenset().
     # Scenario mode is a scripted-story space: never reads User Hidden State.
+    # Brief 100 §0: group dreams (dream_domain="group") hard-disable D4.5
+    # unconditionally — scenario-style guard, not merely a tag-gate miss.
     _d45_injected = False
-    if dream_mode != "scenario":
+    if dream_mode != "scenario" and dream_domain != "group":
         try:
             _hs_data = context_snapshot.get("user_hidden_state_snapshot", {})
             if _should_inject_hidden_state_snapshot(local_state, context_snapshot):
@@ -358,7 +378,12 @@ def build_dream_prompt(
         except Exception as _d45_exc:
             logger.warning("[dream_prompt] D4.5 hidden_state_snapshot failed: %s", _d45_exc)
     if not _d45_injected:
-        _d45_note = "scenario_mode" if dream_mode == "scenario" else ""
+        if dream_domain == "group":
+            _d45_note = "group_domain"
+        elif dream_mode == "scenario":
+            _d45_note = "scenario_mode"
+        else:
+            _d45_note = ""
         _records.append(_LayerRec("D4.5_hidden_state", flags=["DISABLED"], note=_d45_note))
 
     # ── D5: body_projection (injected by pipeline, 角色读投影文字) ───────────
@@ -408,7 +433,7 @@ def build_dream_prompt(
     #          not_yet_allowed.
     # Never injects: subsequent stages, exit_signs, soft-gate logic.
     _ds_injected = False
-    if dream_mode == "scenario" and scenario_core:
+    if dream_mode == "scenario" and scenario_core and dream_domain != "group":
         try:
             _ds_text = _format_scenario_layer(scenario_core)
             if _ds_text:
@@ -427,7 +452,7 @@ def build_dream_prompt(
     # Never injects: float values, percentages, uid, timestamps, weights.
     # Never injects: psychological diagnosis or direct user-psychology analysis.
     _dm_injected = False
-    if dream_mode == "mirror" and mirror_core:
+    if dream_mode == "mirror" and mirror_core and dream_domain != "group":
         try:
             _dm_text = _format_mirror_layer(mirror_core)
             if _dm_text:
@@ -450,26 +475,38 @@ def build_dream_prompt(
     else:
         _records.append(_LayerRec("D_lorebook", flags=["DISABLED"]))
 
+    # ── D9 (group domain only): shared transcript folded into system ─────────
+    # Group dream's D9 is a single speaker-prefixed text block (rendered by the
+    # caller from the shared transcript), not per-turn user/assistant messages
+    # — multiple different characters' lines can't be represented as OpenAI
+    # chat roles for one character's own generation call. Never passes through
+    # the reality sanitizer (Brief 100 §2 D9).
+    if dream_domain == "group" and shared_transcript_block is not None:
+        _d9g = f"# D9·梦内共享对话（{char_name}视角，speaker 前缀，不过现实 sanitizer）\n{shared_transcript_block}"
+        system_layers.append(_d9g)
+        _records.append(_LayerRec("D9_dream_history", len(_d9g), _est_tokens(_d9g), note="group_shared_transcript", content=_d9g))
+
     system_content = "\n\n".join(layer for layer in system_layers if layer.strip())
     messages: list[dict[str, str]] = [{"role": "system", "content": system_content}]
 
-    # ── D9: dream_history (as messages, no sanitizer) ────────────────────────
-    _d9_chars = 0
-    _d9_parts: list[str] = []
-    for turn in dream_history:
-        role = turn.get("role", "user")
-        if role not in ("user", "assistant"):
-            role = "user"
-        _turn_content = (turn.get("content") or "").strip()
-        if _turn_content:
-            messages.append({"role": role, "content": _turn_content})
-            _d9_chars += len(_turn_content)
-            _d9_parts.append(f"[{role}] {_turn_content}")
-    _d9_toks = max(1, _d9_chars // _TOK_RATIO) if _d9_chars else 0
-    _records.append(
-        _LayerRec("D9_dream_history", _d9_chars, _d9_toks, note=f"{len(dream_history)} turns",
-                  content="\n\n".join(_d9_parts))
-    )
+    # ── D9: dream_history (as messages, no sanitizer; solo domain only) ──────
+    if dream_domain != "group":
+        _d9_chars = 0
+        _d9_parts: list[str] = []
+        for turn in dream_history:
+            role = turn.get("role", "user")
+            if role not in ("user", "assistant"):
+                role = "user"
+            _turn_content = (turn.get("content") or "").strip()
+            if _turn_content:
+                messages.append({"role": role, "content": _turn_content})
+                _d9_chars += len(_turn_content)
+                _d9_parts.append(f"[{role}] {_turn_content}")
+        _d9_toks = max(1, _d9_chars // _TOK_RATIO) if _d9_chars else 0
+        _records.append(
+            _LayerRec("D9_dream_history", _d9_chars, _d9_toks, note=f"{len(dream_history)} turns",
+                      content="\n\n".join(_d9_parts))
+        )
 
     # ── D10: user_message ────────────────────────────────────────────────────
     messages.append({"role": "user", "content": user_message})

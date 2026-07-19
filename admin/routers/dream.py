@@ -427,6 +427,20 @@ async def dream_state_get(_auth=Depends(require_scopes("activity"))):
     return base
 
 
+@router.get("/dream/presets", summary="列出可用破限预设名（只读，供群聊梦境 per-char 选择器，Brief 100 §3）")
+async def list_dream_presets(_auth=Depends(require_scopes("activity"))):
+    """列出 characters/dream_presets/ 下经 asset registry 登记的预设（经此层解析
+    真实文件名，兼容中文命名的预设）。只读，不返回正文内容。"""
+    from core.asset_registry import get_registry
+
+    entries = get_registry().list_all("dream_preset")
+    presets = sorted(
+        ({"id": e.id, "label": e.label} for e in entries if not e.hidden),
+        key=lambda item: item["id"],
+    )
+    return {"presets": presets}
+
+
 @router.get("/dream/stats", summary="梦境次数统计（只读，有效梦 > N 轮）")
 async def dream_stats_get(_auth=Depends(require_scopes("activity"))):
     from core.pipeline_registry import get as _get_pipeline

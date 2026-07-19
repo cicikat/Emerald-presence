@@ -160,6 +160,17 @@ REGISTRY: dict[str, PathMeta] = {
     "stage_meta":             PathMeta("canonical", "shared",          "per_group",     "ignore"),
     "stage_transcript":       PathMeta("canonical", "shared",          "per_group",     "ignore"),
 
+    # ── Dream Stage: group dream session (Brief 100) ──────────────────────────
+    # Physically separate tree from stage_group_dir() — zero reflow by v1
+    # design; tmp/archive are dream_only sentinel-tagged, never a memory source.
+    "dream_group_dir":            PathMeta("canonical", "dream", "per_group", "ignore"),
+    "dream_group_root_dir":       PathMeta("runtime",   "dream", "global",    "ignore"),
+    "dream_group_tmp_path":       PathMeta("runtime",   "dream", "per_group", "ignore"),
+    "dream_group_archive_dir":    PathMeta("archive",   "dream", "per_group", "ignore"),
+    "dream_group_state_path":     PathMeta("canonical", "dream", "per_group", "ignore"),
+    "dream_group_settings_path":  PathMeta("canonical", "dream", "per_group", "ignore"),
+    "dream_group_arbiter_trace":  PathMeta("forensic",  "dream", "per_group", "ignore"),
+
     # ── Private exchange: off-hours char-to-char sessions (Brief 86) ──────────
     # _private/ root — no per-call params, just the scan root for all pairs.
     "private_exchange_dir":         PathMeta("runtime",   "shared", "global",   "ignore"),

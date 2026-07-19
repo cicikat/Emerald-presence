@@ -268,6 +268,18 @@ HTTP /desktop/chat 触发 turn
   累积并写入 memory。状态机达到 `min_len` 后等到 `。！？…`，在下一句开始前补 `\n\n`；右引号与
   XML/NMP 闭合标签先完整发出，避免拆坏流式渲染。关闭或异常时 delta 原样透传。
 
+### 群聊回合帧的 `domain` 字段（Brief 100）
+
+`group_round_start` / `group_round_end`（`channels/desktop_ws.py`，帧表见
+`docs/stage.md` §四）新增可选字段 `domain: "reality" | "dream"`。缺省即
+`reality`（`core/stage/runtime.py` 的既有调用点不传该参数），旧客户端忽略未知
+字段即可，零破坏。群聊梦境（Dream Stage）回合固定传 `domain="dream"`
+（`core/stage/dream_runtime.py`）。`channel_message` / `message_stream_*` 本身的
+`"source": "reality"` 字段**未**扩展——群聊梦境的伪流式与 canonical 推送仍走这两个
+帧类型（`channels/desktop_ws.py::push_message()` / `channels.ui_push.pseudo_stream_push()`），
+前端目前只能靠外层 `group_round_start/end` 的 `domain` 或消息本身的 `char_id` 归属
+判断域，不能依赖 `channel_message.source`。
+
 ### 前端 dedup 与 fallback
 
 - HTTP response 的 `msg_id` 在流式路径下等于 `_stream_msg_id`（与 WS 帧一致）。

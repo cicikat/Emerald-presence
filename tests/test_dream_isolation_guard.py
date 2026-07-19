@@ -121,3 +121,56 @@ def test_positive_sample_impression_loader_references_dream_path() -> None:
         "positive-sample check failed: core/dream/impression_loader.py has no 'dreams/' "
         "marker in non-comment lines — if the file moved, fix this test to match"
     )
+
+
+# ── Brief 100 §4: reverse-direction scan for Dream Stage (group dream) ───────
+#
+# Mirror of the guard above, direction flipped: these are DREAM-side files and
+# must never reference REALITY writeback entry points. "Zero reflow" (Brief
+# 100 §0) is a design contract enforced by "not wired in", not by filtering —
+# this test is the automated tripwire for that contract.
+
+_GROUP_DREAM_FILES: list[Path] = [
+    _ROOT / "core" / "stage" / "dream_runtime.py",
+    _ROOT / "core" / "stage" / "dream_views.py",
+]
+
+_GROUP_DREAM_FORBIDDEN_MARKERS = [
+    # Precise reality writeback entry points — not the bare word "projection",
+    # which also appears in legitimate dream-domain vocabulary (body_projection /
+    # project_body_for_yexuan, the her-body physics module used by group dreams
+    # too) and would otherwise false-positive on every generation call site.
+    "core.stage.projection",
+    "enqueue_reality_projection",
+    "summarize_to_midterm",
+    "impression_loader",
+    "afterglow",
+    "hidden_state",
+]
+
+
+def test_dream_stage_runtime_does_not_reference_reality_writers() -> None:
+    violations = _scan_violations(_GROUP_DREAM_FILES, _GROUP_DREAM_FORBIDDEN_MARKERS, allowlist=set())
+    assert not violations, (
+        f"{len(violations)} violation(s) — Dream Stage code must not reference "
+        "reality memory writeback entry points (zero reflow, Brief 100 §0):\n"
+        + "\n".join(violations)
+    )
+
+
+def test_positive_sample_reality_stage_runtime_references_projection() -> None:
+    """Confirms the reverse scan is non-vacuous: reality's core/stage/runtime.py
+    genuinely enqueues a reality projection — proving the scan mechanism would
+    actually catch a Dream Stage file that accidentally grew the same import."""
+    runtime = _ROOT / "core" / "stage" / "runtime.py"
+    assert runtime.exists(), f"positive-sample file not found: {runtime}"
+    src = runtime.read_text(encoding="utf-8")
+    found = any(
+        "projection" in line
+        for line in src.splitlines()
+        if not line.strip().startswith("#")
+    )
+    assert found, (
+        "positive-sample check failed: core/stage/runtime.py has no 'projection' "
+        "marker in non-comment lines — if it moved, fix this test to match"
+    )

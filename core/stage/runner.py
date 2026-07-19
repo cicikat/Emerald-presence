@@ -7,6 +7,7 @@ import random
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Awaitable, Callable
 
 from core.conversation_gate import conversation_lock
@@ -15,6 +16,16 @@ from core.memory.episodic_memory import _texture_similarity
 from core.stage.arbiter import _is_question, score_candidates
 from core.stage.models import Stage, TranscriptEntry
 from core.stage.store import append_transcript, load_stage, load_transcript
+
+LoadStageFn = Callable[[str], "Stage | None"]
+LoadTranscriptFn = Callable[[str], list[TranscriptEntry]]
+AppendTranscriptFn = Callable[[Stage, TranscriptEntry], bool]
+TracePathFn = Callable[[str], Path]
+
+
+def _default_trace_path(group_id: str) -> Path:
+    from core.sandbox import get_paths
+    return get_paths().stage_arbiter_trace(group_id=group_id)
 
 GenerateReply = Callable[[Stage, str, list[TranscriptEntry], str, str], str | Awaitable[str]]
 DeliverReply = Callable[[str, str, str], None | Awaitable[None]]
@@ -56,11 +67,10 @@ def _append_arbiter_trace(
     selected: list[str],
     chain_depth: int,
     extra: dict | None = None,
+    trace_path_fn: TracePathFn = _default_trace_path,
 ) -> None:
     """Persist one decision record. Observation must never block a Stage turn."""
     try:
-        from core.sandbox import get_paths
-
         latest = transcript[-1] if transcript else None
         record = {
             "ts": time.time(),
@@ -81,7 +91,7 @@ def _append_arbiter_trace(
         }
         if extra:
             record.update(extra)
-        path = get_paths().stage_arbiter_trace(group_id=stage.group_id)
+        path = trace_path_fn(stage.group_id)
         rotate_jsonl_if_needed(path, _ARBITER_TRACE_MAX_BYTES, _ARBITER_TRACE_KEEP_N)
         if not safe_append_jsonl(path, record):
             logger.debug("[stage.runner] arbiter trace append failed group=%s", stage.group_id)
@@ -99,6 +109,7 @@ async def _generate_and_append(
     deliver_reply: DeliverReply | None,
     *,
     previous_ai_content: str | None = None,
+    append_transcript_fn: AppendTranscriptFn = append_transcript,
 ) -> tuple[TranscriptEntry | None, bool]:
     content = str(
         await _resolve(generate_reply(stage, speaker_id, list(transcript), turn_id, triggered_by))
@@ -115,7 +126,7 @@ async def _generate_and_append(
         turn_id=turn_id,
         triggered_by=triggered_by,
     )
-    if not append_transcript(stage, entry):
+    if not append_transcript_fn(stage, entry):
         raise RuntimeError(f"failed to append stage reply group={stage.group_id!r}")
     transcript.append(entry)
     if deliver_reply is not None:
@@ -132,9 +143,22 @@ async def run_owner_turn(
     turn_id: str | None = None,
     derived_keywords: dict[str, tuple[str, ...]] | None = None,
     generate_reaction: GenerateReply | None = None,
+    load_stage_fn: LoadStageFn = load_stage,
+    load_transcript_fn: LoadTranscriptFn = load_transcript,
+    append_transcript_fn: AppendTranscriptFn = append_transcript,
+    trace_path_fn: TracePathFn = _default_trace_path,
 ) -> StageTurnResult:
-    """Run Phase A + Phase B under one owner conversation lock."""
-    stage = load_stage(group_id)
+    """Run Phase A + Phase B under one owner conversation lock.
+
+    `load_stage_fn` / `load_transcript_fn` / `append_transcript_fn` /
+    `trace_path_fn` default to the reality Stage store (core.stage.store) so
+    every existing reality caller is unaffected. A Dream Stage round
+    (core.stage.dream_runtime.run_dream_stage_turn) supplies dream-tree
+    equivalents instead — the orchestration algorithm below is shared
+    byte-for-byte between reality and dream, only the persisted artifacts'
+    physical location differs.
+    """
+    stage = load_stage_fn(group_id)
     if stage is None:
         raise ValueError(f"stage not found: {group_id!r}")
     if stage.status != "active":
@@ -144,6 +168,12 @@ async def run_owner_turn(
         raise ValueError("owner_content must not be empty")
     resolved_turn_id = turn_id or uuid.uuid4().hex
 
+    async def _gen_and_append(*args, **kwargs):
+        return await _generate_and_append(*args, append_transcript_fn=append_transcript_fn, **kwargs)
+
+    def _trace_call(*args, **kwargs):
+        return _append_arbiter_trace(*args, trace_path_fn=trace_path_fn, **kwargs)
+
     async with conversation_lock(stage.owner_uid):
         owner_entry = TranscriptEntry(
             speaker_id="owner",
@@ -152,9 +182,9 @@ async def run_owner_turn(
             turn_id=resolved_turn_id,
             triggered_by="user",
         )
-        if not append_transcript(stage, owner_entry):
+        if not append_transcript_fn(stage, owner_entry):
             raise RuntimeError(f"failed to append owner stage message group={group_id!r}")
-        transcript = load_transcript(group_id)
+        transcript = load_transcript_fn(group_id)
         replies: list[TranscriptEntry] = []
 
         # Phase A: each candidate speaks at most once in the direct response wave.
@@ -171,7 +201,7 @@ async def run_owner_turn(
             and stage.settings.allow_silent_rounds and is_low_information(owner_content)
         )
         if may_be_silent:
-            _append_arbiter_trace(stage, transcript, initial_ranked, turn_id=resolved_turn_id, phase="A", selected=[], chain_depth=0, extra={"silent_round": True, "silent_reason": "low_information"})
+            _trace_call(stage, transcript, initial_ranked, turn_id=resolved_turn_id, phase="A", selected=[], chain_depth=0, extra={"silent_round": True, "silent_reason": "low_information"})
             return StageTurnResult(stage.group_id, resolved_turn_id, (), 0)
         while responded < max_responders:
             candidates = [char_id for char_id in stage.roster if char_id not in attempted]
@@ -180,13 +210,13 @@ async def run_owner_turn(
                 break
             pick = ranked[0]
             if responded >= min_responders and pick.total < stage.settings.respond_threshold:
-                _append_arbiter_trace(
+                _trace_call(
                     stage, transcript, ranked, turn_id=resolved_turn_id, phase="A",
                     selected=[], chain_depth=0,
                 )
                 break
             attempted.add(pick.char_id)
-            entry, _echo_cut = await _generate_and_append(
+            entry, _echo_cut = await _gen_and_append(
                 stage,
                 pick.char_id,
                 transcript,
@@ -195,7 +225,7 @@ async def run_owner_turn(
                 generate_reply,
                 deliver_reply,
             )
-            _append_arbiter_trace(
+            _trace_call(
                 stage, transcript[:-1] if entry is not None else transcript, ranked,
                 turn_id=resolved_turn_id, phase="A",
                 selected=[entry.speaker_id] if entry is not None else [], chain_depth=0,
@@ -213,13 +243,13 @@ async def run_owner_turn(
             # AI chain uses a looser threshold so peer_reply bonus can clear the bar.
             if not ranked or ranked[0].total < stage.settings.respond_threshold * 0.8:
                 if ranked:
-                    _append_arbiter_trace(
+                    _trace_call(
                         stage, transcript, ranked, turn_id=resolved_turn_id, phase="B",
                         selected=[], chain_depth=ai_chain_depth,
                     )
                 break
             pick = ranked[0]
-            entry, echo_cut = await _generate_and_append(
+            entry, echo_cut = await _gen_and_append(
                 stage,
                 pick.char_id,
                 transcript,
@@ -231,7 +261,7 @@ async def run_owner_turn(
                     transcript[-1].content if transcript[-1].speaker_id != "owner" else None
                 ),
             )
-            _append_arbiter_trace(
+            _trace_call(
                 stage, transcript[:-1] if entry is not None else transcript, ranked,
                 turn_id=resolved_turn_id, phase="B",
                 selected=[entry.speaker_id] if entry is not None else [], chain_depth=ai_chain_depth,
@@ -268,7 +298,7 @@ async def run_owner_turn(
                 ][:reaction_budget]
                 reacted: list[str] = []
                 for item in reactors:
-                    entry, _echo_cut = await _generate_and_append(
+                    entry, _echo_cut = await _gen_and_append(
                         stage,
                         item.char_id,
                         transcript,
@@ -281,7 +311,7 @@ async def run_owner_turn(
                         replies.append(entry)
                         reacted.append(entry.speaker_id)
                 if ranked:
-                    _append_arbiter_trace(
+                    _trace_call(
                         stage, transcript, ranked, turn_id=resolved_turn_id, phase="R",
                         selected=reacted, chain_depth=ai_chain_depth,
                         extra={"reaction": True},
@@ -310,13 +340,13 @@ async def run_owner_turn(
                             -stage.roster.index(char_id),
                         ),
                     )
-                    entry, _echo_cut = await _generate_and_append(
+                    entry, _echo_cut = await _gen_and_append(
                         stage, seeder, transcript, resolved_turn_id, "topic_seed",
                         generate_reply, deliver_reply,
                     )
                     if entry is not None:
                         replies.append(entry)
-                    _append_arbiter_trace(
+                    _trace_call(
                         stage, transcript[:-1] if entry is not None else transcript, [],
                         turn_id=resolved_turn_id, phase="T",
                         selected=[entry.speaker_id] if entry is not None else [],

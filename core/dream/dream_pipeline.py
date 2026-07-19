@@ -408,6 +408,18 @@ async def enter_dream(
     if dream_mode not in _VALID_DREAM_MODES:
         return {"ok": False, "error": f"invalid dream_mode={dream_mode!r}"}
 
+    # Brief 100 §3 reverse mutual exclusion: a group dream (Dream Stage) owned by
+    # this uid blocks solo /dream/enter, mirroring the forward check in
+    # core.stage.dream_state.has_active_group_dream_for_owner() used by
+    # /group/{id}/dream/enter.
+    try:
+        from core.stage.dream_state import has_active_group_dream_for_owner
+        if has_active_group_dream_for_owner(uid):
+            return {"ok": False, "error": "本群正在进行群聊梦境，无法同时开始单人梦境"}
+    except Exception as exc:
+        logger.error("[dream_pipeline] group dream cross-check failed uid=%s: %s", uid, exc)
+        return {"ok": False, "error": "无法确认群梦状态，暂不能入梦"}
+
     state = read_state(uid)
 
     # ── Phase A: dream_mode mid-session write guard ───────────────────────────

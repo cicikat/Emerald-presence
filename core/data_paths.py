@@ -593,6 +593,42 @@ class DataPaths:
             raise ValueError("character relation requires two distinct characters")
         return self._p("runtime", "relations", f"{first}__{second}.json")
 
+    # ── Dream Stage: group dream session (Brief 100) ──────────────────────────
+    # Physically isolated from stage_group_dir() — dream-only artifacts must
+    # never be visible to reality's `*/meta.json` glob (see private_exchange_dir()
+    # for the identical rationale) and must never share a transcript file with
+    # the reality group's own transcript.json.
+    def dream_group_dir(self, *, group_id: str) -> Path:
+        """data/runtime/dreams/_stage/{group_id}/ — group dream root."""
+        return self._p("runtime", "dreams", "_stage", safe_user_id(group_id))
+
+    def dream_group_root_dir(self) -> Path:
+        """data/runtime/dreams/_stage/ — scan root for cross-group owner lookups
+        (get_reality_guard_status() checking "does this owner have any active
+        group dream anywhere")."""
+        return self._p("runtime", "dreams", "_stage")
+
+    def dream_group_tmp_path(self, *, group_id: str) -> Path:
+        """data/runtime/dreams/_stage/{group_id}/tmp/current_dream.jsonl —
+        shared in-dream transcript (speaker-prefixed), never read by any loader."""
+        return self.dream_group_dir(group_id=group_id) / "tmp" / "current_dream.jsonl"
+
+    def dream_group_archive_dir(self, *, group_id: str) -> Path:
+        """data/runtime/dreams/_stage/{group_id}/archive/ — dream_*.jsonl, replay-only."""
+        return self.dream_group_dir(group_id=group_id) / "archive"
+
+    def dream_group_state_path(self, *, group_id: str) -> Path:
+        return self.dream_group_dir(group_id=group_id) / "state" / "dream_state.json"
+
+    def dream_group_settings_path(self, *, group_id: str) -> Path:
+        return self.dream_group_dir(group_id=group_id) / "settings.json"
+
+    def dream_group_arbiter_trace(self, *, group_id: str) -> Path:
+        """Append-only arbiter trace for a group dream round — mirrors
+        stage_arbiter_trace() but lives under the isolated dream tree so a
+        group dream's decision log never lands in the reality group dir."""
+        return self.dream_group_dir(group_id=group_id) / "arbiter_trace.jsonl"
+
     # ── Private exchange: off-hours char-to-char sessions (Brief 86) ─────────
     def private_exchange_dir(self) -> Path:
         """data/runtime/groups/_private/ — root for private exchange transcripts.

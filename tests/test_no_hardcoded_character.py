@@ -138,6 +138,10 @@ YEXUAN_TENSION_ALLOWLIST: frozenset[str] = frozenset({
     # rather than renamed (see plan: internal identifiers out of scope for P2).
     "core/dream/body_projection.py",
     "core/dream/dream_pipeline.py",
+    # Brief 100: Dream Stage's post-round tension coupling reads the same
+    # project_body_for_yexuan() plumbing dict key, one call per replying
+    # character instead of once per solo turn — same internal, non-protocol key.
+    "core/stage/dream_runtime.py",
 })
 
 _YEXUAN_AI_RE = re.compile(r'"yexuan_ai"|\'yexuan_ai\'')
