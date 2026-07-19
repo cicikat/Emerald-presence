@@ -99,6 +99,39 @@ def test_private_domain_framing_has_both_required_lines():
     assert "不形成针对任何人的共识" in text
 
 
+def test_private_domain_framing_injects_both_identities():
+    """Brief 106 §1: the char doesn't know who it is or who it's talking to
+    without this — the card's only intimacy template is toward the user, so
+    the model mistakes "private + intimate register" for a lover relationship."""
+    from core.character_name_provider import get_char_name
+    from core.stage.context import render_private_presence
+
+    text = render_private_presence(_A, _B)
+    assert f"你是{get_char_name(_A)}" in text
+    assert get_char_name(_B) in text
+
+
+def test_private_domain_framing_injects_existing_impression(sandbox):
+    from core.stage.char_relations import _empty_relation, _save_relation
+    from core.stage.context import render_private_presence
+
+    relation = _empty_relation(_A, _B)
+    first, _second = sorted((_A, _B))
+    side = "a_of_b" if _A == first else "b_of_a"
+    relation[side] = {"summary": "上次帮我修过琴", "valence": 0.4, "updated_at": ""}
+    assert _save_relation(relation)
+
+    text = render_private_presence(_A, _B)
+    assert "上次帮我修过琴" in text
+
+
+def test_private_domain_framing_omits_impression_when_none(sandbox):
+    from core.stage.context import render_private_presence
+
+    text = render_private_presence(_A, _B)
+    assert "的印象：" not in text
+
+
 @pytest.mark.asyncio
 async def test_generate_private_skips_fetch_context():
     from core.stage.views import StageCharacterView

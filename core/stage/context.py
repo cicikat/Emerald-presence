@@ -101,18 +101,35 @@ def render_transcript(
     return text
 
 
-def render_private_presence(_viewer_id: str, _other_id: str) -> str:
-    """§2 私下语域框定层 — the two required system lines for a private exchange (Brief 86).
+def render_private_presence(viewer_id: str, other_id: str) -> str:
+    """身份段 + §2 私下语域框定层（Brief 106 §1 / Brief 86）。
 
-    Both are mandatory. Line 1 licenses the private register; line 2 is the
-    anti-drift anchor (DESIGN.md §十一 决策 9.5) — without it, "the owner can't
-    see this" reliably drifts into conspiratorial narrative that then leaks
-    back into the shared char_relations layer via the round's reflow.
+    身份段在前：告诉角色自己是谁、对面是谁、彼此既有印象——角色卡里唯一的
+    亲密关系模板是对用户的，没有这段身份锚点，模型会把"私下+亲昵语域"错套成
+    恋人关系（Brief 106 根因）。语域两句是既有的强制项，原样保留：line 1
+    授权私下语气；line 2 是防漂移锚（DESIGN.md §十一 决策 9.5）——没有它，
+    "owner 看不到"会稳定漂移成密谋叙事，再经本轮 reflow 泄回共享的
+    char_relations 层。
     """
     from core.config_loader import get_user_display_name
 
     user_name = get_user_display_name() or "TA"
+    viewer_name = get_char_name(viewer_id)
+    other_name = get_char_name(other_id)
+
+    identity_lines = [f"你是{viewer_name}，现在深夜和{other_name}单独说上了话。"]
+    try:
+        from core.stage.char_relations import viewer_summary
+
+        summary, _valence = viewer_summary(viewer_id, other_id)
+        if summary:
+            identity_lines.append(f"你对{other_name}的印象：{summary}")
+    except Exception:
+        # Identity framing must never block a private exchange turn.
+        pass
+
     return (
+        "\n".join(identity_lines) + "\n\n"
         f"这段对话{user_name}看不到，不需要表演给任何人，用你们私下的语气。\n"
         f"私下语域不等于秘密——你们不讨论对{user_name}隐瞒什么，也不形成针对任何人的共识。"
         "就是两个熟人闲聊。"
