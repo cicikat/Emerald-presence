@@ -168,10 +168,10 @@ async def run_owner_turn(
         has_vocative = any(addressed_kind(stage, char_id, owner_content) == "vocative" for char_id in stage.roster)
         may_be_silent = (
             not has_vocative and initial_ranked and initial_ranked[0].total < SILENCE_THRESHOLD
-            and (is_low_information(owner_content) or stage.settings.allow_silent_rounds)
+            and stage.settings.allow_silent_rounds and is_low_information(owner_content)
         )
         if may_be_silent:
-            _append_arbiter_trace(stage, transcript, initial_ranked, turn_id=resolved_turn_id, phase="A", selected=[], chain_depth=0, extra={"silent_round": True})
+            _append_arbiter_trace(stage, transcript, initial_ranked, turn_id=resolved_turn_id, phase="A", selected=[], chain_depth=0, extra={"silent_round": True, "silent_reason": "low_information"})
             return StageTurnResult(stage.group_id, resolved_turn_id, (), 0)
         while responded < max_responders:
             candidates = [char_id for char_id in stage.roster if char_id not in attempted]

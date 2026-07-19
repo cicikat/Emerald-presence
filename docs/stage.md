@@ -125,7 +125,7 @@ speaker_id / content / timestamp / _turn_id / triggered_by
 | `respond_threshold` | 0.5 | Phase A/B "是否接话" 的仲裁分数门槛 |
 | `spontaneous_threshold` | 0.7 | 预留（主动群触发未接入，v1 不消费） |
 | `addressed_exclusive` | false | 命中 vocative 时是否只留被点名角色候选 |
-| `allow_silent_rounds` | true | 允许整轮沉默（配合 recall_gate 低信息量判定） |
+| `allow_silent_rounds` | true | 允许整轮沉默（仅在消息本身是 backchannel/低信息量时生效，需与 `is_low_information` 同时成立；有实质内容的消息始终触发 `min_responders` 保底） |
 | `transcript_limit` | 200 | 共享 transcript 滚动上限 |
 | `memory_strength.group` | 0.7 | 群聊摘要投影写 mid_term 时的记忆强度 |
 | `debug_token_log` | true | 是否记录每条 Phase prompt 的 token 估算 |
