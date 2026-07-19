@@ -359,22 +359,18 @@ textarea { resize: vertical; min-height: 72px; }
 
     <!-- ── 配置中心（Brief 93 §1） ── -->
     <div class="page" id="page-setup">
-      <h1 class="page-title">配置</h1>
+      <h1 class="page-title" data-i18n="setup.title">配置</h1>
 
       <div class="card" id="setup-missing-banner" style="display:none;border-color:var(--danger);background:color-mix(in srgb, var(--danger) 10%, transparent)">
-        <p id="setup-missing-banner-text" style="margin:0;color:var(--danger);font-weight:600">⚠ 未配置将无法聊天：请先填写下方「基础聊天模型」必填项</p>
+        <p id="setup-missing-banner-text" style="margin:0;color:var(--danger);font-weight:600" data-i18n="setup.missing">⚠ 未配置将无法聊天/主动触发失效：请先填写下方「基础聊天模型」必填项</p>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h3>基础聊天模型 <span class="badge badge-warn">必填①</span></h3>
+          <h3><span data-i18n="setup.base.title">基础聊天模型</span> <span class="badge badge-warn"><span data-i18n="common.required">必填</span>①</span></h3>
           <span id="setup-base-status" style="font-size:12px;color:var(--muted)"></span>
         </div>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
-          日常对话实际调用的模型连接。已配置 <code style="font-family:var(--mono)">model_presets</code> 时写入当前生效路由的主聊天
-          preset；未配置时写入旧版 <code style="font-family:var(--mono)">llm:</code> 块——两种情况都会自动识别，不需要你判断。
-          更细粒度的多模型 preset / 路由切换见「模型路由」页。
-        </p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px" data-i18n="setup.base.description">日常对话实际调用的模型连接。已配置 model_presets 时写入当前生效路由的主聊天 preset；未配置时写入旧版 llm: 块——两种情况都会自动识别，不需要你判断。更细粒度的多模型 preset / 路由切换见「模型路由」页。</p>
         <div class="form-row col-1">
           <label class="field">
             <span>base_url</span>
@@ -388,47 +384,41 @@ textarea { resize: vertical; min-height: 72px; }
           </label>
           <label class="field">
             <span>api_key <span id="setup-base-key-state" style="font-size:11px;color:var(--muted)"></span></span>
-            <input type="password" id="setup-base-api-key" placeholder="留空=不修改已有值">
+            <input type="password" id="setup-base-api-key" placeholder="留空=不修改已有值" data-i18n-placeholder="setup.secret.keep">
           </label>
         </div>
         <div class="modal-footer" style="justify-content:flex-start;padding-top:4px">
-          <button class="btn btn-primary" onclick="saveSetupBaseModel()">保存</button>
+          <button class="btn btn-primary" onclick="saveSetupBaseModel()" data-i18n="common.save">保存</button>
         </div>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h3>Owner ID <span class="badge badge-warn">必填②</span></h3>
+          <h3>Owner ID <span class="badge badge-warn"><span data-i18n="common.required">必填</span>②</span></h3>
           <span id="setup-owner-status" style="font-size:12px;color:var(--muted)"></span>
         </div>
-        <p style="font-size:12px;color:var(--danger);margin-bottom:12px">
-          建议直接填你的 QQ 号——若此处用了别的 id，之后接 QQ 时会按 QQ 号另起一套记忆，与桌宠期记忆不互通。
-          留空 = 主动触发调度器会静默跳过主动消息，且记忆文件可能挂在错误/缺省 uid 下。
-        </p>
+        <p style="font-size:12px;color:var(--danger);margin-bottom:12px" data-i18n="setup.owner.description">建议直接填你的 QQ 号——若此处用了别的 id，之后接 QQ 时会按 QQ 号另起一套记忆，与桌宠期记忆不互通。留空 = 主动触发调度器会静默跳过主动消息，且记忆文件可能挂在错误/缺省 uid 下。</p>
         <div class="form-row">
           <label class="field">
-            <span>owner_id（仅 A-Za-z0-9_- ）</span>
-            <input type="text" id="setup-owner-id" placeholder="建议填你的 QQ 号">
+            <span data-i18n="setup.owner.id_label">owner_id（仅 A-Za-z0-9_- ）</span>
+            <input type="text" id="setup-owner-id" placeholder="建议填你的 QQ 号" data-i18n-placeholder="setup.owner.id_placeholder">
           </label>
           <label class="field">
-            <span>owner_birthday <span style="font-size:11px;color:var(--muted)">（可选，MM-DD）</span></span>
-            <input type="text" id="setup-owner-birthday" placeholder="例如 04-24">
+            <span data-i18n="setup.owner.birthday_label">owner_birthday（可选，MM-DD）</span>
+            <input type="text" id="setup-owner-birthday" placeholder="例如 04-24" data-i18n-placeholder="setup.owner.birthday_placeholder">
           </label>
         </div>
         <div class="modal-footer" style="justify-content:flex-start;padding-top:4px">
-          <button class="btn btn-primary" onclick="saveSetupOwner()">保存</button>
+          <button class="btn btn-primary" onclick="saveSetupOwner()" data-i18n="common.save">保存</button>
         </div>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h3>语义 Embedding <span class="badge">强烈建议</span></h3>
+          <h3><span data-i18n="setup.embedding.title">语义 Embedding</span> <span class="badge" data-i18n="setup.strongly_recommended">强烈建议</span></h3>
           <span id="setup-embedding-status" style="font-size:12px;color:var(--muted)"></span>
         </div>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
-          作用：长期记忆语义召回（情景记忆/往事检索按语义匹配而非纯关键词）。
-          缺失后果：召回质量降级为关键词匹配，<strong>不会导致聊天崩溃或阻塞</strong>（fail-open）。
-        </p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px" data-i18n="setup.embedding.description">作用：长期记忆语义召回（情景记忆/往事检索按语义匹配而非纯关键词）。缺失后果：召回质量降级为关键词匹配，不会导致聊天崩溃或阻塞（fail-open）。</p>
         <div class="form-row col-1">
           <label class="field">
             <span>base_url</span>
@@ -448,34 +438,30 @@ textarea { resize: vertical; min-height: 72px; }
         <div class="form-row col-1">
           <label class="field">
             <span>api_key <span id="setup-embed-key-state" style="font-size:11px;color:var(--muted)"></span></span>
-            <input type="password" id="setup-embed-api-key" placeholder="留空=不修改已有值">
+            <input type="password" id="setup-embed-api-key" placeholder="留空=不修改已有值" data-i18n-placeholder="setup.secret.keep">
           </label>
         </div>
         <div class="modal-footer" style="justify-content:flex-start;padding-top:4px">
-          <button class="btn btn-primary" onclick="saveSetupEmbedding()">保存</button>
+          <button class="btn btn-primary" onclick="saveSetupEmbedding()" data-i18n="common.save">保存</button>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-header"><h3>其余模型路由 <span class="badge">可选</span></h3></div>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
-          以下只读展示当前实际生效的路由，不在本页编辑：
-        </p>
-        <div id="setup-optional-body"><div class="loading">加载中…</div></div>
+        <div class="card-header"><h3><span data-i18n="setup.optional_models.title">其余模型路由</span> <span class="badge" data-i18n="common.optional">可选</span></h3></div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px" data-i18n="setup.optional_models.description">以下只读展示当前实际生效的路由，不在本页编辑：</p>
+        <div id="setup-optional-body"><div class="loading" data-i18n="common.loading">加载中…</div></div>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h3>邮件通道 <span class="badge">可选</span></h3>
+          <h3><span data-i18n="setup.mail.title">邮件通道</span> <span class="badge" data-i18n="common.optional">可选</span></h3>
           <span id="setup-mail-status" style="font-size:12px;color:var(--muted)"></span>
         </div>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
-          角色写信功能的 SMTP 发信配置；默认关闭，纯增值功能。总开关也可以在「Token」页「通道开关」区切换。
-        </p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px" data-i18n="setup.mail.description">角色写信功能的 SMTP 发信配置；默认关闭，纯增值功能。总开关也可以在「Token」页「通道开关」区切换。</p>
         <div class="form-row">
           <label class="checkbox-row" style="gap:8px;font-size:14px">
             <input type="checkbox" id="setup-mail-enabled" style="width:16px;height:16px;accent-color:var(--accent)">
-            <span>启用邮件通道</span>
+            <span data-i18n="setup.mail.enable">启用邮件通道</span>
           </label>
         </div>
         <div class="form-row">
@@ -491,104 +477,90 @@ textarea { resize: vertical; min-height: 72px; }
         <div class="form-row">
           <label class="field">
             <span>smtp_user</span>
-            <input type="text" id="setup-mail-user" placeholder="发信邮箱账号">
+            <input type="text" id="setup-mail-user" placeholder="发信邮箱账号" data-i18n-placeholder="setup.mail.user_placeholder">
           </label>
           <label class="field">
             <span>smtp_password <span id="setup-mail-password-state" style="font-size:11px;color:var(--muted)"></span></span>
-            <input type="password" id="setup-mail-password" placeholder="留空=不修改已有值">
+            <input type="password" id="setup-mail-password" placeholder="留空=不修改已有值" data-i18n-placeholder="setup.secret.keep">
           </label>
         </div>
         <div class="form-row">
           <label class="field">
             <span>from_addr</span>
-            <input type="text" id="setup-mail-from-addr" placeholder="发送邮箱地址">
+            <input type="text" id="setup-mail-from-addr" placeholder="发送邮箱地址" data-i18n-placeholder="setup.mail.from_addr_placeholder">
           </label>
           <label class="field">
             <span>from_name</span>
-            <input type="text" id="setup-mail-from-name" placeholder="角色名">
+            <input type="text" id="setup-mail-from-name" placeholder="角色名" data-i18n-placeholder="setup.mail.from_name_placeholder">
           </label>
         </div>
         <div class="form-row">
           <label class="field">
             <span>to_addr</span>
-            <input type="text" id="setup-mail-to-addr" placeholder="接收邮箱地址">
+            <input type="text" id="setup-mail-to-addr" placeholder="接收邮箱地址" data-i18n-placeholder="setup.mail.to_addr_placeholder">
           </label>
           <label class="field">
             <span>subject_prefix</span>
-            <input type="text" id="setup-mail-subject-prefix" placeholder="【来信】">
+            <input type="text" id="setup-mail-subject-prefix" placeholder="【来信】" data-i18n-placeholder="setup.mail.subject_placeholder">
           </label>
         </div>
         <div class="form-row col-1">
           <label class="field">
-            <span>proxy_url <span style="font-size:11px;color:var(--muted)">（可选，SMTP 端口被墙时用）</span></span>
+            <span data-i18n="setup.mail.proxy_label">proxy_url（可选，SMTP 端口被墙时用）</span>
             <input type="text" id="setup-mail-proxy-url" placeholder="http://127.0.0.1:7897">
           </label>
         </div>
         <div class="modal-footer" style="justify-content:flex-start;padding-top:4px">
-          <button class="btn btn-primary" onclick="saveSetupMail()">保存</button>
+          <button class="btn btn-primary" onclick="saveSetupMail()" data-i18n="common.save">保存</button>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-header"><h3>自定义纪念日 <span class="badge">可选</span></h3></div>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
-          letter_writer / festival 消费；命中当天会主动提起。JSON 数组编辑，字段：
-          <code style="font-family:var(--mono)">key/month/day</code> 必填，
-          <code style="font-family:var(--mono)">year_start</code> 留空=每年都当作第 0 年（只用 prompt_zero），
-          <code style="font-family:var(--mono)">prompt_zero/prompt_years</code> 可选（prompt_years 支持 <code style="font-family:var(--mono)">{char}</code>/<code style="font-family:var(--mono)">{years}</code> 占位符）。
-        </p>
+        <div class="card-header"><h3><span data-i18n="setup.anniversaries.title">自定义纪念日</span> <span class="badge" data-i18n="common.optional">可选</span></h3></div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px" data-i18n="setup.anniversaries.description">letter_writer / festival 消费；命中当天会主动提起。JSON 数组编辑，字段：key/month/day 必填，year_start 留空=每年都当作第 0 年（只用 prompt_zero），prompt_zero/prompt_years 可选（prompt_years 支持 {char}/{years} 占位符）。</p>
         <div class="form-row col-1">
           <label class="field">
-            <span>anniversaries（JSON 数组）</span>
-            <textarea id="setup-anniversaries-json" rows="8" style="font-family:var(--mono);font-size:12px" placeholder='[
+            <span data-i18n="setup.anniversaries.label">anniversaries（JSON 数组）</span>
+            <textarea id="setup-anniversaries-json" rows="8" style="font-family:var(--mono);font-size:12px" data-i18n-placeholder="setup.anniversaries.placeholder" placeholder='[
   {"key": "first_date", "month": 6, "day": 14, "year_start": 2024, "prompt_years": "在一起{years}年了"}
 ]'></textarea>
           </label>
         </div>
         <div class="modal-footer" style="justify-content:flex-start;padding-top:4px">
-          <button class="btn btn-primary" onclick="saveSetupAnniversaries()">保存</button>
+          <button class="btn btn-primary" onclick="saveSetupAnniversaries()" data-i18n="common.save">保存</button>
         </div>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h3>Obsidian 日记路径 <span class="badge">可选</span></h3>
+          <h3><span data-i18n="setup.diary.title">Obsidian 日记路径</span> <span class="badge" data-i18n="common.optional">可选</span></h3>
           <span id="setup-diary-status" style="font-size:12px;color:var(--muted)"></span>
         </div>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
-          日记读取功能（daily_journal/diary_reminder/diary_inject）读取此目录下按
-          <code style="font-family:var(--mono)">YYYY-MM-DD.md</code> 命名的日记文件；不填则回落到本地
-          fallback 目录。角色白名单（<code style="font-family:var(--mono)">diary.characters</code>）不在本页编辑。
-        </p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px" data-i18n="setup.diary.description">日记读取功能（daily_journal/diary_reminder/diary_inject）读取此目录下按 YYYY-MM-DD.md 命名的日记文件；不填则回落到本地 fallback 目录。角色白名单（diary.characters）不在本页编辑。</p>
         <div class="form-row col-1">
           <label class="field">
             <span>obsidian_path</span>
-            <input type="text" id="setup-diary-path" placeholder="例如 E:\obsidian_note\Psychology\Calendar">
+            <input type="text" id="setup-diary-path" placeholder="例如 E:\obsidian_note\Psychology\Calendar" data-i18n-placeholder="setup.diary.placeholder">
           </label>
         </div>
         <div class="modal-footer" style="justify-content:flex-start;padding-top:4px">
-          <button class="btn btn-primary" onclick="saveSetupDiary()">保存</button>
+          <button class="btn btn-primary" onclick="saveSetupDiary()" data-i18n="common.save">保存</button>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-header"><h3>Coplay 后台游戏检测白名单 <span class="badge">可选</span></h3></div>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
-          陪玩模式（coplay）用于识别非 Steam 游戏：armed 状态下按 <code style="font-family:var(--mono)">process_name</code>
-          做 psutil 进程名匹配（大小写不敏感，<code style="font-family:var(--mono)">.exe</code> 可写可不写）。
-          <code style="font-family:var(--mono)">save_dir</code> 可选，填了才会做存档变化检测。JSON 数组编辑，
-          <code style="font-family:var(--mono)">name/process_name</code> 必填。
-        </p>
+        <div class="card-header"><h3><span data-i18n="setup.coplay.title">Coplay 后台游戏检测白名单</span> <span class="badge" data-i18n="common.optional">可选</span></h3></div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px" data-i18n="setup.coplay.description">陪玩模式（coplay）用于识别非 Steam 游戏：armed 状态下按 process_name 做 psutil 进程名匹配（大小写不敏感，.exe 可写可不写）。save_dir 可选，填了才会做存档变化检测。JSON 数组编辑，name/process_name 必填。</p>
         <div class="form-row col-1">
           <label class="field">
-            <span>game_whitelist（JSON 数组）</span>
-            <textarea id="setup-coplay-games-json" rows="8" style="font-family:var(--mono);font-size:12px" placeholder='[
+            <span data-i18n="setup.coplay.label">game_whitelist（JSON 数组）</span>
+            <textarea id="setup-coplay-games-json" rows="8" style="font-family:var(--mono);font-size:12px" data-i18n-placeholder="setup.coplay.placeholder" placeholder='[
   {"name": "示例游戏", "process_name": "game.exe", "save_dir": "C:\\Users\\你\\Saved Games\\示例游戏"}
 ]'></textarea>
           </label>
         </div>
         <div class="modal-footer" style="justify-content:flex-start;padding-top:4px">
-          <button class="btn btn-primary" onclick="saveSetupCoplayGames()">保存</button>
+          <button class="btn btn-primary" onclick="saveSetupCoplayGames()" data-i18n="common.save">保存</button>
         </div>
       </div>
     </div>
@@ -2232,6 +2204,13 @@ function _setupErrMsg(e) {
   try { return JSON.parse(m[1]).detail || m[1]; } catch { return m[1]; }
 }
 
+function _setupBadge(configured, unconfiguredKey='common.not_configured') {
+  const label = configured
+    ? t('common.configured', '已配置')
+    : t(unconfiguredKey, '未配置');
+  return `<span class="badge ${configured ? 'badge-success' : 'badge-danger'}">${configured ? '●' : '○'} ${escapeHtml(label)}</span>`;
+}
+
 async function checkSetupStatus() {
   try { return await api('GET', '/settings/setup-status'); }
   catch (e) { return null; }
@@ -2239,7 +2218,7 @@ async function checkSetupStatus() {
 
 async function loadSetupPage() {
   document.getElementById('setup-missing-banner').style.display = 'none';
-  document.getElementById('setup-optional-body').innerHTML = '<div class="loading">加载中…</div>';
+  document.getElementById('setup-optional-body').innerHTML = `<div class="loading">${escapeHtml(t('common.loading', '加载中…'))}</div>`;
   try {
     const [status, base, embed] = await Promise.all([
       api('GET', '/settings/setup-status'),
@@ -2249,41 +2228,44 @@ async function loadSetupPage() {
     const owner = status.owner || {};
 
     const missing = [];
-    if (!base.configured)  missing.push('基础聊天模型');
+    if (!base.configured)  missing.push(t('setup.base.title', '基础聊天模型'));
     if (!owner.configured) missing.push('owner_id');
     document.getElementById('setup-missing-banner').style.display = missing.length ? 'block' : 'none';
-    document.getElementById('setup-missing-banner-text').textContent =
-      `⚠ 未配置将无法聊天/主动触发失效：请先填写下方「${missing.join('」「')}」必填项`;
+    document.getElementById('setup-missing-banner-text').textContent = t(
+      'setup.missing',
+      '⚠ 未配置将无法聊天/主动触发失效：请先填写下方「{items}」必填项',
+      {items: missing.join(t('setup.missing_separator', '」「'))},
+    );
 
     document.getElementById('setup-owner-id').value = owner.owner_id || '';
     document.getElementById('setup-owner-birthday').value = owner.owner_birthday || '';
-    document.getElementById('setup-owner-status').innerHTML = owner.configured
-      ? '<span class="badge badge-success">● 已配置</span>'
-      : '<span class="badge badge-danger">○ 未配置</span>';
+    document.getElementById('setup-owner-status').innerHTML = _setupBadge(owner.configured);
 
     document.getElementById('setup-base-url').value = base.base_url || '';
     document.getElementById('setup-base-model-name').value = base.model || '';
     document.getElementById('setup-base-api-key').value = '';
-    document.getElementById('setup-base-key-state').textContent = base.api_key_set ? `（已配置 ${base.api_key_masked}）` : '（未配置）';
-    document.getElementById('setup-base-status').innerHTML = base.configured
-      ? '<span class="badge badge-success">● 已配置</span>'
-      : '<span class="badge badge-danger">○ 未配置</span>';
+    document.getElementById('setup-base-key-state').textContent = base.api_key_set
+      ? t('setup.secret.configured', '（已配置 {value}）', {value: base.api_key_masked})
+      : `（${t('common.not_configured', '未配置')}）`;
+    document.getElementById('setup-base-status').innerHTML = _setupBadge(base.configured);
 
     document.getElementById('setup-embed-base-url').value = embed.base_url || '';
     document.getElementById('setup-embed-model').value = embed.model || '';
     document.getElementById('setup-embed-dim').value = embed.dim || '';
     document.getElementById('setup-embed-api-key').value = '';
-    document.getElementById('setup-embed-key-state').textContent = embed.api_key_set ? `（已配置 ${embed.api_key_masked}）` : '（未配置）';
+    document.getElementById('setup-embed-key-state').textContent = embed.api_key_set
+      ? t('setup.secret.configured', '（已配置 {value}）', {value: embed.api_key_masked})
+      : `（${t('common.not_configured', '未配置')}）`;
     document.getElementById('setup-embedding-status').innerHTML = embed.configured
-      ? '<span class="badge badge-success">● 已配置</span>'
-      : '<span class="badge">○ 未配置（召回自动降级为关键词匹配，不影响聊天）</span>';
+      ? _setupBadge(true)
+      : `<span class="badge">○ ${escapeHtml(t('setup.embedding.not_configured', '未配置（召回自动降级为关键词匹配，不影响聊天）'))}</span>`;
 
     await Promise.all([
       _loadSetupOptional(), _loadSetupMail(), _loadSetupAnniversaries(),
       _loadSetupDiary(), _loadSetupCoplayGames(),
     ]);
   } catch (e) {
-    toast('加载配置中心失败: ' + _setupErrMsg(e), 'err');
+    toast(t('setup.load_error', '加载配置中心失败: {error}', {error: _setupErrMsg(e)}), 'err');
   }
 }
 
@@ -2295,18 +2277,17 @@ async function _loadSetupMail() {
     document.getElementById('setup-mail-port').value = mail.smtp_port || '';
     document.getElementById('setup-mail-user').value = mail.smtp_user || '';
     document.getElementById('setup-mail-password').value = '';
-    document.getElementById('setup-mail-password-state').textContent =
-      mail.smtp_password_set ? `（已配置 ${mail.smtp_password_masked}）` : '（未配置）';
+    document.getElementById('setup-mail-password-state').textContent = mail.smtp_password_set
+      ? t('setup.secret.configured', '（已配置 {value}）', {value: mail.smtp_password_masked})
+      : `（${t('common.not_configured', '未配置')}）`;
     document.getElementById('setup-mail-from-addr').value = mail.from_addr || '';
     document.getElementById('setup-mail-from-name').value = mail.from_name || '';
     document.getElementById('setup-mail-to-addr').value = mail.to_addr || '';
     document.getElementById('setup-mail-subject-prefix').value = mail.subject_prefix || '';
     document.getElementById('setup-mail-proxy-url').value = mail.proxy_url || '';
-    document.getElementById('setup-mail-status').innerHTML = mail.configured
-      ? '<span class="badge badge-success">● 已配置</span>'
-      : '<span class="badge">○ 未配置</span>';
+    document.getElementById('setup-mail-status').innerHTML = _setupBadge(mail.configured);
   } catch (e) {
-    toast('加载邮件通道配置失败: ' + _setupErrMsg(e), 'err');
+    toast(t('setup.mail.load_error', '加载邮件通道配置失败: {error}', {error: _setupErrMsg(e)}), 'err');
   }
 }
 
@@ -2334,10 +2315,10 @@ async function saveSetupMail() {
   if (proxy)  body.proxy_url = proxy;
   try {
     await api('PUT', '/settings/mail', body);
-    toast('邮件通道配置已保存', 'ok');
+    toast(t('setup.mail.saved', '邮件通道配置已保存'), 'ok');
     _loadSetupMail();
   } catch (e) {
-    toast('保存失败: ' + _setupErrMsg(e), 'err');
+    toast(t('common.save_failed', '保存失败: {error}', {error: _setupErrMsg(e)}), 'err');
   }
 }
 
@@ -2347,7 +2328,7 @@ async function _loadSetupAnniversaries() {
     document.getElementById('setup-anniversaries-json').value =
       anniversaries && anniversaries.length ? JSON.stringify(anniversaries, null, 2) : '';
   } catch (e) {
-    toast('加载自定义纪念日失败: ' + _setupErrMsg(e), 'err');
+    toast(t('setup.anniversaries.load_error', '加载自定义纪念日失败: {error}', {error: _setupErrMsg(e)}), 'err');
   }
 }
 
@@ -2356,17 +2337,17 @@ async function saveSetupAnniversaries() {
   let anniversaries;
   try {
     anniversaries = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(anniversaries)) throw new Error('必须是数组');
+    if (!Array.isArray(anniversaries)) throw new Error(t('setup.array_required', '必须是数组'));
   } catch (e) {
-    toast('JSON 格式错误: ' + e.message, 'err');
+    toast(t('setup.json_array_error', 'JSON 格式错误: {error}', {error: e.message}), 'err');
     return;
   }
   try {
     await api('PUT', '/settings/anniversaries', { anniversaries });
-    toast('自定义纪念日已保存', 'ok');
+    toast(t('setup.anniversaries.saved', '自定义纪念日已保存'), 'ok');
     _loadSetupAnniversaries();
   } catch (e) {
-    toast('保存失败: ' + _setupErrMsg(e), 'err');
+    toast(t('common.save_failed', '保存失败: {error}', {error: _setupErrMsg(e)}), 'err');
   }
 }
 
@@ -2374,23 +2355,21 @@ async function _loadSetupDiary() {
   try {
     const diary = await api('GET', '/settings/diary');
     document.getElementById('setup-diary-path').value = diary.obsidian_path || '';
-    document.getElementById('setup-diary-status').innerHTML = diary.configured
-      ? '<span class="badge badge-success">● 已配置</span>'
-      : '<span class="badge">○ 未配置</span>';
+    document.getElementById('setup-diary-status').innerHTML = _setupBadge(diary.configured);
   } catch (e) {
-    toast('加载日记路径失败: ' + _setupErrMsg(e), 'err');
+    toast(t('setup.diary.load_error', '加载日记路径失败: {error}', {error: _setupErrMsg(e)}), 'err');
   }
 }
 
 async function saveSetupDiary() {
   const path = document.getElementById('setup-diary-path').value.trim();
-  if (!path) { toast('obsidian_path 不能为空', 'err'); return; }
+  if (!path) { toast(t('setup.diary.required', 'obsidian_path 不能为空'), 'err'); return; }
   try {
     await api('PUT', '/settings/diary', { obsidian_path: path });
-    toast('日记路径已保存', 'ok');
+    toast(t('setup.diary.saved', '日记路径已保存'), 'ok');
     _loadSetupDiary();
   } catch (e) {
-    toast('保存失败: ' + _setupErrMsg(e), 'err');
+    toast(t('common.save_failed', '保存失败: {error}', {error: _setupErrMsg(e)}), 'err');
   }
 }
 
@@ -2400,7 +2379,7 @@ async function _loadSetupCoplayGames() {
     document.getElementById('setup-coplay-games-json').value =
       game_whitelist && game_whitelist.length ? JSON.stringify(game_whitelist, null, 2) : '';
   } catch (e) {
-    toast('加载 coplay 游戏白名单失败: ' + _setupErrMsg(e), 'err');
+    toast(t('setup.coplay.load_error', '加载 coplay 游戏白名单失败: {error}', {error: _setupErrMsg(e)}), 'err');
   }
 }
 
@@ -2409,17 +2388,17 @@ async function saveSetupCoplayGames() {
   let game_whitelist;
   try {
     game_whitelist = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(game_whitelist)) throw new Error('必须是数组');
+    if (!Array.isArray(game_whitelist)) throw new Error(t('setup.array_required', '必须是数组'));
   } catch (e) {
-    toast('JSON 格式错误: ' + e.message, 'err');
+    toast(t('setup.json_array_error', 'JSON 格式错误: {error}', {error: e.message}), 'err');
     return;
   }
   try {
     await api('PUT', '/settings/coplay-games', { game_whitelist });
-    toast('coplay 游戏白名单已保存', 'ok');
+    toast(t('setup.coplay.saved', 'coplay 游戏白名单已保存'), 'ok');
     _loadSetupCoplayGames();
   } catch (e) {
-    toast('保存失败: ' + _setupErrMsg(e), 'err');
+    toast(t('common.save_failed', '保存失败: {error}', {error: _setupErrMsg(e)}), 'err');
   }
 }
 
@@ -2434,26 +2413,29 @@ async function _loadSetupOptional() {
     const profiles = mp.routing_profiles || {};
     const profile = profiles[mp.active_routing] || Object.values(profiles)[0] || {};
     const presetNames = Object.keys(mp.presets || {});
-    const resolve = (cat) => profile[cat] || profile.chat || presetNames[0] || '（无 preset）';
+    const resolve = (cat) => profile[cat] || profile.chat || presetNames[0] || t('setup.no_preset', '（无 preset）');
+    const enabled = escapeHtml(t('common.enabled', '已启用'));
+    const disabled = escapeHtml(t('common.disabled', '未启用'));
+    const unknown = escapeHtml(t('common.unknown', '未知'));
 
     el.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:10px">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-          <span>TTS：${tts ? (tts.enabled ? '<span class="badge badge-success">已启用</span>' : '<span class="badge">未启用</span>') : '<span class="badge">未知</span>'}</span>
-          <button class="btn btn-ghost btn-sm" onclick="goto('status')">前往系统状态页设置</button>
+          <span>TTS: ${tts ? (tts.enabled ? `<span class="badge badge-success">${enabled}</span>` : `<span class="badge">${disabled}</span>`) : `<span class="badge">${unknown}</span>`}</span>
+          <button class="btn btn-ghost btn-sm" onclick="goto('status')">${escapeHtml(t('setup.go_status', '前往系统状态页设置'))}</button>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-          <span>Vision：${vision ? (vision.enabled ? `<span class="badge badge-success">已启用（${vision.model || '未填模型'}）</span>` : '<span class="badge">未启用</span>') : '<span class="badge">未知</span>'}</span>
-          <button class="btn btn-ghost btn-sm" onclick="goto('status')">前往系统状态页设置</button>
+          <span>Vision: ${vision ? (vision.enabled ? `<span class="badge badge-success">${escapeHtml(t('setup.vision_enabled', '已启用（{model}）', {model: vision.model || t('setup.no_model', '未填模型')}))}</span>` : `<span class="badge">${disabled}</span>`) : `<span class="badge">${unknown}</span>`}</span>
+          <button class="btn btn-ghost btn-sm" onclick="goto('status')">${escapeHtml(t('setup.go_status', '前往系统状态页设置'))}</button>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-          <span>probe 小模型 → <code style="font-family:var(--mono)">${resolve('probe')}</code>　summary 小模型 → <code style="font-family:var(--mono)">${resolve('summary')}</code></span>
-          <button class="btn btn-ghost btn-sm" onclick="goto('model-routing')">前往模型路由</button>
+          <span>${escapeHtml(t('setup.probe_helper', 'probe 小模型'))} → <code style="font-family:var(--mono)">${escapeHtml(resolve('probe'))}</code>　${escapeHtml(t('setup.summary_helper', 'summary 小模型'))} → <code style="font-family:var(--mono)">${escapeHtml(resolve('summary'))}</code></span>
+          <button class="btn btn-ghost btn-sm" onclick="goto('model-routing')">${escapeHtml(t('setup.go_routing', '前往模型路由'))}</button>
         </div>
       </div>
     `;
   } catch (e) {
-    el.innerHTML = `<div class="empty">加载失败: ${_setupErrMsg(e)}</div>`;
+    el.innerHTML = `<div class="empty">${escapeHtml(t('setup.optional_load_error', '加载失败: {error}', {error: _setupErrMsg(e)}))}</div>`;
   }
 }
 
@@ -2465,13 +2447,13 @@ async function saveSetupBaseModel() {
   if (url)   body.base_url = url;
   if (model) body.model = model;
   if (key)   body.api_key = key;
-  if (!Object.keys(body).length) { toast('没有要保存的修改', 'err'); return; }
+  if (!Object.keys(body).length) { toast(t('setup.no_changes', '没有要保存的修改'), 'err'); return; }
   try {
     await api('PUT', '/settings/base-model', body);
-    toast('基础聊天模型已保存', 'ok');
+    toast(t('setup.base.saved', '基础聊天模型已保存'), 'ok');
     loadSetupPage();
   } catch (e) {
-    toast('保存失败: ' + _setupErrMsg(e), 'err');
+    toast(t('common.save_failed', '保存失败: {error}', {error: _setupErrMsg(e)}), 'err');
   }
 }
 
@@ -2479,19 +2461,19 @@ async function saveSetupOwner() {
   const ownerId = document.getElementById('setup-owner-id').value.trim();
   const birthday = document.getElementById('setup-owner-birthday').value.trim();
   if (ownerId && !/^[A-Za-z0-9_-]+$/.test(ownerId)) {
-    toast('owner_id 只能包含字母、数字、下划线、短横线（A-Za-z0-9_-）', 'err');
+    toast(t('setup.owner.invalid_id', 'owner_id 只能包含字母、数字、下划线、短横线（A-Za-z0-9_-）'), 'err');
     return;
   }
   if (birthday && !/^\d{2}-\d{2}$/.test(birthday)) {
-    toast('owner_birthday 必须是 MM-DD 格式，如 04-24', 'err');
+    toast(t('setup.owner.invalid_birthday', 'owner_birthday 必须是 MM-DD 格式，如 04-24'), 'err');
     return;
   }
   try {
     await api('PUT', '/scheduler/config', { owner_id: ownerId, owner_birthday: birthday });
-    toast('owner_id 已保存', 'ok');
+    toast(t('setup.owner.saved', 'owner_id 已保存'), 'ok');
     loadSetupPage();
   } catch (e) {
-    toast('保存失败: ' + _setupErrMsg(e), 'err');
+    toast(t('common.save_failed', '保存失败: {error}', {error: _setupErrMsg(e)}), 'err');
   }
 }
 
@@ -2505,13 +2487,13 @@ async function saveSetupEmbedding() {
   if (model) body.model = model;
   if (dim)   body.dim = parseInt(dim, 10);
   if (key)   body.api_key = key;
-  if (!Object.keys(body).length) { toast('没有要保存的修改', 'err'); return; }
+  if (!Object.keys(body).length) { toast(t('setup.no_changes', '没有要保存的修改'), 'err'); return; }
   try {
     await api('PUT', '/settings/embedding', body);
-    toast('Embedding 配置已保存', 'ok');
+    toast(t('setup.embedding.saved', 'Embedding 配置已保存'), 'ok');
     loadSetupPage();
   } catch (e) {
-    toast('保存失败: ' + _setupErrMsg(e), 'err');
+    toast(t('common.save_failed', '保存失败: {error}', {error: _setupErrMsg(e)}), 'err');
   }
 }
 
@@ -5146,7 +5128,9 @@ function observeTime(value) {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
-function observeEmpty(label='暂无数据') { return `<div class="empty">${escapeHtml(label)}</div>`; }
+function observeEmpty(label) {
+  return `<div class="empty">${escapeHtml(label || t('common.no_data', '暂无数据'))}</div>`;
+}
 function observeBar(value, max) {
   const ratio = max > 0 ? Math.max(0, Math.min(1, Number(value || 0) / max)) : 0;
   return `<div style="height:6px;background:var(--border);border-radius:4px;overflow:hidden;margin-top:5px"><div style="width:${ratio*100}%;height:100%;background:var(--accent);border-radius:4px"></div></div>`;

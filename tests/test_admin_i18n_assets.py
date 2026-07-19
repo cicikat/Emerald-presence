@@ -108,3 +108,37 @@ def test_group_arbiter_private_exchange_and_prompt_inspector_are_localized():
         assert f"'{key}'" in runtime
 
     assert "origin.origin === 'stage' && origin.group_id === groupId" in index
+
+
+def test_setup_page_and_common_empty_state_are_localized():
+    index = INDEX.read_text(encoding="utf-8")
+    runtime = I18N.read_text(encoding="utf-8")
+    page = re.search(
+        r'<div class="page" id="page-setup">(.*?)'
+        r'<div class="page active" id="page-status">',
+        index,
+        re.S,
+    )
+    assert page is not None
+
+    for key in (
+        "setup.title",
+        "setup.base.title",
+        "setup.owner.description",
+        "setup.embedding.title",
+        "setup.optional_models.title",
+        "setup.mail.title",
+        "setup.anniversaries.title",
+        "setup.diary.title",
+        "setup.coplay.title",
+    ):
+        assert f'data-i18n="{key}"' in page.group(1)
+        assert runtime.count(f"'{key}'") == 2
+
+    assert page.group(1).count('data-i18n="common.save"') == 7
+    assert 'data-i18n-placeholder="setup.secret.keep"' in page.group(1)
+    assert "t('setup.base.saved'" in index
+    assert "t('setup.mail.saved'" in index
+    assert "t('setup.diary.saved'" in index
+    assert "t('setup.coplay.saved'" in index
+    assert "label || t('common.no_data', '暂无数据')" in index
