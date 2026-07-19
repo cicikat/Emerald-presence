@@ -100,6 +100,12 @@ main {
   flex: 1; overflow-y: auto;
   padding: 28px 32px;
 }
+.admin-topbar {
+  display: flex; justify-content: flex-end; align-items: center; gap: 8px;
+  margin: -8px 0 18px;
+}
+.admin-topbar label { color: var(--muted); font-size: 12px; }
+.admin-topbar select { width: auto; min-width: 112px; padding: 5px 8px; }
 .page { display: none; }
 .page.active { display: block; }
 
@@ -275,11 +281,11 @@ textarea { resize: vertical; min-height: 72px; }
 <!-- Auth overlay -->
 <div id="auth-overlay">
   <div class="auth-card">
-    <h1>🤖 管理面板</h1>
-    <p>His Presence · 输入管理密钥登录</p>
+    <h1 data-i18n="auth.title">🤖 管理面板</h1>
+    <p data-i18n="auth.subtitle">His Presence · 输入管理密钥登录</p>
     <input type="password" id="key-input" placeholder="secret_key" autocomplete="current-password">
     <div class="err" id="auth-err"></div>
-    <button class="btn btn-primary" style="width:100%" onclick="doLogin()">登录</button>
+    <button class="btn btn-primary" style="width:100%" onclick="doLogin()" data-i18n="auth.login">登录</button>
   </div>
 </div>
 
@@ -287,62 +293,69 @@ textarea { resize: vertical; min-height: 72px; }
 <div id="app" style="display:none">
   <nav>
     <div class="nav-logo">
-      <h2>运维控制台</h2>
+      <h2 data-i18n="nav.console">运维控制台</h2>
       <p id="nav-host">127.0.0.1:8080</p>
     </div>
-    <a data-page="setup" onclick="goto('setup')"><span class="icon">🧩</span>配置</a>
+    <a data-page="setup" onclick="goto('setup')"><span class="icon">🧩</span><span data-i18n="nav.setup">配置</span></a>
 
-    <div class="nav-group-header" onclick="toggleNavGroup('create')"><span class="nav-caret" id="caret-create">▾</span>🎨 创作</div>
+    <div class="nav-group-header" onclick="toggleNavGroup('create')"><span class="nav-caret" id="caret-create">▾</span><span data-i18n="nav.group.creation">🎨 创作</span></div>
     <div class="nav-group" id="navgroup-create">
-      <a data-page="character"      onclick="goto('character')">      <span class="icon">🃏</span>角色卡</a>
-      <a data-page="lorebook"       onclick="goto('lorebook')">       <span class="icon">🌍</span>现实设定</a>
-      <a data-page="dream-settings" onclick="goto('dream-settings')"> <span class="icon">🌙</span>梦境设定</a>
+      <a data-page="character"      onclick="goto('character')">      <span class="icon">🃏</span><span data-i18n="nav.character">角色卡</span></a>
+      <a data-page="lorebook"       onclick="goto('lorebook')">       <span class="icon">🌍</span><span data-i18n="nav.lorebook">现实设定</span></a>
+      <a data-page="dream-settings" onclick="goto('dream-settings')"> <span class="icon">🌙</span><span data-i18n="nav.dream_settings">梦境设定</span></a>
     </div>
 
-    <div class="nav-group-header" onclick="toggleNavGroup('ops')"><span class="nav-caret" id="caret-ops">▾</span>🛠 运维</div>
+    <div class="nav-group-header" onclick="toggleNavGroup('ops')"><span class="nav-caret" id="caret-ops">▾</span><span data-i18n="nav.group.operations">🛠 运维</span></div>
     <div class="nav-group" id="navgroup-ops">
-      <a class="active" data-page="status" onclick="goto('status')"><span class="icon">📊</span>系统状态</a>
-      <a data-page="scheduler" onclick="goto('scheduler')"><span class="icon">⏰</span>调度器</a>
-      <a data-page="users"     onclick="goto('users')">    <span class="icon">👤</span>用户管理</a>
-      <a data-page="logs"      onclick="goto('logs')">     <span class="icon">📋</span>错误日志</a>
-      <a data-page="auth-tokens" onclick="goto('auth-tokens')"><span class="icon">🔑</span>Token</a>
-      <a data-page="model-routing" onclick="goto('model-routing')"><span class="icon">🔀</span>模型路由</a>
-      <a data-page="relationship-facts" onclick="goto('relationship-facts')"><span class="icon">📌</span>关系事实</a>
+      <a class="active" data-page="status" onclick="goto('status')"><span class="icon">📊</span><span data-i18n="nav.status">系统状态</span></a>
+      <a data-page="scheduler" onclick="goto('scheduler')"><span class="icon">⏰</span><span data-i18n="nav.scheduler">调度器</span></a>
+      <a data-page="users"     onclick="goto('users')">    <span class="icon">👤</span><span data-i18n="nav.users">用户管理</span></a>
+      <a data-page="logs"      onclick="goto('logs')">     <span class="icon">📋</span><span data-i18n="nav.logs">错误日志</span></a>
+      <a data-page="auth-tokens" onclick="goto('auth-tokens')"><span class="icon">🔑</span><span data-i18n="nav.auth_tokens">Token</span></a>
+      <a data-page="model-routing" onclick="goto('model-routing')"><span class="icon">🔀</span><span data-i18n="nav.model_routing">模型路由</span></a>
+      <a data-page="relationship-facts" onclick="goto('relationship-facts')"><span class="icon">📌</span><span data-i18n="nav.relationship_facts">关系事实</span></a>
     </div>
 
-    <div class="nav-group-header" onclick="toggleNavGroup('state')"><span class="nav-caret" id="caret-state">▾</span>🔬 内部状态</div>
+    <div class="nav-group-header" onclick="toggleNavGroup('state')"><span class="nav-caret" id="caret-state">▾</span><span data-i18n="nav.group.internal_state">🔬 内部状态</span></div>
     <div class="nav-group" id="navgroup-state">
-      <a data-page="observe-mood"    onclick="goto('observe-mood')">   <span class="icon">🌸</span>情绪·花园</a>
-      <a data-page="observe-dream"   onclick="goto('observe-dream')">  <span class="icon">🌙</span>梦境状态</a>
-      <a data-page="observe-memory"  onclick="goto('observe-memory')"> <span class="icon">🧠</span>记忆探查</a>
-      <a data-page="observe-hidden"  onclick="goto('observe-hidden')"> <span class="icon">🔬</span>隐性状态</a>
-      <a data-page="observe-chatlog" onclick="goto('observe-chatlog')"><span class="icon">💬</span>聊天日志</a>
-      <a data-page="observe-runtime" onclick="goto('observe-runtime')"><span class="icon">⚙️</span>运行时内部态</a>
+      <a data-page="observe-mood"    onclick="goto('observe-mood')">   <span class="icon">🌸</span><span data-i18n="nav.mood">情绪·花园</span></a>
+      <a data-page="observe-dream"   onclick="goto('observe-dream')">  <span class="icon">🌙</span><span data-i18n="nav.dream_state">梦境状态</span></a>
+      <a data-page="observe-memory"  onclick="goto('observe-memory')"> <span class="icon">🧠</span><span data-i18n="nav.memory">记忆探查</span></a>
+      <a data-page="observe-hidden"  onclick="goto('observe-hidden')"> <span class="icon">🔬</span><span data-i18n="nav.hidden_state">隐性状态</span></a>
+      <a data-page="observe-chatlog" onclick="goto('observe-chatlog')"><span class="icon">💬</span><span data-i18n="nav.chat_log">聊天日志</span></a>
+      <a data-page="observe-runtime" onclick="goto('observe-runtime')"><span class="icon">⚙️</span><span data-i18n="nav.runtime">运行时内部态</span></a>
     </div>
 
-    <div class="nav-group-header" onclick="toggleNavGroup('observe')"><span class="nav-caret" id="caret-observe">▾</span>🔍 观测</div>
+    <div class="nav-group-header" onclick="toggleNavGroup('observe')"><span class="nav-caret" id="caret-observe">▾</span><span data-i18n="nav.group.observation">🔍 观测</span></div>
     <div class="nav-group" id="navgroup-observe">
-      <a data-page="observe-growth"  onclick="goto('observe-growth')"> <span class="icon">🌱</span>成长</a>
-      <a data-page="observe-visual"  onclick="goto('observe-visual')"> <span class="icon">👁️</span>视觉</a>
-      <a data-page="observe-spend"   onclick="goto('observe-spend')">  <span class="icon">💰</span>支出</a>
-      <a data-page="observe-group-arbiter" onclick="goto('observe-group-arbiter')"><span class="icon">⚖️</span>群聊仲裁</a>
-      <a data-page="observe-memory-summary" onclick="goto('observe-memory-summary')"><span class="icon">📚</span>记忆摘要</a>
-      <a data-page="observe-prompt"  onclick="goto('observe-prompt')"> <span class="icon">🗂️</span>Prompt 层检视</a>
-      <a data-page="observe-probe"   onclick="goto('observe-probe')">  <span class="icon">🔭</span>探针观测</a>
-      <a data-page="observe-dream-prompt" onclick="goto('observe-dream-prompt')"><span class="icon">💭</span>梦境 Prompt</a>
-      <a data-page="observe-trigger-catalog" onclick="goto('observe-trigger-catalog')"><span class="icon">📡</span>触发器目录</a>
-      <a data-page="observe-vector"     onclick="goto('observe-vector')">    <span class="icon">🧬</span>向量库</a>
-      <a data-page="observe-provenance" onclick="goto('observe-provenance')"><span class="icon">🧾</span>印象溯源</a>
+      <a data-page="observe-growth"  onclick="goto('observe-growth')"> <span class="icon">🌱</span><span data-i18n="nav.growth">成长</span></a>
+      <a data-page="observe-visual"  onclick="goto('observe-visual')"> <span class="icon">👁️</span><span data-i18n="nav.visual">视觉</span></a>
+      <a data-page="observe-spend"   onclick="goto('observe-spend')">  <span class="icon">💰</span><span data-i18n="nav.spend">支出</span></a>
+      <a data-page="observe-group-arbiter" onclick="goto('observe-group-arbiter')"><span class="icon">⚖️</span><span data-i18n="nav.group_arbiter">群聊仲裁</span></a>
+      <a data-page="observe-memory-summary" onclick="goto('observe-memory-summary')"><span class="icon">📚</span><span data-i18n="nav.memory_summary">记忆摘要</span></a>
+      <a data-page="observe-prompt"  onclick="goto('observe-prompt')"> <span class="icon">🗂️</span><span data-i18n="nav.prompt_layers">Prompt 层检视</span></a>
+      <a data-page="observe-probe"   onclick="goto('observe-probe')">  <span class="icon">🔭</span><span data-i18n="nav.probe">探针观测</span></a>
+      <a data-page="observe-dream-prompt" onclick="goto('observe-dream-prompt')"><span class="icon">💭</span><span data-i18n="nav.dream_prompt">梦境 Prompt</span></a>
+      <a data-page="observe-trigger-catalog" onclick="goto('observe-trigger-catalog')"><span class="icon">📡</span><span data-i18n="nav.trigger_catalog">触发器目录</span></a>
+      <a data-page="observe-vector"     onclick="goto('observe-vector')">    <span class="icon">🧬</span><span data-i18n="nav.vector_store">向量库</span></a>
+      <a data-page="observe-provenance" onclick="goto('observe-provenance')"><span class="icon">🧾</span><span data-i18n="nav.provenance">印象溯源</span></a>
     </div>
 
-    <a data-page="pet"    onclick="goto('pet')"    style="display:none"><span class="icon">🐾</span>宠物</a>
-    <a data-page="yexuan" onclick="goto('yexuan')" style="display:none"><span class="icon">💬</span>与<span class="nav-char-name">叶瑄</span></a>
+    <a data-page="pet"    onclick="goto('pet')"    style="display:none"><span class="icon">🐾</span><span data-i18n="nav.pet">宠物</span></a>
+    <a data-page="yexuan" onclick="goto('yexuan')" style="display:none"><span class="icon">💬</span><span data-i18n="nav.chat_with">与</span> <span class="nav-char-name">叶瑄</span></a>
     <div class="nav-bottom">
       <div class="key-hint" id="nav-key-hint"></div>
     </div>
   </nav>
 
   <main>
+    <div class="admin-topbar">
+      <label for="admin-language-select" data-i18n="common.language">语言</label>
+      <select id="admin-language-select" onchange="AdminI18n.setLanguage(this.value)">
+        <option value="zh-CN">中文</option>
+        <option value="en">English</option>
+      </select>
+    </div>
 
     <!-- ── 配置中心（Brief 93 §1） ── -->
     <div class="page" id="page-setup">
@@ -2160,6 +2173,7 @@ textarea { resize: vertical; min-height: 72px; }
 
 <div id="toast"></div>
 
+<script src="/static/i18n.js"></script>
 <script>
 // ══════════════════════════════════════════════════════════
 //  State
@@ -2169,6 +2183,12 @@ let BASE  = window.location.origin;
 let _currentUser = null;
 let _allUsers = [];
 window._charName = '叶瑄';  // fallback; overwritten after login by _initCharName()
+
+window.addEventListener('admin-language-changed', () => {
+  const activePage = document.querySelector('.page.active');
+  const appVisible = document.getElementById('app').style.display !== 'none';
+  if (activePage && appVisible) goto(activePage.id.replace(/^page-/, ''));
+});
 
 async function _initCharName() {
   try {
