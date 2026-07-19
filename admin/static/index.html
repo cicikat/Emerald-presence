@@ -355,6 +355,7 @@ textarea { resize: vertical; min-height: 72px; }
     <a data-page="yexuan" onclick="goto('yexuan')" style="display:none"><span class="icon">💬</span><span data-i18n="nav.chat_with">与</span> <span class="nav-char-name">叶瑄</span></a>
     <div class="nav-bottom">
       <div class="key-hint" id="nav-key-hint"></div>
+      <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:8px" onclick="logout()" data-i18n="nav.logout">退出登录</button>
     </div>
   </nav>
 
@@ -2509,38 +2510,58 @@ async function saveSetupEmbedding() {
 // ══════════════════════════════════════════════════════════
 //  Auth
 // ══════════════════════════════════════════════════════════
-async function doLogin() {
-  const key = document.getElementById('key-input').value.trim();
-  if (!key) return;
+async function tryLogin(key, silent) {
   TOKEN = key;
   try {
     const r = await fetch(`${BASE}/status`, {headers: authHeaders()});
     if (r.status === 401) {
-      document.getElementById('auth-err').textContent = '密钥错误，请重试';
-      return;
+      TOKEN = '';
+      localStorage.removeItem('qq_admin_key');
+      document.getElementById('auth-err').textContent = silent
+        ? t('dynamic.auth.stale_key', 'Token 已失效，请重新输入')
+        : t('dynamic.auth.invalid_key', '密钥错误，请重试');
+      return false;
     }
     localStorage.setItem('qq_admin_key', key);
     document.getElementById('auth-overlay').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
     document.getElementById('nav-host').textContent = window.location.host;
-    document.getElementById('nav-key-hint').textContent = '密钥: ' + key.slice(0,4) + '…';
+    document.getElementById('nav-key-hint').textContent = t('dynamic.auth.key_prefix', '密钥: {value}', {value: key.slice(0,4) + '…'});
     const setupStatus = await checkSetupStatus();
     goto(setupStatus && setupStatus.needs_setup ? 'setup' : 'status');
     restoreNavGroups();
     _initCharName().catch(() => {});
     initSecretsBookFab().catch(() => {});
+    return true;
   } catch(e) {
-    document.getElementById('auth-err').textContent = '连接失败: ' + e.message;
+    TOKEN = '';
+    document.getElementById('auth-err').textContent = t('dynamic.auth.connect_failed', '连接失败: {error}', {error: e.message});
+    return false;
   }
+}
+
+async function doLogin() {
+  const key = document.getElementById('key-input').value.trim();
+  if (!key) return;
+  await tryLogin(key, false);
+}
+
+function logout() {
+  localStorage.removeItem('qq_admin_key');
+  TOKEN = '';
+  document.getElementById('key-input').value = '';
+  document.getElementById('auth-err').textContent = '';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('auth-overlay').style.display = 'flex';
 }
 
 document.getElementById('key-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') doLogin();
 });
 
-// Auto-login if key stored
+// Auto-login if key stored: silently verify, only surface the input if it's rejected
 if (TOKEN) {
-  doLogin().catch(() => {});
+  tryLogin(TOKEN, true).catch(() => {});
 }
 
 // ══════════════════════════════════════════════════════════
@@ -3060,7 +3081,7 @@ function toggleLoreContent(i) {
 async function exportLorebook() {
   try {
     const resp = await fetch('/lorebook/export/json', {
-      headers: { 'Authorization': `Bearer ${localStorage}` }
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('qq_admin_key')||''}` }
     });
     const blob = await resp.blob();
     const url = URL.createObjectURL(blob);
