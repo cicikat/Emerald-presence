@@ -112,6 +112,38 @@ Python · FastAPI · NapCat (OneBot 11, optional) · DeepSeek / any OpenAI-compa
 
 ## Quickstart
 
+### 10-minute path (minimal playable config, no QQ/NapCat needed)
+
+For new users who just want to get something running before reading further. Everything below goes through the desktop pet / admin panel; the QQ bot is optional (see "Optional integrations"). On Windows you can skip the manual commands and use the bundled `AA*.bat` scripts instead.
+
+1. **Install dependencies**: double-click `AA1安装并启动.bat` (or manually run `pip install -r requirements.txt` + `cp config.example.yaml config.yaml`).
+   **Expected output**: the terminal ends with `Successfully installed ...`, and a `config.yaml` now exists at the repo root.
+
+2. **Initialize auth** (required before the first run): double-click `AA2鉴权初始化.bat` (or `python scripts/setup_auth.py`).
+   **Expected output**:
+   ```
+   ✅ 鉴权初始化完成，凭据已写入 secrets.local.yaml（已 gitignore，勿提交）
+   📖 已用系统默认程序打开 secrets.local.yaml
+   ```
+   This auto-opens the secrets file `secrets.local.yaml` — **don't close that window yet**. The admin-panel login secret (`admin_secret`) and every per-device token live in there; you'll come back to copy the login secret in the next step, and again later when connecting the desktop/mobile client.
+
+3. **Start the backend**: double-click `AA3启动.bat` (or `python main.py`). If you're not connecting QQ, set `standalone_mode: true` in `config.yaml` first — that's the "minimal playable config" this section is about: it skips the NapCat connection while the desktop pet / admin panel keep working normally.
+   **Expected output**: the terminal keeps printing `INFO`-level logs; once you see `Uvicorn running on http://127.0.0.1:8080` the backend is ready and the process should stay running (not exit).
+
+4. **First panel login**: open `http://127.0.0.1:8080` in a browser and log in with the `admin_secret` from the secrets file.
+   **Expected output**: you land on the "配置" (Setup) page automatically, with a red banner at the top: `⚠ 未配置将无法聊天/主动触发失效：请先填写下方「基础聊天模型」「owner_id」必填项` (chat and proactive triggers won't work until the required fields below are filled in).
+
+5. **Configure the LLM API**: fill in `base_url` / `model` / `api_key` (e.g. DeepSeek) in the "基础聊天模型" (Primary Chat Model) card, save, then click the "测试连接" (Test connection) button next to it. Fill in `owner_id` on the same page too (your QQ number is recommended, even if you're not connecting QQ yet).
+   **Expected output**: a green `✓ xxx ms · deepseek-chat` means the connection works; red text is the raw error — fix `base_url`/`api_key` accordingly. This save is hot-reloaded, **no backend restart needed**.
+
+6. **Create a character card** (strongly recommended): the bundled `default` card is just a placeholder template (its name is literally "角色名" / "character name"). The panel shows a reminder card at this point — go to the "角色卡" (Character Card) page and create/edit your own character.
+   **Expected output**: your new character card appears and saves in the editor; the reminder card on the Setup page disappears once you're no longer on the placeholder.
+
+7. **Send your first message**: through the desktop client, or the admin panel's "聊天日志" (Chat Log) page.
+   **Expected output**: a reply from the character within a few seconds, and a pipeline-related log line printed in the backend terminal.
+
+At that point you have the minimal working loop: LLM configured, character card no longer a placeholder, and a real reply received.
+
 **Requirements**
 
 - Python 3.10–3.12 (3.12 recommended; 3.13+ not yet supported — `rapidocr-onnxruntime`

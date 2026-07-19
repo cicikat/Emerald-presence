@@ -111,6 +111,38 @@ Python · FastAPI · NapCat (OneBot 11，可选) · DeepSeek / 任意兼容 LLM 
 
 ## 快速开始
 
+### 10 分钟跑通（最小可玩配置，无需 QQ/NapCat）
+
+面向"先跑起来看效果"的新用户，全程走桌宠/管理面板即可；QQ 机器人是可选项，见下方「可选接入」。Windows 用户可以跳过手工命令，直接用仓库自带的 `AA*.bat`。
+
+1. **装依赖**：双击 `AA1安装并启动.bat`（或手动 `pip install -r requirements.txt` + `cp config.example.yaml config.yaml`）。
+   **预期输出**：终端末尾出现 `Successfully installed ...`，仓库根目录多出 `config.yaml`。
+
+2. **鉴权初始化**（首次运行前必做）：双击 `AA2鉴权初始化.bat`（或 `python scripts/setup_auth.py`）。
+   **预期输出**：
+   ```
+   ✅ 鉴权初始化完成，凭据已写入 secrets.local.yaml（已 gitignore，勿提交）
+   📖 已用系统默认程序打开 secrets.local.yaml
+   ```
+   会自动弹出密码本 `secrets.local.yaml`——**先别关这个窗口**，管理面板登录密钥（`admin_secret`）和各设备 token 都在这里，下一步登录要回来抄，之后接桌宠/手机也要用。
+
+3. **启动后端**：双击 `AA3启动.bat`（或 `python main.py`）。不打算接 QQ 时，先在 `config.yaml` 设 `standalone_mode: true`——这就是本节说的「最小可玩配置」，跳过 NapCat 连接，桌宠/面板照常能聊。
+   **预期输出**：终端持续打印 `INFO` 日志，出现 `Uvicorn running on http://127.0.0.1:8080` 即代表就绪，进程不会自己退出。
+
+4. **面板首登**：浏览器打开 `http://127.0.0.1:8080`，用密码本里的 `admin_secret` 登录。
+   **预期输出**：自动落在「配置」页，顶部一条红色横幅：`⚠ 未配置将无法聊天/主动触发失效：请先填写下方「基础聊天模型」「owner_id」必填项`。
+
+5. **配置 LLM API**：在「基础聊天模型」卡片填 `base_url` / `model` / `api_key`（如 DeepSeek），保存后点旁边的「测试连接」按钮；同一页把 `owner_id` 也填好（建议直接填 QQ 号，即使暂不接 QQ）。
+   **预期输出**：`✓ xxx ms · deepseek-chat`（绿色）代表连通；红字是报错原文，照着改 base_url/api_key 即可。这一步是热重载的，**不需要重启后端**。
+
+6. **创建角色卡**（强烈建议）：仓库自带的 `default` 角色卡只是占位模板（名字就叫"角色名"），面板此时会看到一张提醒卡片，去「角色卡」页新建/编辑一个属于你自己的角色。
+   **预期输出**：编辑器里能看到并保存你新建的角色卡；保存后「配置」页的提醒卡片消失。
+
+7. **发第一条消息**：桌宠客户端，或面板「聊天日志」页对话框，发一句话。
+   **预期输出**：几秒内收到角色回复；后端终端打印一行 pipeline 相关日志。
+
+跑到这里，「LLM 配好 + 角色卡不是占位模板 + 收到过一条真实回复」就算闭环了。
+
 **环境要求**
 
 - Python 3.10–3.12（推荐 3.12；暂不支持 3.13+ —— `rapidocr-onnxruntime` 声明要求
