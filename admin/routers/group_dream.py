@@ -280,8 +280,10 @@ async def group_dream_settings_patch(group_id: str, body: dict, _auth=Depends(re
         errors.append(f"enable_dream_lorebook 必须为 bool，收到：{updates['enable_dream_lorebook']!r}")
 
     def _validate_presets(label: str, val) -> None:
-        if not isinstance(val, list) or len(val) == 0 or len(val) > 10:
-            errors.append(f"{label} 必须为非空列表（最多 10 项）")
+        # 空列表合法：D0 回退链（Brief 100 §1）允许 per_char / 群级同时缺失，
+        # 由 resolve_jailbreak_presets() 逐级回退到 default.md，不是错误状态。
+        if not isinstance(val, list) or len(val) > 10:
+            errors.append(f"{label} 必须为列表（最多 10 项，留空 = 回退默认）")
             return
         for item in val:
             if not isinstance(item, str) or not _SAFE_PRESET_RE.match(item):
