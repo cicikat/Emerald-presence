@@ -186,14 +186,33 @@ speaker_id / content / timestamp / _turn_id / triggered_by
   `core/scheduler/triggers/private_exchange.py`（深夜/闲时窗口，同 `memory_janitor` 时段判断），
   每日 ≤1 对、单次会话 ≤ `max_turns`（默认 6）次轻量 LLM 调用，pair 选择纯规则零 LLM。
   会话生成复用本文档 §Phase B 的 lightweight 视图（`StageCharacterView.generate_private()`），
-  但用私下语域框定层（两条系统提示：授权私下语气 + 防漂移锚"不隐瞒、不结盟"）取代
-  Stage 的"群聊在场感"框定。产物**只回流关系层**——`char_relations` 摘要投影
+  但用私下语域框定层取代 Stage 的"群聊在场感"框定：`render_private_presence()`
+  产出**身份段 + 语域段**两部分（Brief 106 §1 修订）。身份段在前——
+  `你是{viewer}，现在深夜和{other}单独说上了话`，有既有印象则复用
+  `char_relations.viewer_summary(viewer, other)` 追加一句"你对 ta 的印象：…"；
+  没有这段身份锚点，角色卡里唯一的亲密关系模板是对用户的，模型会把
+  "私下+亲昵语域"错套成恋人关系（真机观察到的根因）。语域段是原有的两条
+  强制系统提示（授权私下语气 + 防漂移锚"不隐瞒、不结盟"），原样保留。
+  产物**只回流关系层**——`char_relations` 摘要投影
   （经既有 6h 冷却更新路径）+ 12h presence 提示；transcript 全文按决策 3
   （自产内容不固化）永不进入 short_term / mid_term / episodic / identity / event_log / 向量库，
   只落 `data/runtime/groups/_private/{char_a}__{char_b}/transcript.jsonl`（管理面板只读端点
-  `GET /relations/private-log`，在「群聊仲裁」页按角色 pair 折叠展示 transcript 尾部）。
-  任意一方生成失败 → 整段放弃，
+  `GET /relations/private-log`，在「群聊仲裁」页按角色 pair 折叠展示 transcript 尾部；
+  同页另有一节直接展示 `prompt_capture` 环形缓冲里 `origin.origin=="private_exchange"`
+  的原始构建 prompt——按 pair 双方是否都在当前群 roster 内过滤，供核对身份/语域
+  注入是否生效，Brief 106 §5）。任意一方生成失败 → 整段放弃，
   不落盘、不回流（fail-open，当日额度不返还）。
+
+  私聊复用 Stage 的 4.2 transcript 槽位与 9_history 短期历史槽位时，两处此前都
+  固定按"群聊"措辞注入，角色容易把私下对话或私聊历史误读成群聊场合（Brief 106
+  §2/§4）：`build_prompt()` 新增 `stage_transcript_private` 标志（私聊会话调用方
+  显式置真），4.2 层头据此从"当前群聊共享对话"换成"你们俩的私下对话（{user}不
+  在场）"；9_history 层则仅在**真正的多人 group Stage**（历史非空 且
+  `stage_transcript` 非空非私聊）时把 note 从"以下是与用户真实发生的对话"换成
+  "以下是你和{user}的私聊历史，不是这场群聊里发生的内容"——私下往来的 history
+  恒为空（lightweight_context），不受影响。此外 `generate_private()` 的
+  instruction（"接着刚才的话往下聊…"）走 build_prompt 的 user_message 槽位
+  （层12），前缀"（旁白指引，不是任何人的发言。）"防止被读成有人在场发话。
 
 接入现有 Pipeline 前，必须先构造显式的 per-character view，保证角色卡、prompt scope 和记忆 scope
 都由 `speaker_id` 决定，不能依赖全局 active character。
