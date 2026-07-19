@@ -548,6 +548,29 @@ def list_days(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> list[str]:
     return sorted(dates, reverse=True)
 
 
+def count_real_turns(user_id: str, *, char_id: str = DEFAULT_CHAR_ID) -> int:
+    """统计 full_log.md 中 speaker:user 的行数：lifetime 真实用户轮数。
+
+    不受 short_term 滑窗（20轮）、event_log 按天分片/删除影响，因为 full_log.md
+    永不轮转、永不删除。仅供 identity 冷启动观测使用（identity-2，见
+    docs/known-issues.md），不接入任何业务判断路径。
+    """
+    path = _event_log_read_dir(user_id, char_id=char_id) / "full_log.md"
+    if not path.exists():
+        return 0
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception as e:
+        log_error("event_log.count_real_turns", e)
+        return 0
+    count = 0
+    for line in lines:
+        m = _SPEAKER_META_RE.match(line.strip())
+        if m and m.group(1) == "user":
+            count += 1
+    return count
+
+
 def delete_day(user_id: str, date_str: str, *, char_id: str = DEFAULT_CHAR_ID) -> bool:
     """Delete (unlink) the YYYY-MM-DD.md file for a given day.
 

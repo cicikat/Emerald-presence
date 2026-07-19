@@ -338,12 +338,73 @@ async def delete_event_log_day(
     return {"message": f"事件日志 {date_str} 已删除", "char_id": resolved}
 
 
-# TODO(Step 8): GET /fixation/status?uid=...
-#   返回该 uid 的 fixation_state + 最近 20 条 fixation.jsonl 日志。
-#   实现要点：
-#     from core.memory.fixation_pipeline import _load_fixation_state, _should_consolidate
-#     from core.sandbox import get_paths
-#     log_path = get_paths().fixation_log()
-#     lines = log_path.read_text(encoding="utf-8").splitlines()[-20:] if log_path.exists() else []
-#     records = [json.loads(l) for l in lines if f'"uid": "{uid}"' in l]
-#     return {"fixation_state": _load_fixation_state(uid), "recent_logs": records}
+def _read_fixation_log_records() -> list[dict]:
+    from core.sandbox import get_paths
+
+    log_path = get_paths().fixation_log()
+    if not log_path.exists():
+        return []
+    records: list[dict] = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(_json.loads(line))
+        except Exception:
+            continue
+    return records
+
+
+@router.get("/fixation/status", summary="固化 pipeline 状态 + 最近日志（含 identity 冷启动观测记录）")
+async def get_fixation_status(
+    uid: str,
+    char_id: str | None = None,
+    n: int = 20,
+    auth=Depends(require_scopes("memory.read")),
+):
+    from core.memory.fixation_pipeline import _load_fixation_state
+
+    resolved = _resolve_char_id(char_id)
+    state = _load_fixation_state(uid, char_id=resolved)
+
+    records = [r for r in _read_fixation_log_records() if r.get("uid") == uid]
+    coldstart_records = [r for r in records if r.get("job") == "identity_coldstart"]
+
+    return {
+        "uid": uid,
+        "char_id": resolved,
+        "fixation_state": state,
+        "recent_logs": records[-n:] if n > 0 else records,
+        "identity_coldstart": coldstart_records,
+    }
+
+
+@router.get(
+    "/fixation/identity-coldstart-summary",
+    summary="identity 冷启动观测汇总（跨用户，Brief 104 §3 / identity-2 调参依据）",
+)
+async def get_identity_coldstart_summary(auth=Depends(require_scopes("memory.read"))):
+    """跨用户汇总"首个有效 identity 维度（confidence>=0.5）出现时的真实轮数"，
+    供判断当前冷启动期典型时长、决定是否调 consolidate 阈值使用。只读聚合，不写任何状态。
+    """
+    records = [r for r in _read_fixation_log_records() if r.get("job") == "identity_coldstart"]
+    turns = [r["real_turns"] for r in records if isinstance(r.get("real_turns"), (int, float))]
+
+    summary = {
+        "sample_count": len(turns),
+        "avg_real_turns": round(sum(turns) / len(turns), 1) if turns else None,
+        "min_real_turns": min(turns) if turns else None,
+        "max_real_turns": max(turns) if turns else None,
+    }
+    if turns:
+        sorted_turns = sorted(turns)
+        mid = len(sorted_turns) // 2
+        summary["median_real_turns"] = (
+            sorted_turns[mid] if len(sorted_turns) % 2
+            else round((sorted_turns[mid - 1] + sorted_turns[mid]) / 2, 1)
+        )
+    else:
+        summary["median_real_turns"] = None
+
+    return {"summary": summary, "samples": records}
