@@ -173,6 +173,7 @@ class StageCharacterView:
         context = self._lightweight_context()
         context["stage_presence"] = render_private_presence(self.char_id, other_id)
         context["stage_transcript"] = render_private_transcript(turns, viewer_id=self.char_id)
+        context["stage_transcript_private"] = True
 
         if turns:
             instruction = "接着刚才的话往下聊，只输出你要说的这一句话，不用加称呼或引号。"

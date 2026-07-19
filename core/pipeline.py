@@ -723,6 +723,7 @@ class Pipeline:
             char_id=_char_id,
             stage_presence=context.get("stage_presence", ""),
             stage_transcript=context.get("stage_transcript", ""),
+            stage_transcript_private=context.get("stage_transcript_private", False),
             suppress_emotional_recall=context.get("suppress_emotional_recall", False),
             web_recall_result=context.get("web_recall_result", ""),
             web_recall_hits=context.get("web_recall_hits", []),

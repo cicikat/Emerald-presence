@@ -147,6 +147,7 @@ async def test_generate_private_skips_fetch_context():
             captured["content"] = content
             captured["stage_presence"] = context["stage_presence"]
             captured["stage_transcript"] = context["stage_transcript"]
+            captured["stage_transcript_private"] = context["stage_transcript_private"]
             return ([{"role": "user", "content": content}], {"token_estimate": 1})
 
         async def run_llm(self, messages, *, char_id=None):
@@ -166,6 +167,7 @@ async def test_generate_private_skips_fetch_context():
         "speaker": _A,
     })
     assert captured["stage_transcript"] == ""
+    assert captured["stage_transcript_private"] is True
     assert "看不到" in captured["stage_presence"]
 
 

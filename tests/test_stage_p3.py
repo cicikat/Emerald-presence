@@ -357,6 +357,48 @@ def test_prompt_builder_injects_stage_layers(sandbox):
     assert "2.2_stage_presence" in debug["layers_activated"]
 
 
+def test_prompt_builder_private_transcript_header_differs_from_group(sandbox):
+    """Brief 106 §2: private_exchange reuses layer 4.2's slot; without
+    stage_transcript_private it was always labeled "群聊共享对话", so a
+    private char↔char turn reads its own transcript as a group chat."""
+    from core import prompt_builder
+
+    char = MagicMock()
+    char.name = "Companion"
+    char.system_prompt = ""
+    char.description = ""
+    char.personality = ""
+    char.scenario = ""
+    char.mes_example = ""
+
+    with (
+        patch("core.prompt_builder._load_jailbreak", return_value=""),
+        patch("core.prompt_builder._load_style_hint", return_value=""),
+        patch("core.presence.get_last_seen_text", return_value=""),
+        patch("core.author_note_rotator.get_current_note", return_value=""),
+        patch("core.config_loader.get_config", return_value={"chat": {"style": "chat"}}),
+        patch("core.mood_text.get_mood_text", return_value=""),
+        patch("core.activity_manager.get_prompt_fragment", return_value=""),
+    ):
+        messages, _debug = prompt_builder.build(
+            character=char,
+            user_id="owner",
+            user_message="hello",
+            history=[],
+            relation={},
+            profile={},
+            group_context=[],
+            stage_presence="presence",
+            stage_transcript="A：hi",
+            stage_transcript_private=True,
+        )
+
+    content = {message.get("_layer"): message["content"] for message in messages}["4.2_stage_transcript"]
+    assert "群聊" not in content
+    assert "你们俩的私下对话" in content
+    assert "不在场" in content
+
+
 @pytest.mark.asyncio
 async def test_reality_runtime_delivers_speaker_and_enqueues_projection(sandbox, monkeypatch):
     from core.stage.models import Stage

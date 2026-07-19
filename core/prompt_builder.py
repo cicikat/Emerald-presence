@@ -419,6 +419,7 @@ def build(
     user_facts_text: str = "",
     stage_presence: str = "",
     stage_transcript: str = "",
+    stage_transcript_private: bool = False,
     suppress_emotional_recall: bool = False,
     web_recall_result: str = "",
     web_recall_hits: list | None = None,
@@ -842,11 +843,22 @@ def build(
             "_layer": "4_group_context",
         })
 
-    # ── Layer 4.2: shared Stage transcript ──────────────────────────────────
+    # ── Layer 4.2: shared Stage transcript / private exchange transcript ────
+    # 私聊复用这一槽位时（Brief 106 §2）此前固定拼"群聊"头，角色把私下对话
+    # 误读成群聊场合。层名 _layer 不变，只按 stage_transcript_private 换头。
     if stage_transcript:
+        if stage_transcript_private:
+            from core.config_loader import get_user_display_name
+
+            _pe_user_name = get_user_display_name() or "TA"
+            _stage_tag = "私下对话"
+            _stage_header = f"【你们俩的私下对话（{_pe_user_name}不在场）】"
+        else:
+            _stage_tag = "群聊对话"
+            _stage_header = "【当前群聊共享对话】"
         messages.append({
             "role": "system",
-            "content": "<群聊对话>\n【当前群聊共享对话】\n" + stage_transcript + "\n</群聊对话>",
+            "content": f"<{_stage_tag}>\n{_stage_header}\n" + stage_transcript + f"\n</{_stage_tag}>",
             "_layer": "4.2_stage_transcript",
             "_drop_priority": 90,
         })
