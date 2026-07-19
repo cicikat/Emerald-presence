@@ -1460,6 +1460,35 @@ def build(
     except Exception:
         pass
 
+    # ACT-2 · 流式路径反坍缩软降级：上一轮流式生成命中句首同质坍缩（S2 同源检测，
+    # core.pipeline.Pipeline._check_stream_collapse 写入）时，流式当轮已放行、不可撤回，
+    # 只能延到本轮注入纠偏提示；一次性信号，读到即消费清除，不做持久化倒计时。
+    try:
+        from core.memory.short_term import (
+            consume_stream_collapse_signal as _consume_stream_collapse,
+            is_filler_prefix as _is_filler_prefix_stream,
+        )
+        _stream_collapse_prefix = _consume_stream_collapse(user_id, char_id=char_id)
+        if _stream_collapse_prefix:
+            if _is_filler_prefix_stream(_stream_collapse_prefix):
+                _stream_collapse_hint = (
+                    "（上一条回复开头是同一个语气词，这次第一个字直接进正文——"
+                    "从动作、称呼或要说的事本身开始。）"
+                )
+            else:
+                _stream_collapse_hint = (
+                    f'（上一条回复开头用了「{_stream_collapse_prefix}」，这次禁止以相同句首开头，'
+                    "自然地换个切入方式。）"
+                )
+            messages.append({
+                "role": "system",
+                "content": _stream_collapse_hint,
+                "_layer": "stream_collapse_hint",
+                "_drop_priority": 95,
+            })
+    except Exception:
+        pass
+
     # ── 根据 chat.style 注入输出风格指令（合并为一处，按模式分叉）─────────────
     from core.config_loader import get_config as _get_config
     _style = _get_config().get("chat", {}).get("style", "roleplay")
@@ -1820,6 +1849,7 @@ KNOWN_LAYERS: list[tuple[str, str]] = [
     ("10_tool_result", "本轮工具执行结果"),
     ("10.5_action_trace", "工具动作痕迹：你最近做过的操作（跨轮回忆，不进裁剪链）"),
     ("anti_collapse_hint", "反坍缩提示：长度/分段维度合并，各自持久化倒计时 hint_rounds 轮"),
+    ("stream_collapse_hint", "流式路径反坍缩软降级提示（ACT-2）：上一轮命中一次性信号，读到即消费清除"),
     ("11_author_note", "Author's Note 人设核心提醒"),
     ("11_jailbreak", "破限预设 layer=11"),
     ("11.5_post_history", "酒馆卡历史之后约束层"),

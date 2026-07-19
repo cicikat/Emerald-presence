@@ -44,6 +44,7 @@ REGISTRY: dict[str, PathMeta] = {
     "spend_ledger":          PathMeta("runtime",   "shared",          "global",        "ignore"),
     "activity_snapshot":      PathMeta("runtime",   "character_inner", "per_char",      "ignore"),
     "dreams_tmp_dir":         PathMeta("runtime",   "dream",           "per_char_user", "ignore"),
+    "stream_collapse_signal": PathMeta("runtime",   "reality",         "per_char_user", "ignore"),
     "scheduler_cooldowns":    PathMeta("canonical", "shared",          "global",        "ignore"),
     "scheduler_user_state":   PathMeta("runtime",   "shared",          "global",        "ignore"),
     "proactive_recent":       PathMeta("runtime",   "shared",          "global",        "ignore"),

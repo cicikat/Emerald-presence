@@ -221,7 +221,7 @@ async def test_owner_chat_stream_enforces_visible_copy_only(monkeypatch, enabled
         def build_prompt(self, uid, message, context, **kwargs):
             return [{"role": "user", "content": message}], {}
 
-        async def run_llm_stream(self, messages):
+        async def run_llm_stream(self, messages, **kwargs):
             for piece in pieces:
                 yield piece
 

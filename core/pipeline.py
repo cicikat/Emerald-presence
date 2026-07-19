@@ -763,6 +763,19 @@ class Pipeline:
         reply = await _call()
         return await self._anti_collapse_prefix_retry(messages, reply)
 
+    @staticmethod
+    def _homogeneity_hist_for_check(messages: list[dict]) -> list[dict]:
+        """从层9历史条目里复原 detect_reply_homogeneity_prefix() 要用的 assistant 历史。
+
+        build() 侧可能已做过去同质投影（剥掉了重复前缀），命中的用 _raw_content 复原
+        原文，才能拿到与 build() 内部同一份检测结果 P。供输出端重试与流式软降级共用。
+        """
+        return [
+            {"role": "assistant", "content": m.get("_raw_content", m.get("content", ""))}
+            for m in messages
+            if m.get("_layer") == "9_history" and m.get("role") == "assistant"
+        ]
+
     async def _anti_collapse_prefix_retry(self, messages: list[dict], reply: str) -> str:
         """
         问题7 (c) 输出端校验重试（硬止血）：
@@ -780,13 +793,7 @@ class Pipeline:
                 detect_reply_homogeneity_prefix,
                 is_filler_prefix,
             )
-            # messages 里层9历史条目已可能被 build() 做过去同质投影（剥掉了重复前缀），
-            # 命中的用 _raw_content 复原原文，才能拿到与 build() 内部同一份检测结果 P。
-            hist_for_check = [
-                {"role": "assistant", "content": m.get("_raw_content", m.get("content", ""))}
-                for m in messages
-                if m.get("_layer") == "9_history" and m.get("role") == "assistant"
-            ]
+            hist_for_check = self._homogeneity_hist_for_check(messages)
             prefix = detect_reply_homogeneity_prefix(hist_for_check)
             if not prefix or not reply.strip().startswith(prefix):
                 return reply
@@ -807,8 +814,42 @@ class Pipeline:
             log_error("pipeline._anti_collapse_prefix_retry", e)
             return reply
 
+    def _check_stream_collapse(
+        self, messages: list[dict], reply: str, *, char_id: str | None, user_id: str,
+    ) -> None:
+        """
+        ACT-2 · 方案B（流式路径反坍缩软降级）：
+        流式 token 已对用户可见，不能像非流式那样丢弃重试——命中与 S2 同源的
+        detect_reply_homogeneity_prefix() 检测时，本轮原样放行，只打观测日志 +
+        写入下一轮可读的一次性信号（core.memory.short_term.note_stream_collapse_signal），
+        由下一轮 build_prompt 注入反坍缩提示层后消费清除。fail-open：任何异常都不影响本轮输出。
+        """
+        if not user_id:
+            return
+        try:
+            from core.memory.short_term import detect_reply_homogeneity_prefix
+            prefix = detect_reply_homogeneity_prefix(self._homogeneity_hist_for_check(messages))
+            if not prefix or not reply.strip().startswith(prefix):
+                return
+
+            _char_id = char_id or getattr(self, "_active_character_id", DEFAULT_CHAR_ID)
+            logger.info(
+                "[anti_collapse] stream_soft_degrade uid=%s char_id=%s rule=homogeneity_prefix prefix=%r",
+                user_id, _char_id, prefix,
+            )
+            from core.memory.short_term import note_stream_collapse_signal
+            note_stream_collapse_signal(user_id, prefix, char_id=_char_id)
+        except Exception as e:
+            from core.error_handler import log_error
+            log_error("pipeline._check_stream_collapse", e)
+
     async def run_llm_stream(
-        self, messages: list[dict], *, char_id: str | None = None, is_proactive: bool = False
+        self,
+        messages: list[dict],
+        *,
+        char_id: str | None = None,
+        is_proactive: bool = False,
+        user_id: str = "",
     ):
         """流式生成，逐 token yield。失败（含零产出）时降级为非流式整段 yield 一次。
 
@@ -818,15 +859,19 @@ class Pipeline:
 
         char_id: 显式指定"替谁说话"时传（Brief 30）；None（默认）按活跃角色解析。
         is_proactive: 本次是否 scheduler 主动消息（Brief 32）。
+        user_id: 反坍缩软降级信号（ACT-2）归属的用户；不传则跳过检测（无法定位下一轮读取位置）。
         """
         from core import llm_client
         got_any = False
+        pieces: list[str] = []
         try:
             async for piece in llm_client.chat_stream(messages, char_id=char_id, is_proactive=is_proactive):
                 got_any = True
+                pieces.append(piece)
                 yield piece
             # 流正常结束
             if got_any:
+                self._check_stream_collapse(messages, "".join(pieces), char_id=char_id, user_id=user_id)
                 return
             # 0 token（模型返回空流） → 降级
         except Exception as e:
@@ -984,7 +1029,7 @@ class Pipeline:
         # natural（用过工具）或 exhausted：强制收尾，注入声音锚定，走不带 tools 的出口。
         loop_msgs.append({"role": "system", "content": _voice_reanchor(char_id)})
         if stream:
-            return self.run_llm_stream(loop_msgs, is_proactive=is_proactive)
+            return self.run_llm_stream(loop_msgs, char_id=char_id, is_proactive=is_proactive, user_id=uid)
         return await self.run_llm(loop_msgs, is_proactive=is_proactive)
 
     # ──────────────────────────────────────────────────────────────────────────

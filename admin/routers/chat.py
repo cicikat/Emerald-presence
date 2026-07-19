@@ -172,7 +172,9 @@ async def run_owner_chat_turn(
                     session_state=_loop_session_state, is_group=False, stream=True,
                 )
             else:
-                _stream_source = pipeline.run_llm_stream(messages)
+                _stream_source = pipeline.run_llm_stream(
+                    messages, char_id=_frozen_scope.character_id, user_id=user_id,
+                )
             try:
                 async for piece in _stream_source:
                     if _t_first_delta_ts is None:

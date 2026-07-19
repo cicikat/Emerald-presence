@@ -21,10 +21,14 @@
 
 ### ACT-2：反坍缩重试未覆盖流式路径
 
-**状态**：`open`（需独立设计）
-**位置**：`core/pipeline.py::Pipeline.run_llm_stream()`
+**状态**：`observe`（方案 B 已落地，观察单轮坍缩率）
+**位置**：`core/pipeline.py::Pipeline.run_llm_stream()` / `Pipeline._check_stream_collapse()`
 
-非流式路径可在发现重复句首后丢弃并重试；流式 token 已对用户可见，不能直接套用。下一步需在“暂缓前 N token”与“流式只接受软降级”之间完成设计、延迟评估和协议验收。
+`cc-tasks/105` 已裁决并实现方案 B——流式路径不丢弃重试（暂缓前 N token 的方案 A 已封存），
+命中句首同质坍缩（S2 同源检测）时只记观测日志（`[anti_collapse] stream_soft_degrade`）+ 写入
+下一轮一次性信号，由下一轮 `build_prompt` 注入 `stream_collapse_hint` 层纠偏，详见
+`docs/prompt-layers.md` §反坍缩治理 · ACT-2。**观察项**：若上线后单轮内坍缩率（同一条流式回复
+内部即出现重复句首，而非跨轮）显著高于非流式路径，需复议启用方案 A。
 
 ### F8：管理面板对话 UI 右键历史未实现
 

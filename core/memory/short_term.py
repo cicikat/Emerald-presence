@@ -684,6 +684,45 @@ def get_anti_collapse_hint(
     return " ".join(parts) if parts else None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ACT-2：流式路径反坍缩（方案 B · 软降级）
+#
+# 流式 token 已对用户可见，不能像非流式那样丢弃重试。命中 S2 同源检测
+# （detect_reply_homogeneity_prefix）时，本轮原样放行，只落一次性信号供
+# 下一轮 build_prompt 读到后注入提示层；读到即删，不做持久化倒计时
+# （区别于上面 get_anti_collapse_hint 的 hint_rounds 衰减）。
+# ─────────────────────────────────────────────────────────────────────────────
+
+def note_stream_collapse_signal(
+    user_id: str, prefix: str, *, char_id: str = DEFAULT_CHAR_ID,
+) -> None:
+    """记录一次流式坍缩命中（句首前缀 P），供下一轮读取。fail-open：写入失败只记日志。"""
+    try:
+        from core.sandbox import get_paths
+        path = get_paths().stream_collapse_signal(user_id, char_id=char_id)
+        safe_write_json(path, {"prefix": prefix, "ts": time.time()}, keep_bak=False)
+    except Exception as e:
+        log_error("short_term.note_stream_collapse_signal", e)
+
+
+def consume_stream_collapse_signal(
+    user_id: str, *, char_id: str = DEFAULT_CHAR_ID,
+) -> str | None:
+    """读取并立即删除（一次性消费）流式坍缩信号，返回命中的句首前缀；无信号返回 None。fail-open。"""
+    try:
+        from core.sandbox import get_paths
+        path = get_paths().stream_collapse_signal(user_id, char_id=char_id)
+        if not path.exists():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+        path.unlink(missing_ok=True)
+        prefix = data.get("prefix")
+        return prefix if isinstance(prefix, str) and prefix else None
+    except Exception as e:
+        log_error("short_term.consume_stream_collapse_signal", e)
+        return None
+
+
 def clear(user_id: str, *, char_id: str = DEFAULT_CHAR_ID):
     """清空指定用户的短期历史（admin 用）"""
     _save(user_id, [], char_id=char_id)

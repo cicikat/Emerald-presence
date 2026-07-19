@@ -527,6 +527,10 @@ class DataPaths:
         """知识库目录（静态内容）: content/characters/{char_id}/knowledge/"""
         return Path(f"content/characters/{char_id}/knowledge")
 
+    def stream_collapse_signal(self, user_id: str | int, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
+        """ACT-2：流式路径反坍缩一次性降级信号，下一轮 build_prompt 读到后立即消费清除。"""
+        return self.user_memory_root(user_id, char_id=char_id) / "stream_collapse_signal.json"
+
     def sent_letters(self, user_id: str | int, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
         """已发送信件归档: data/runtime/memory/{char_id}/{uid}/sent_letters.json"""
         return self.user_memory_root(user_id, char_id=char_id) / "sent_letters.json"
