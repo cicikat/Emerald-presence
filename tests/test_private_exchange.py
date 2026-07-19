@@ -169,6 +169,45 @@ async def test_generate_private_skips_fetch_context():
     assert captured["stage_transcript"] == ""
     assert captured["stage_transcript_private"] is True
     assert "看不到" in captured["stage_presence"]
+    assert captured["content"].startswith("（旁白指引，不是任何人的发言。）")
+
+
+@pytest.mark.asyncio
+async def test_generate_private_instruction_prefixed_for_continuation_and_opener():
+    """Brief 106 §3: the instruction rides the user-role slot (layer 12), which
+    the model otherwise reads as someone present speaking. The narrator prefix
+    must lead the final text in every branch — continuation, cold-open, and
+    cold-open-with-opener-material (prefix must stay first, not get buried
+    after the opener line)."""
+    from core.stage.views import StageCharacterView
+    from unittest.mock import patch
+
+    captured = []
+
+    class FakePipeline:
+        async def fetch_context(self, *a, **kw):
+            raise AssertionError("private exchange must use the lightweight path")
+
+        def build_prompt(self, uid, content, context, **kwargs):
+            captured.append(content)
+            return ([{"role": "user", "content": content}], {"token_estimate": 1})
+
+        async def run_llm(self, messages, *, char_id=None):
+            return "回复内容"
+
+    view = object.__new__(StageCharacterView)
+    view.char_id = _A
+    view.pipeline = FakePipeline()
+
+    prefix = "（旁白指引，不是任何人的发言。）"
+    with patch("core.observe.prompt_capture.set_capture_origin"):
+        await view.generate_private(_B, [(_B, "在吗")], owner_uid="owner")
+        await view.generate_private(_B, [], owner_uid="owner", opener_material="今晚月色不错。")
+
+    continuation, cold_open_with_material = captured
+    assert continuation.startswith(prefix)
+    assert cold_open_with_material.startswith(prefix)
+    assert "今晚月色不错。" in cold_open_with_material
 
 
 # ── LLM 调用预算硬顶 + 落盘 + 回流 ──────────────────────────────────────────────

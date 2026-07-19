@@ -184,6 +184,10 @@ class StageCharacterView:
             )
             if opener_material:
                 instruction = opener_material + "\n" + instruction
+        # Brief 106 §3: this instruction goes out over the user-role slot (layer
+        # 12), which the model otherwise reads as someone present speaking —
+        # prefix it as an out-of-character stage direction, not dialogue.
+        instruction = "（旁白指引，不是任何人的发言。）" + instruction
 
         from core.tag_rules import get_tags
         seed_text = turns[-1][1] if turns else instruction
