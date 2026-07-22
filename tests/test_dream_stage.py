@@ -1,6 +1,8 @@
 """Brief 100 · 群聊梦境（Dream Stage）后端 v1."""
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 ROSTER = ["yexuan", "yexuanJ-5412"]
@@ -220,6 +222,40 @@ async def test_send_accepted_shape(sandbox, monkeypatch):
     result = await group_dream_send(GROUP_ID, {"content": "你好"})
     assert result["status"] == "accepted"
     assert isinstance(result["round_id"], str) and result["round_id"]
+
+
+@pytest.mark.asyncio
+async def test_hanging_round_times_out_resets_state_and_next_round_runs(sandbox, monkeypatch):
+    """An LLM hang must release the round guard and leave a visible failure state."""
+    import core.stage.dream_runtime as runtime
+    from core.stage.dream_state import read_state
+    from core.stage.runner import StageTurnResult
+
+    _create_reality_group()
+    await _enter_group_dream()
+
+    async def hanging_turn(*args, **kwargs):
+        await asyncio.Future()
+
+    monkeypatch.setattr(runtime, "_DREAM_STAGE_TURN_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(runtime, "run_owner_turn", hanging_turn)
+    with pytest.raises(TimeoutError):
+        await runtime.run_dream_stage_turn(GROUP_ID, "第一句", fanout=False, round_id="hang")
+
+    state = read_state(GROUP_ID)
+    assert state["round_status"] == "timed_out"
+    assert state["last_round_error"] == "timeout"
+    assert runtime.has_active_round(GROUP_ID) is False
+
+    async def recovered_turn(*args, **kwargs):
+        return StageTurnResult(GROUP_ID, "recovered", (), 0)
+
+    monkeypatch.setattr(runtime, "run_owner_turn", recovered_turn)
+    result = await runtime.run_dream_stage_turn(GROUP_ID, "第二句", fanout=False, round_id="recovered")
+    assert result.turn_id == "recovered"
+    state = read_state(GROUP_ID)
+    assert state["round_status"] == "idle"
+    assert state["last_round_error"] is None
 
 
 # ── §3 state / settings shape ──────────────────────────────────────────────────

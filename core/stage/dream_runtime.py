@@ -22,7 +22,9 @@ for, so this docstring doesn't trip its own guard):
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -46,6 +48,28 @@ from core.stage.store import load_stage as load_reality_stage
 logger = logging.getLogger(__name__)
 
 _VIEWS = DreamStageViewRegistry()
+
+# A Dream Stage round is serialized per group.  A second HTTP send must not
+# queue behind a stuck LLM call and create another permanent typing indicator.
+_ACTIVE_ROUNDS: dict[str, str] = {}
+_DREAM_STAGE_TURN_TIMEOUT_S = 90.0
+
+
+class DreamStageBusyError(RuntimeError):
+    """Raised when a group already owns an in-flight Dream Stage round."""
+
+
+def has_active_round(group_id: str) -> bool:
+    """Whether this process is currently executing a round for ``group_id``."""
+    return group_id in _ACTIVE_ROUNDS
+
+
+def reserve_round(group_id: str, round_id: str) -> bool:
+    """Atomically reserve a round before its background task is scheduled."""
+    if has_active_round(group_id):
+        return False
+    _ACTIVE_ROUNDS[group_id] = round_id
+    return True
 
 
 def _dream_trace_path(group_id: str) -> Path:
@@ -81,77 +105,117 @@ async def run_dream_stage_turn(
     turn_id: str | None = None,
     round_id: str | None = None,
 ) -> StageTurnResult:
-    reality_stage = load_reality_stage(group_id)
-    if reality_stage is None:
-        raise ValueError(f"stage not found: {group_id!r}")
-    if reality_stage.domain != "reality":
-        raise RuntimeError("run_dream_stage_turn requires an underlying reality Stage")
-
-    dream_state = read_dream_group_state(group_id)
-    if dream_state.get("status") not in (DreamStatus.DREAM_ACTIVE.value, DreamStatus.DREAM_CLOSING.value):
-        raise RuntimeError(f"group dream not active: group={group_id!r}")
-
     resolved_round_id: str = round_id or turn_id or uuid.uuid4().hex
+    active_round_id = _ACTIVE_ROUNDS.get(group_id)
+    if active_round_id is not None and active_round_id != resolved_round_id:
+        raise DreamStageBusyError(
+            f"group dream round already running: group={group_id!r} round={active_round_id!r}"
+        )
+    _ACTIVE_ROUNDS[group_id] = resolved_round_id
+    try:
+        reality_stage = load_reality_stage(group_id)
+        if reality_stage is None:
+            raise ValueError(f"stage not found: {group_id!r}")
+        if reality_stage.domain != "reality":
+            raise RuntimeError("run_dream_stage_turn requires an underlying reality Stage")
 
-    async def generate(stg, speaker_id, transcript, _turn_id, triggered_by):
-        return await _VIEWS.get(speaker_id).generate(stg, transcript, _turn_id, triggered_by)
+        dream_state = read_dream_group_state(group_id)
+        if dream_state.get("status") not in (DreamStatus.DREAM_ACTIVE.value, DreamStatus.DREAM_CLOSING.value):
+            raise RuntimeError(f"group dream not active: group={group_id!r}")
+        dream_state.update({
+            "active_round_id": resolved_round_id,
+            "round_status": "running",
+            "round_started_at": time.time(),
+            "last_round_error": None,
+        })
+        write_dream_group_state(group_id, dream_state)
+        logger.debug("[dream_runtime] round state=running group=%s round=%s", group_id, resolved_round_id)
 
-    async def deliver(speaker_id: str, content: str, _turn_id: str):
-        if not fanout:
-            return
-        _msg_id = uuid.uuid4().hex
-        try:
-            from channels import ui_push as _ui_push
-            await _ui_push.pseudo_stream_push(
-                content, msg_id=_msg_id, char_id=speaker_id, round_id=resolved_round_id,
-                domain="dream", profile="dream",
-            )
-        except Exception:
-            logger.debug("[dream_runtime] pseudo_stream_push failed", exc_info=True)
-        try:
-            from channels import desktop_ws as _dws
-            if _dws.is_connected():
-                await _dws.push_message(
+        async def generate(stg, speaker_id, transcript, _turn_id, triggered_by):
+            return await _VIEWS.get(speaker_id).generate(stg, transcript, _turn_id, triggered_by)
+
+        async def deliver(speaker_id: str, content: str, _turn_id: str):
+            if not fanout:
+                return
+            _msg_id = uuid.uuid4().hex
+            try:
+                from channels import ui_push as _ui_push
+                await _ui_push.pseudo_stream_push(
                     content, msg_id=_msg_id, char_id=speaker_id, round_id=resolved_round_id,
-                    domain="dream",
+                    domain="dream", profile="dream",
                 )
-        except Exception:
-            logger.debug("[dream_runtime] WS deliver failed", exc_info=True)
-        # v1: desktop-only immersive overlay — no fanout to mobile/QQ (mirrors
-        # solo dream, which never fans out to those channels either).
+            except Exception:
+                logger.debug("[dream_runtime] pseudo_stream_push failed", exc_info=True)
+            try:
+                from channels import desktop_ws as _dws
+                if _dws.is_connected():
+                    await _dws.push_message(
+                        content, msg_id=_msg_id, char_id=speaker_id, round_id=resolved_round_id,
+                        domain="dream",
+                    )
+            except Exception:
+                logger.debug("[dream_runtime] WS deliver failed", exc_info=True)
 
-    if fanout:
+        if fanout:
+            try:
+                from channels import desktop_ws as _dws
+                if _dws.is_connected():
+                    await _dws.push_group_round_start(resolved_round_id, group_id, domain="dream")
+            except Exception:
+                logger.debug("[dream_runtime] WS group_round_start push failed", exc_info=True)
+
         try:
-            from channels import desktop_ws as _dws
-            if _dws.is_connected():
-                await _dws.push_group_round_start(resolved_round_id, group_id, domain="dream")
-        except Exception:
-            logger.debug("[dream_runtime] WS group_round_start push failed", exc_info=True)
+            result = await asyncio.wait_for(
+                run_owner_turn(
+                    group_id,
+                    owner_content,
+                    generate_reply=generate,
+                    deliver_reply=deliver,
+                    turn_id=resolved_round_id,
+                    load_stage_fn=_load_dream_stage,
+                    load_transcript_fn=load_dream_transcript,
+                    append_transcript_fn=_append_dream_transcript,
+                    trace_path_fn=_dream_trace_path,
+                ),
+                timeout=_DREAM_STAGE_TURN_TIMEOUT_S,
+            )
+        except TimeoutError as exc:
+            logger.warning("[dream_runtime] round state=timed_out group=%s round=%s timeout_s=%s", group_id, resolved_round_id, _DREAM_STAGE_TURN_TIMEOUT_S)
+            _mark_round_finished(group_id, resolved_round_id, error="timeout")
+            raise TimeoutError(f"group dream round timed out after {_DREAM_STAGE_TURN_TIMEOUT_S:g}s") from exc
 
-    result = await run_owner_turn(
-        group_id,
-        owner_content,
-        generate_reply=generate,
-        deliver_reply=deliver,
-        turn_id=resolved_round_id,
-        load_stage_fn=_load_dream_stage,
-        load_transcript_fn=load_dream_transcript,
-        append_transcript_fn=_append_dream_transcript,
-        trace_path_fn=_dream_trace_path,
-    )
+        if result.replies:
+            _update_shared_state_after_round(group_id, owner_content, result.replies)
+        _mark_round_finished(group_id, resolved_round_id)
+        logger.debug("[dream_runtime] round state=finished group=%s round=%s", group_id, resolved_round_id)
+        return result
+    except BaseException:
+        _mark_round_finished(group_id, resolved_round_id, error="failed")
+        logger.debug("[dream_runtime] round state=failed group=%s round=%s", group_id, resolved_round_id, exc_info=True)
+        raise
+    finally:
+        if fanout:
+            try:
+                from channels import desktop_ws as _dws
+                if _dws.is_connected():
+                    await _dws.push_group_round_end(resolved_round_id, group_id, domain="dream")
+            except Exception:
+                logger.debug("[dream_runtime] WS group_round_end push failed", exc_info=True)
+        _ACTIVE_ROUNDS.pop(group_id, None)
 
-    if fanout:
-        try:
-            from channels import desktop_ws as _dws
-            if _dws.is_connected():
-                await _dws.push_group_round_end(resolved_round_id, group_id, domain="dream")
-        except Exception:
-            logger.debug("[dream_runtime] WS group_round_end push failed", exc_info=True)
 
-    if result.replies:
-        _update_shared_state_after_round(group_id, owner_content, result.replies)
-
-    return result
+def _mark_round_finished(group_id: str, round_id: str, *, error: str | None = None) -> None:
+    """Expose a terminal result without reviving a dream that hard-exited."""
+    state = read_dream_group_state(group_id)
+    if state.get("active_round_id") != round_id:
+        return
+    if state.get("status") not in (DreamStatus.DREAM_ACTIVE.value, DreamStatus.DREAM_CLOSING.value):
+        return
+    state.pop("active_round_id", None)
+    state.pop("round_started_at", None)
+    state["round_status"] = "timed_out" if error == "timeout" else "failed" if error else "idle"
+    state["last_round_error"] = error
+    write_dream_group_state(group_id, state)
 
 
 def _update_shared_state_after_round(

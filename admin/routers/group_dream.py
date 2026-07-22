@@ -186,7 +186,11 @@ async def group_dream_send(group_id: str, body: dict, _auth=Depends(require_scop
     if not content:
         raise HTTPException(status_code=422, detail="content 不能为空")
 
+    from core.stage.dream_runtime import reserve_round
+
     round_id = uuid.uuid4().hex
+    if not reserve_round(group_id, round_id):
+        raise HTTPException(status_code=409, detail="群聊梦境正在回应上一条消息，请稍候")
 
     async def _run():
         try:
@@ -194,12 +198,6 @@ async def group_dream_send(group_id: str, body: dict, _auth=Depends(require_scop
             await run_dream_stage_turn(group_id, content, fanout=True, round_id=round_id)
         except Exception:
             logger.exception("[group_dream_send] dream stage turn failed group=%s round=%s", group_id, round_id)
-            try:
-                from channels import desktop_ws as _dws
-                if _dws.is_connected():
-                    await _dws.push_group_round_end(round_id, group_id, domain="dream")
-            except Exception:
-                pass
 
     asyncio.create_task(_run())
     return {"round_id": round_id, "status": "accepted"}
@@ -247,6 +245,8 @@ async def group_dream_state_get(group_id: str, _auth=Depends(require_scopes("cha
         "scene_state": state.get("scene_state"),
         "symbolic_anchors": list(state.get("symbolic_anchors") or []),
         "flow_entries": list(state.get("flow_entries") or []),
+        "round_status": state.get("round_status", "idle"),
+        "last_round_error": state.get("last_round_error"),
     }
     base.update(derive_dream_state_projection(state))
     base["blocks_chat"] = get_reality_guard_status(stage.owner_uid) != DreamGuardStatus.ALLOW

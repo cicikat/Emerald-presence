@@ -152,7 +152,8 @@ def clear_local_state(state: dict[str, Any]) -> dict[str, Any]:
     for key in (
         "char_tension", "scene_state", "symbolic_anchors", "body_state",
         "per_char_snapshots", "frozen_relations", "dream_id", "dream_started_at",
-        "frozen_world",
+        "frozen_world", "active_round_id", "round_started_at", "round_status",
+        "last_round_error",
     ):
         out.pop(key, None)
     return out

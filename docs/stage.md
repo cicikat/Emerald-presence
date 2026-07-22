@@ -326,6 +326,8 @@ pipeline 同构：
 | `POST` | `/group/{id}/dream/enter` | 冻结世界/lore/逐角色快照/relations；冲突 409：本群已有活跃梦、owner 单人梦 ACTIVE/CLOSING、`conversation_lock(owner_uid)` 已被占用（视为"本群 reality 轮进行中"） |
 | `POST` | `/group/{id}/dream/send` | `{content}` → `{round_id, status:"accepted"}`，异步起 `run_dream_stage_turn()`，WS 推送 |
 | `POST` | `/group/{id}/dream/exit` | 无条件硬退（Invariant D）；transcript 归档、dream-local 状态清空、状态直接回 `REALITY_CHAT`（v1 无 afterglow，不经 `REALITY_AFTERGLOW`） |
+
+Dream Stage 每组同一时间只允许一个 in-flight round。运行态会写入 `active_round_id` / `round_status`；第二条发送返回 409 而不是排队并制造第二个 typing 气泡。整轮受运行时 timeout 保护；超时或异常总会发送既有 `group_round_end` 解锁前端，并在状态端点返回 `round_status`（`timed_out` / `failed`）与 `last_round_error`，下一条消息可以正常处理。
 | `GET` | `/group/{id}/dream/state` | 对齐单人 `/dream/state` shape；差异：`char_tension` 是 `{char_id: float}` 映射、新增 `roster`；`derive_dream_state_projection()` 与 `get_reality_guard_status()` 分别调用，语义不合并 |
 | `GET`/`PATCH` | `/group/{id}/dream/settings` | schema 见 `core/stage/dream_settings.py`；枚举校验对齐单人 `/dream/settings`；`per_char` 的 key 必须是本群 roster 成员 |
 | `GET` | `/dream/presets` | 挂在 `admin/routers/dream.py`（不是 `/group/*` 前缀）：列出 `characters/dream_presets/` 经 asset registry 登记的预设 `{id, label}`，供客户端 per-char 选择器；只读，无正文 |
