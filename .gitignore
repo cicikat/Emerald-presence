@@ -38,6 +38,7 @@ __pycache__/
 .env
 .env.*
 .tmp
+.testmondata
 DESIGN.md
 tests/test_record.md
 tests/eval_set.json

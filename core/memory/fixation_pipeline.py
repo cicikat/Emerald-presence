@@ -487,6 +487,7 @@ def _write_trigger_audit_log(
     dedupe_key: str = "",
     source: str = "",
     kind: str = "",
+    trust: str = "",
     dream_guard_status: str = "",
     gate_result: str = "",
     did_generate_reply: bool = True,
@@ -497,7 +498,7 @@ def _write_trigger_audit_log(
     Called in place of short_term.append for trigger turns (P0 boundary rule).
 
     Structured provenance fields (event_id, dedupe_key, gate_result, dream_guard_status,
-    source, kind) are populated when threaded from _pipeline_send via audit_extras; they
+    source, trust) are populated when threaded from _pipeline_send via audit_extras; they
     default to empty strings for paths that don't thread them (e.g. slow_queue retry).
     """
     import hashlib
@@ -522,8 +523,11 @@ def _write_trigger_audit_log(
             record["dedupe_key"] = dedupe_key
         if source:
             record["source"] = source
-        if kind:
-            record["kind"] = kind
+        # v0.1 code still calls these paths "trigger"; persisted envelope
+        # terminology is intentionally the stable conceptual name.
+        record["kind"] = "stimulus"
+        if trust:
+            record["trust"] = trust
         if dream_guard_status:
             record["dream_guard_status"] = dream_guard_status
         if gate_result:

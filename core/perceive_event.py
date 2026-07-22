@@ -34,6 +34,17 @@ logger = logging.getLogger(__name__)
 
 # Entries older than this are evicted from the in-memory dedup registry.
 _DEDUP_TTL_SECONDS: float = 90.0
+_LOW_TRUST = "low_trust"
+_HIGH_TRUST = "high_trust"
+_VALID_TRUST_LEVELS = frozenset({_LOW_TRUST, _HIGH_TRUST})
+# No current caller uses this source. It reserves an explicit, auditable path
+# for a future direct admin stimulus without changing any gate behaviour today.
+_HIGH_TRUST_SOURCES = frozenset({"admin_direct"})
+
+
+def _default_trust_for_source(source: str) -> str:
+    """Return the v0.1 trust label implied by an event source."""
+    return _HIGH_TRUST if source in _HIGH_TRUST_SOURCES else _LOW_TRUST
 
 
 class PerceiveStatus(str, Enum):
@@ -59,6 +70,7 @@ class PerceiveEvent:
     event_id    caller-supplied stable id; when given, used as dedup_key directly
     char_id     active character; None → resolved from active_prompt_assets.json
     created_at  event creation epoch (defaults to time.time())
+    trust       low_trust / high_trust; blank derives from source in __post_init__
     require_dream_guard
                 True → dream guard must ALLOW before event is accepted
     """
@@ -70,7 +82,17 @@ class PerceiveEvent:
     event_id: Optional[str] = None
     char_id: Optional[str] = None
     created_at: float = field(default_factory=time.time)
+    trust: str = ""
     require_dream_guard: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.trust:
+            self.trust = _default_trust_for_source(self.source)
+        if self.trust not in _VALID_TRUST_LEVELS:
+            raise ValueError(
+                f"invalid PerceiveEvent trust {self.trust!r}; "
+                f"expected one of {sorted(_VALID_TRUST_LEVELS)}"
+            )
 
 
 @dataclass
@@ -166,9 +188,9 @@ async def receive_perceive_event(event: PerceiveEvent) -> PerceiveResult:
 
     logger.info(
         "[perceive_event] recv source=%s uid=%s char_id=%s channel=%s kind=%s "
-        "event_id=%s dedupe_key=%s payload_len=%d",
+        "event_id=%s dedupe_key=%s trust=%s payload_len=%d",
         event.source, event.uid, resolved_char, event.channel, event.kind,
-        event_id, dedupe_key, len(json.dumps(event.payload, default=str)),
+        event_id, dedupe_key, event.trust, len(json.dumps(event.payload, default=str)),
     )
 
     # ── 1. TTL dedup ─────────────────────────────────────────────────────────

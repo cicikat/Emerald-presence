@@ -9,3 +9,28 @@ async def api_calls(caller: str = "", provider: str = "", limit: int = Query(100
     from core.api_call_log import query
     entries, grouped = query(caller=caller, provider=provider, limit=limit)
     return {"entries": entries, "count": len(entries), "by_provider": grouped}
+
+
+@router.get("/observability/perceive-events", summary="读取 reality stimulus 审计记录")
+async def perceive_events(
+    source: str = "",
+    gate_result: str = "",
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    _auth=Depends(require_scopes("state.read")),
+):
+    from core.perceive_event_audit import query
+
+    entries, total = query(
+        source=source,
+        gate_result=gate_result,
+        offset=offset,
+        limit=limit,
+    )
+    return {
+        "entries": entries,
+        "count": len(entries),
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    }

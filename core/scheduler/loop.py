@@ -422,7 +422,8 @@ async def _pipeline_send(
             "gate_result": pe_result.status,
             "dream_guard_status": "ALLOW",
             "source": "scheduler",
-            "kind": kind,
+            "kind": "stimulus",
+            "trust": pe_event.trust,
             "did_generate_reply": True,
         }
 

@@ -6,7 +6,7 @@ Coverage:
   TA2  _assert_trigger_outlet_kind: rejected kinds (tool/activity/plugin/dream) raise
   TA3  _assert_trigger_outlet_kind: unknown kind raises
   TB1  _write_trigger_audit_log: new structured fields present (event_id, dedupe_key,
-         gate_result, dream_guard_status, source, kind, did_generate_reply)
+         gate_result, dream_guard_status, source, kind, trust, did_generate_reply)
   TB2  _write_trigger_audit_log: full reply text never present even with new fields
   TB3  capture_turn: audit_extras forwarded to _write_trigger_audit_log
   TC1  receive_perceive_event BLOCK_UNCERTAIN → emits WARNING-level log
@@ -107,16 +107,19 @@ class TestAuditLogStructuredFields(unittest.TestCase):
             dream_guard_status="ALLOW",
             source="scheduler",
             kind="scheduled",
+            trust="low_trust",
             did_generate_reply=True,
         )
         if not record:
             return  # path layout may differ; no exception = pass
         for field in ("event_id", "dedupe_key", "gate_result", "dream_guard_status",
-                      "source", "kind", "did_generate_reply", "reply_hash", "reply_len"):
+                      "source", "kind", "trust", "did_generate_reply", "reply_hash", "reply_len"):
             self.assertIn(field, record, f"audit log missing field: {field}")
         self.assertEqual(record["event_id"], "evt-abc")
         self.assertEqual(record["dedupe_key"], "dk-xyz")
         self.assertEqual(record["gate_result"], "accepted")
+        self.assertEqual(record["kind"], "stimulus")
+        self.assertEqual(record["trust"], "low_trust")
         self.assertEqual(record["dream_guard_status"], "ALLOW")
         self.assertTrue(record["did_generate_reply"])
 
@@ -150,11 +153,13 @@ class TestAuditLogStructuredFields(unittest.TestCase):
         )
         if not record:
             return
-        # Legacy call: provenance fields should not appear (they default to empty and are skipped)
-        for field in ("event_id", "dedupe_key", "source", "kind",
+        # Legacy call: empty provenance fields stay absent; kind is now the
+        # mandatory conceptual envelope name for every trigger audit record.
+        for field in ("event_id", "dedupe_key", "source",
                       "dream_guard_status", "gate_result"):
             self.assertNotIn(field, record,
                              f"empty provenance field {field!r} should be omitted")
+        self.assertEqual(record["kind"], "stimulus")
 
 
 class TestCaptureTurnAuditExtrasForwarded(unittest.TestCase):

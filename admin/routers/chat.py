@@ -800,6 +800,16 @@ async def desktop_wake(body: dict = Body(default={}), _auth=Depends(require_scop
                     bypass_gate=True,  # already inside conversation_lock
                     pipeline=pipeline,
                     envelope=stamp_trigger(),
+                    audit_extras={
+                        "event_id": _pe_result.event_id,
+                        "dedupe_key": _pe_result.dedupe_key,
+                        "gate_result": _pe_result.status,
+                        "dream_guard_status": "ALLOW",
+                        "source": _pe.source,
+                        "kind": "stimulus",
+                        "trust": _pe.trust,
+                        "did_generate_reply": True,
+                    },
                     frozen_scope=_wake_scope,
                     web_echo=bool(context.get("web_recall_result")),
                 )
