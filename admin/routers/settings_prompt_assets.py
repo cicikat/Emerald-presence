@@ -19,8 +19,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from admin.auth import require_scopes
-from core.asset_registry import get_registry, reload_registry, _AVATARS_DIR, _AVATAR_EXTS
-from core.dream.world_loader import discover_worlds, _WORLDS_BASE
+from core.asset_registry import get_registry, reload_registry, _AVATAR_EXTS
+from core.dream.world_loader import discover_worlds
 from core.model_registry import resolve_routing_info
 from core.sandbox import get_paths
 from core.safe_write import safe_write_bytes
@@ -79,9 +79,10 @@ def _character_ui_dict(entry) -> dict:
 
 def _load_world_cards() -> list[dict]:
     result = []
+    worlds_base = get_paths().dream_worlds_dir()
     for wid in discover_worlds():
         label = wid
-        meta_path = _WORLDS_BASE / wid / "meta.json"
+        meta_path = worlds_base / wid / "meta.json"
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             label = meta.get("label", wid)
@@ -172,9 +173,14 @@ async def get_character_avatar(char_id: str, v: Optional[str] = None, auth=Depen
             return FileResponse(str(p), media_type=_AVATAR_CONTENT_TYPES[ext])
 
     # Authored default
-    authored = _AVATARS_DIR / f"{char_id}.png"
-    if authored.exists():
-        return FileResponse(str(authored), media_type="image/png")
+    paths = get_paths()
+    for avatars_dir in (
+        paths.user_reality_dir() / "avatars",
+        paths.legacy_reality_dir() / "avatars",
+    ):
+        authored = avatars_dir / f"{char_id}.png"
+        if authored.exists():
+            return FileResponse(str(authored), media_type="image/png")
 
     raise HTTPException(status_code=404, detail=f"no avatar for character {char_id!r}")
 

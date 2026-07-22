@@ -735,30 +735,26 @@ def _load_preset_text(preset_name: str) -> tuple[str, str]:
     Falls back to default.md if named preset is missing; returns disabled if default missing too.
     """
     import re
-    from pathlib import Path
-
-    _PRESETS_BASE = Path("characters/dream_presets")
-
     if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", preset_name):
         logger.warning("[dream_pipeline] preset name %r rejected, using default", preset_name)
         preset_name = "default"
 
-    def _resolve_filename(name: str) -> str:
+    def _resolve_path(name: str):
         try:
             from core.asset_registry import get_registry
             entry = get_registry().resolve(name, "dream_preset")
-            return entry.filename
+            return entry.path()
         except Exception:
-            return f"{name}.md"
+            from core.sandbox import get_paths
+            return get_paths().dream_presets_dir() / f"{name}.md"
 
     def _read(name: str) -> str | None:
-        fname = _resolve_filename(name)
-        p = _PRESETS_BASE / fname
+        p = _resolve_path(name)
         try:
             if p.exists():
                 return p.read_text(encoding="utf-8").strip() or None
         except Exception as exc:
-            logger.warning("[dream_pipeline] cannot read preset %r (%s): %s", name, fname, exc)
+            logger.warning("[dream_pipeline] cannot read preset %r (%s): %s", name, p, exc)
         return None
 
     text = _read(preset_name)

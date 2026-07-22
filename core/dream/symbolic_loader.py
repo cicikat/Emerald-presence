@@ -13,10 +13,12 @@ import json
 import logging
 from pathlib import Path
 
+from core.sandbox import get_paths
+
 logger = logging.getLogger(__name__)
 
-_WORLDS_BASE = Path("characters/dream_worlds")
-_ANCHOR_WEIGHTS_PATH = Path("characters/dream_worlds/anchor_weights.json")
+_WORLDS_BASE = get_paths().dream_worlds_dir()
+_ANCHOR_WEIGHTS_PATH = _WORLDS_BASE / "anchor_weights.json"
 
 # Per-world profile cache: world_id → {symbol: {"weight": float, "tags": list[str]}}
 _profile_cache: dict[str, dict[str, dict]] = {}

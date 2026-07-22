@@ -14,7 +14,6 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
-
 import yaml
 
 from core.sandbox import get_paths
@@ -44,7 +43,9 @@ def _load_pool(char_id: str = _DEFAULT_CHAR_ID) -> list:
     try:
         pool_path = get_paths().activity_pool(char_id=char_id)
         if char_id != _DEFAULT_CHAR_ID:
-            own_pool = Path(f"content/characters/{char_id}/activity_pool.yaml")
+            own_pool = Path(f"userdata/characters/authored/{char_id}/activity_pool.yaml")
+            if not own_pool.exists():
+                own_pool = Path(f"content/characters/{char_id}/activity_pool.yaml")
             if not own_pool.exists():
                 logger.debug(
                     f"[activity] {char_id} 无独立 activity_pool.yaml，fallback 读默认角色池"

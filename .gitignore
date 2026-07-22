@@ -1,6 +1,8 @@
 # runtime data — see blacklist.example.yaml and relations.example.yaml for structure
 data/
 logs/
+# Local user-authored assets: cards, worlds, private character notes, and stickers.
+userdata/
 # 角色卡（实际角色文件含隐私内容不提交；空白模板见 examples/character_template.json）
 characters/*.json
 characters/*.txt

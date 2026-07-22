@@ -27,11 +27,14 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_CHARACTERS_DIR = Path("characters")
-_LOREBOOKS_DIR = _CHARACTERS_DIR / "reality" / "lorebooks"
-_JAILBREAKS_DIR = _CHARACTERS_DIR / "reality" / "jailbreaks"
-_DREAM_PRESETS_DIR = _CHARACTERS_DIR / "dream_presets"
-_AVATARS_DIR = _CHARACTERS_DIR / "reality" / "avatars"
+_LEGACY_CHARACTERS_DIR = Path("characters")
+# Compatibility aliases retained for extensions and test fixtures that still
+# refer to the pre-C1 names. Runtime discovery itself uses DataPaths.
+_CHARACTERS_DIR = _LEGACY_CHARACTERS_DIR
+_LOREBOOKS_DIR = _LEGACY_CHARACTERS_DIR / "reality" / "lorebooks"
+_JAILBREAKS_DIR = _LEGACY_CHARACTERS_DIR / "reality" / "jailbreaks"
+_DREAM_PRESETS_DIR = _LEGACY_CHARACTERS_DIR / "dream_presets"
+_AVATARS_DIR = _LEGACY_CHARACTERS_DIR / "reality" / "avatars"
 
 # Stem substrings that mark non-rolecard / scaffold files
 _NON_CARD_KEYWORDS = frozenset({"template", "author_notes", "example"})
@@ -58,6 +61,7 @@ class AssetEntry:
     hidden: bool
     avatar_url: str | None = None
     has_runtime_avatar: bool = False
+    source_path: Path | None = None
 
     def as_ui_dict(self) -> dict:
         d: dict = {"id": self.id, "label": self.label, "kind": self.kind, "avatar_url": self.avatar_url}
@@ -66,15 +70,28 @@ class AssetEntry:
         return d
 
     def path(self) -> Path:
+        if self.source_path is not None:
+            return self.source_path
+        # Compatibility for direct construction in older callers/tests.
         if self.kind == "character":
-            return _CHARACTERS_DIR / self.filename
+            return _LEGACY_CHARACTERS_DIR / self.filename
         if self.kind == "reality_lorebook":
-            return _LOREBOOKS_DIR / self.filename
+            return _LEGACY_CHARACTERS_DIR / "reality" / "lorebooks" / self.filename
         if self.kind == "reality_jailbreak":
-            return _JAILBREAKS_DIR / self.filename
+            return _LEGACY_CHARACTERS_DIR / "reality" / "jailbreaks" / self.filename
         if self.kind == "dream_preset":
-            return _DREAM_PRESETS_DIR / self.filename
+            return _LEGACY_CHARACTERS_DIR / "dream_presets" / self.filename
         raise ValueError(f"unknown asset kind: {self.kind!r}")
+
+
+def _paths():
+    from core.sandbox import get_paths
+    return get_paths()
+
+
+def _asset_dir(*, user: Path, legacy: Path) -> Path:
+    """Prefer the migrated user-owned directory, retaining legacy discovery."""
+    return user if user.exists() else legacy
 
 
 # ── Per-kind scanners ─────────────────────────────────────────────────────────
@@ -96,74 +113,93 @@ def _avatar_info_for(char_id: str) -> tuple[str | None, bool]:
         if p.exists():
             mtime = int(p.stat().st_mtime)
             return (f"/settings/character-avatar/{char_id}?v={mtime}", True)
-    authored = _AVATARS_DIR / f"{char_id}.png"
-    if authored.exists():
-        mtime = int(authored.stat().st_mtime)
-        return (f"/settings/character-avatar/{char_id}?v={mtime}", False)
+    paths = _paths()
+    for root in (paths.user_reality_dir() / "avatars", paths.legacy_reality_dir() / "avatars"):
+        authored = root / f"{char_id}.png"
+        if authored.exists():
+            mtime = int(authored.stat().st_mtime)
+            return (f"/settings/character-avatar/{char_id}?v={mtime}", False)
     return (None, False)
 
-
 def _scan_characters() -> list[AssetEntry]:
-    if not _CHARACTERS_DIR.exists():
-        return []
-    result = []
-    for p in sorted(_CHARACTERS_DIR.glob("*.json")):
-        stem_lower = p.stem.lower()
-        hidden = any(kw in stem_lower for kw in _NON_CARD_KEYWORDS)
-        label = p.stem
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            label = data.get("name") or p.stem
-        except Exception:
-            pass
-        avatar_url, has_runtime = _avatar_info_for(p.stem)
-        result.append(AssetEntry(id=p.stem, label=label, filename=p.name,
-                                  kind="character", hidden=hidden,
-                                  avatar_url=avatar_url,
-                                  has_runtime_avatar=has_runtime))
-    # Also scan .txt and .md character cards
-    for ext in ("*.txt", "*.md"):
-        for p in sorted(_CHARACTERS_DIR.glob(ext)):
+    # Scan legacy first so a migrated/private card with the same id wins.
+    result: dict[str, AssetEntry] = {}
+    paths = _paths()
+    for root in reversed((paths.user_character_cards_dir(), _CHARACTERS_DIR)):
+        if not root.exists():
+            continue
+        for p in sorted(root.glob("*.json")):
             stem_lower = p.stem.lower()
             hidden = any(kw in stem_lower for kw in _NON_CARD_KEYWORDS)
+            label = p.stem
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                label = data.get("name") or p.stem
+            except Exception:
+                pass
             avatar_url, has_runtime = _avatar_info_for(p.stem)
-            result.append(AssetEntry(id=p.stem, label=p.stem, filename=p.name,
-                                      kind="character", hidden=hidden,
-                                      avatar_url=avatar_url,
-                                      has_runtime_avatar=has_runtime))
-    return result
-
+            result[p.stem] = AssetEntry(id=p.stem, label=label, filename=p.name,
+                                        kind="character", hidden=hidden,
+                                        avatar_url=avatar_url,
+                                        has_runtime_avatar=has_runtime,
+                                        source_path=p)
+        for ext in ("*.txt", "*.md"):
+            for p in sorted(root.glob(ext)):
+                stem_lower = p.stem.lower()
+                hidden = any(kw in stem_lower for kw in _NON_CARD_KEYWORDS)
+                avatar_url, has_runtime = _avatar_info_for(p.stem)
+                result[p.stem] = AssetEntry(id=p.stem, label=p.stem, filename=p.name,
+                                            kind="character", hidden=hidden,
+                                            avatar_url=avatar_url,
+                                            has_runtime_avatar=has_runtime,
+                                            source_path=p)
+    return list(result.values())
 
 def _scan_lorebooks() -> list[AssetEntry]:
-    if not _LOREBOOKS_DIR.exists():
+    paths = _paths()
+    root = _asset_dir(
+        user=paths.user_reality_dir() / "lorebooks",
+        legacy=_LOREBOOKS_DIR,
+    )
+    if not root.exists():
         return []
     result = []
-    for p in sorted(_LOREBOOKS_DIR.glob("*.yaml")):
+    for p in sorted(root.glob("*.yaml")):
         stem_lower = p.stem.lower()
         hidden = any(kw in stem_lower for kw in _NON_CARD_KEYWORDS)
         result.append(AssetEntry(id=p.stem, label=p.stem, filename=p.name,
-                                  kind="reality_lorebook", hidden=hidden))
+                                  kind="reality_lorebook", hidden=hidden, source_path=p))
     return result
 
 
 def _scan_jailbreaks() -> list[AssetEntry]:
-    if not _JAILBREAKS_DIR.exists():
+    paths = _paths()
+    root = _asset_dir(
+        user=paths.user_reality_dir() / "jailbreaks",
+        legacy=_JAILBREAKS_DIR,
+    )
+    if not root.exists():
         return []
     result = []
-    for p in sorted(_JAILBREAKS_DIR.glob("*.json")):
+    for p in sorted(root.glob("*.json")):
         stem_lower = p.stem.lower()
         hidden = any(kw in stem_lower for kw in _NON_CARD_KEYWORDS)
         result.append(AssetEntry(id=p.stem, label=p.stem, filename=p.name,
-                                  kind="reality_jailbreak", hidden=hidden))
+                                  kind="reality_jailbreak", hidden=hidden, source_path=p))
     return result
 
 
 def _scan_dream_presets() -> list[AssetEntry]:
-    if not _DREAM_PRESETS_DIR.exists():
+    paths = _paths()
+    root = _asset_dir(
+        user=paths.user_dream_presets_dir(),
+        legacy=_DREAM_PRESETS_DIR,
+    )
+    if not root.exists():
         return []
     result = []
     seen_ids: set[str] = set()
-    for p in sorted(_DREAM_PRESETS_DIR.glob("*.md")):
+    for p in sorted(root.glob("*.md")):
         stem = p.stem
         is_ascii = bool(_ASCII_ID_RE.fullmatch(stem))
 
@@ -180,7 +216,7 @@ def _scan_dream_presets() -> list[AssetEntry]:
                 p.name,
             )
             result.append(AssetEntry(id=stem, label=stem, filename=p.name,
-                                      kind="dream_preset", hidden=True))
+                                      kind="dream_preset", hidden=True, source_path=p))
             continue
 
         if asset_id in seen_ids:
@@ -193,7 +229,7 @@ def _scan_dream_presets() -> list[AssetEntry]:
         stem_lower = stem.lower()
         hidden = any(kw in stem_lower for kw in _NON_CARD_KEYWORDS)
         result.append(AssetEntry(id=asset_id, label=label, filename=p.name,
-                                  kind="dream_preset", hidden=hidden))
+                                  kind="dream_preset", hidden=hidden, source_path=p))
     return result
 
 

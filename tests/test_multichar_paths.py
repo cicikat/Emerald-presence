@@ -67,15 +67,17 @@ def test_character_inner_v1_top_paths(dp, tmp_path, method, expected_parts):
 # ── character_inner authored 静态路径（不走沙盒 _p，绝对路径略去 base）─────────
 
 def test_activity_pool_v1(dp):
-    # content/characters/yexuan/activity_pool.yaml now exists — new path wins
-    assert dp.activity_pool(char_id="yexuan") == Path("content/characters/yexuan/activity_pool.yaml")
+    # C1 migrated private activity pool is now the primary path.
+    assert dp.activity_pool(char_id="yexuan") == Path(
+        "userdata/characters/authored/yexuan/activity_pool.yaml"
+    )
     assert dp.activity_pool() == dp.activity_pool(char_id="yexuan")
 
 
-def test_author_notes_pool_legacy(dp):
-    # v1 fallback path (no new content/characters/yexuan file exists in test)
+def test_author_notes_pool_userdata_primary(dp):
+    # C1 migrated private author notes are now the primary path.
     result = dp.author_notes_pool(char_id="yexuan")
-    assert "yexuan_author_notes.json" in str(result)
+    assert result == Path("userdata/characters/authored/yexuan/author_notes.json")
     assert dp.author_notes_pool() == dp.author_notes_pool(char_id="yexuan")
 
 

@@ -22,9 +22,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.sandbox import get_paths
+
 logger = logging.getLogger(__name__)
 
-_WORLDS_BASE = Path("characters/dream_worlds")
+_WORLDS_BASE = get_paths().dream_worlds_dir()
 _FALLBACK_WORLD = "reality_derived"
 _DEFAULT_DIR = "_default"
 

@@ -11,9 +11,11 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from core.sandbox import get_paths
+
 logger = logging.getLogger(__name__)
 
-_WORLDS_BASE = Path("characters/dream_worlds")
+_WORLDS_BASE = get_paths().dream_worlds_dir()
 
 # Process-lifetime cache: world_id → {scene_key: str}
 _scene_cache: dict[str, dict[str, str]] = {}

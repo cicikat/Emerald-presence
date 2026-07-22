@@ -202,33 +202,33 @@ tts:
   ref_free: false
   if_freeze: false
   if_sr: false
-  ref_audio: content/characters/角色id/voice/default.wav
+  ref_audio: userdata/characters/authored/角色id/voice/default.wav
   prompt_text: ''
   speed: 1.0
   emotion_enabled: true
   emotions:
     neutral:
-      ref_audio: content/characters/角色id/voice/neutral.wav
+      ref_audio: userdata/characters/authored/角色id/voice/neutral.wav
       prompt_text: ''
       speed: 1
     happy:
-      ref_audio: content/characters/角色id/voice/happy.wav
+      ref_audio: userdata/characters/authored/角色id/voice/happy.wav
       prompt_text: ''
       speed: 1.1
     sad:
-      ref_audio: content/characters/角色id/voice/sad.wav
+      ref_audio: userdata/characters/authored/角色id/voice/sad.wav
       prompt_text: ''
       speed: 0.9
     gentle:
-      ref_audio: content/characters/角色id/voice/gentle.wav
+      ref_audio: userdata/characters/authored/角色id/voice/gentle.wav
       prompt_text: ''
       speed: 0.95
     surprised:
-      ref_audio: content/characters/角色id/voice/surprised.wav
+      ref_audio: userdata/characters/authored/角色id/voice/surprised.wav
       prompt_text: ''
       speed: 1.05
     angry:
-      ref_audio: content/characters/角色id/voice/angry.wav
+      ref_audio: userdata/characters/authored/角色id/voice/angry.wav
       prompt_text: ''
       speed: 1.1
 hardware:

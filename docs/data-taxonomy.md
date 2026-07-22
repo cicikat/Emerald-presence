@@ -103,6 +103,30 @@ data/
 
 ## 路径边界
 
+### User-authored assets (C1)
+
+`userdata/` 是本机私有的手写资产根目录，不属于 `data/` 的运行时状态沙盒，也不提交到 Git：
+
+```text
+userdata/
+├── assets/stickers/{emotion}/
+└── characters/
+    ├── cards/{char_id}.{json,txt,md}
+    ├── authored/{char_id}/
+    │   ├── activity_pool.yaml
+    │   ├── author_notes.json
+    │   ├── traits.yaml
+    │   ├── letter_samples/
+    │   └── knowledge/
+    ├── reality/{avatars,lorebooks,jailbreaks}/
+    └── dream/{worlds,presets}/
+```
+
+访问必须经 `DataPaths` 或 `AssetRegistry`。读取优先 `userdata/`，仅在迁移前旧目录仍存在时回退到
+`assets/stickers/`、`characters/` 和 `content/characters/`；新建角色、梦境世界及其他可写资产写入
+`userdata/`。`defaults/`、`examples/`、默认角色卡和梦境世界模板仍是随仓库发布的公共种子，不迁入
+`userdata/`。
+
 ### Reality memory
 
 现实记忆主干统一写入 `get_paths().user_memory_root(uid, char_id)`：
@@ -127,8 +151,8 @@ data/
 角色内部状态统一落在 `data/runtime/characters/{char_id}/`。其中 `inner/`、`garden/` 和
 `pet.json` 都按角色隔离。`character_growth/` 是 Brief 35 移除模块留下的历史数据：不再有
 代码读写，不应作为当前状态或新增路径使用。`activity_pool()`、`yexuan_traits()`、
-`author_notes_pool()` 属于 authored 静态内容，优先读 `content/characters/{char_id}/`，
-物理文件未迁移时回退旧位置。
+`author_notes_pool()` 属于 authored 静态内容，优先读
+`userdata/characters/authored/{char_id}/`，迁移完成前才回退旧位置。
 
 `interest_state.json`、`works/{interest_id}/` 与 `notes/{interest_id}.md` 是当前成长系统的
 角色级 canonical 真值；物理位置虽在 `runtime/` 树下，仍不可按临时缓存清理。

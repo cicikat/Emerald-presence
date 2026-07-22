@@ -21,10 +21,13 @@ from pydantic import BaseModel
 from admin.auth import require_scopes
 from core.asset_registry import get_registry, reload_registry
 from core.config_loader import get_config
+from core.sandbox import get_paths
 
 router = APIRouter()
 
-CHARACTERS_DIR = Path("characters")
+# New/edited private cards are written beneath userdata.  _safe_path retains a
+# read fallback for a deployment that has not yet completed the C1 move.
+CHARACTERS_DIR = get_paths().user_character_cards_dir()
 CONFIG_FILE = Path("config.yaml")
 
 
@@ -32,11 +35,16 @@ CONFIG_FILE = Path("config.yaml")
 
 def _safe_path(name: str) -> Path:
     """返回安全路径，防止路径穿越攻击"""
-    resolved = (CHARACTERS_DIR / name).resolve()
-    base = CHARACTERS_DIR.resolve()
-    if not str(resolved).startswith(str(base)):
+    if name != Path(name).name:
         raise HTTPException(status_code=400, detail="非法文件名")
-    return resolved
+    primary = (CHARACTERS_DIR / name).resolve()
+    if primary.exists():
+        return primary
+    legacy = (get_paths().legacy_character_cards_dir() / name).resolve()
+    legacy_base = get_paths().legacy_character_cards_dir().resolve()
+    if legacy.exists() and legacy.is_relative_to(legacy_base):
+        return legacy
+    return primary
 
 
 import logging as _logging

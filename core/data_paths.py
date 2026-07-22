@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
 _DEFAULTS_ROOT = Path(__file__).parent.parent / "defaults"
+_USERDATA_ROOT = Path("userdata")
 _SAFE_USER_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -113,6 +114,61 @@ class DataPaths:
         不作为业务写入路径的起点——业务路径一律走本类其他具名方法。
         """
         return self._base
+
+    # ── User-authored assets (never part of the runtime data sandbox) ───────
+    # ``data/`` is canonical runtime state and deliberately remains separate.
+    # These accessors centralize the C1 migration from several root-level
+    # private-asset directories to one user-owned root.
+    def userdata_root(self) -> Path:
+        return _USERDATA_ROOT
+
+    def user_stickers_dir(self) -> Path:
+        return self.userdata_root() / "assets" / "stickers"
+
+    def legacy_stickers_dir(self) -> Path:
+        return Path("assets") / "stickers"
+
+    def stickers_dir(self) -> Path:
+        primary = self.user_stickers_dir()
+        return primary if primary.exists() else self.legacy_stickers_dir()
+
+    def user_character_cards_dir(self) -> Path:
+        return self.userdata_root() / "characters" / "cards"
+
+    def legacy_character_cards_dir(self) -> Path:
+        return Path("characters")
+
+    def character_card_dirs(self) -> tuple[Path, Path]:
+        """Private cards first, then the legacy root (for default/fallback)."""
+        return self.user_character_cards_dir(), self.legacy_character_cards_dir()
+
+    def user_authored_character_dir(self, *, char_id: str) -> Path:
+        return self.userdata_root() / "characters" / "authored" / safe_user_id(char_id)
+
+    def legacy_authored_character_dir(self, *, char_id: str) -> Path:
+        return Path("content") / "characters" / safe_user_id(char_id)
+
+    def authored_character_dir(self, *, char_id: str) -> Path:
+        primary = self.user_authored_character_dir(char_id=char_id)
+        return primary if primary.exists() else self.legacy_authored_character_dir(char_id=char_id)
+
+    def user_reality_dir(self) -> Path:
+        return self.userdata_root() / "characters" / "reality"
+
+    def legacy_reality_dir(self) -> Path:
+        return Path("characters") / "reality"
+
+    def user_dream_worlds_dir(self) -> Path:
+        return self.userdata_root() / "characters" / "dream" / "worlds"
+
+    def legacy_dream_worlds_dir(self) -> Path:
+        return Path("characters") / "dream_worlds"
+
+    def user_dream_presets_dir(self) -> Path:
+        return self.userdata_root() / "characters" / "dream" / "presets"
+
+    def legacy_dream_presets_dir(self) -> Path:
+        return Path("characters") / "dream_presets"
 
     # ── 桌宠端轮询文件（方案A：前缀同步到 config.yaml 的 data_prefix 字段）──────
     def channel_queue(self) -> Path:
@@ -238,9 +294,13 @@ class DataPaths:
         return self._p("runtime", "characters", char_id, "inner", "mood_state.json")
 
     def activity_pool(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        # S8 will physically move authored files; fall back to legacy yexuan path if new not yet present
-        new = Path(f"content/characters/{char_id}/activity_pool.yaml")
-        return new if new.exists() else Path("data/yexuan_inner/activity_pool.yaml")
+        primary = self.user_authored_character_dir(char_id=char_id) / "activity_pool.yaml"
+        legacy = self.legacy_authored_character_dir(char_id=char_id) / "activity_pool.yaml"
+        if primary.exists():
+            return primary
+        if legacy.exists():
+            return legacy
+        return Path("data/yexuan_inner/activity_pool.yaml")
 
     def activity_state(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
         return self._p("runtime", "characters", char_id, "inner", "activity_state.json")
@@ -308,9 +368,11 @@ class DataPaths:
         return self._p("runtime", "characters", char_id, "garden")
 
     def author_notes_pool(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        # S8 will physically move authored files; fall back to default pool if new not yet present
-        new = Path(f"content/characters/{char_id}/{char_id}_author_notes.json")
+        primary = self.user_authored_character_dir(char_id=char_id) / "author_notes.json"
+        new = self.legacy_authored_character_dir(char_id=char_id) / f"{char_id}_author_notes.json"
         legacy = Path(f"characters/{char_id}_author_notes.json")
+        if primary.exists():
+            return primary
         if new.exists():
             return new
         if legacy.exists():
@@ -337,7 +399,11 @@ class DataPaths:
         """
         if self.mode == "test":
             return self._base / "reality" / filename
-        return Path("characters") / "reality" / filename
+        primary = self.user_reality_dir() / filename
+        legacy = self.legacy_reality_dir() / filename
+        if primary.exists() or not legacy.exists():
+            return primary
+        return legacy
 
     # ── Runtime prompt asset selection config ────────────────────────────────
     def active_prompt_assets(self) -> Path:
@@ -384,19 +450,22 @@ class DataPaths:
         """characters/reality/lorebooks/ 目录（authored，不走 data/ 沙盒偏移）"""
         if self.mode == "test":
             return self._base / "reality" / "lorebooks"
-        return Path("characters") / "reality" / "lorebooks"
+        primary = self.user_reality_dir() / "lorebooks"
+        return primary if primary.exists() else self.legacy_reality_dir() / "lorebooks"
 
     def dream_worlds_dir(self) -> Path:
         """characters/dream_worlds/ 目录（authored，不走 data/ 沙盒偏移）"""
         if self.mode == "test":
             return self._base / "dream_worlds"
-        return Path("characters") / "dream_worlds"
+        primary = self.user_dream_worlds_dir()
+        return primary if primary.exists() else self.legacy_dream_worlds_dir()
 
     def dream_presets_dir(self) -> Path:
         """characters/dream_presets/ 目录（authored，不走 data/ 沙盒偏移）"""
         if self.mode == "test":
             return self._base / "dream_presets"
-        return Path("characters") / "dream_presets"
+        primary = self.user_dream_presets_dir()
+        return primary if primary.exists() else self.legacy_dream_presets_dir()
 
     def dream_scenarios_dir(self) -> Path:
         """data/dream/scenarios/ 目录（authored content，剧本 YAML，不走 data/ 沙盒偏移）。
@@ -426,7 +495,8 @@ class DataPaths:
         """characters/reality/jailbreaks/ 目录（authored，不走 data/ 沙盒偏移）"""
         if self.mode == "test":
             return self._base / "reality" / "jailbreaks"
-        return Path("characters") / "reality" / "jailbreaks"
+        primary = self.user_reality_dir() / "jailbreaks"
+        return primary if primary.exists() else self.legacy_reality_dir() / "jailbreaks"
 
     # ── authored reality prompt assets（characters/reality/，不走 data/ 沙盒偏移）
     def jailbreak_entries(self) -> Path:
@@ -478,9 +548,11 @@ class DataPaths:
 
     # ── 只读静态（不偏移，test 与 prod 共享原文件）───────────────────────────
     def yexuan_traits(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
-        # S8 will physically move authored files; fall back to legacy if new not yet present
-        new = Path(f"content/characters/{char_id}/traits.yaml")
-        return new if new.exists() else Path("data/yexuan_traits.yaml")
+        primary = self.user_authored_character_dir(char_id=char_id) / "traits.yaml"
+        legacy = self.legacy_authored_character_dir(char_id=char_id) / "traits.yaml"
+        if primary.exists():
+            return primary
+        return legacy if legacy.exists() else Path("data/yexuan_traits.yaml")
 
     def jailbreak_presets_dir(self) -> Path:
         new = Path("content/jailbreak_presets")
@@ -525,11 +597,13 @@ class DataPaths:
     # ── 信件内容资产（authored static content）────────────────────────────────
     def letter_samples_dir(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
         """示范信件库目录（静态内容）: content/characters/{char_id}/letter_samples/"""
-        return Path(f"content/characters/{char_id}/letter_samples")
+        primary = self.user_authored_character_dir(char_id=char_id) / "letter_samples"
+        return primary if primary.exists() else self.legacy_authored_character_dir(char_id=char_id) / "letter_samples"
 
     def letter_knowledge_dir(self, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
         """知识库目录（静态内容）: content/characters/{char_id}/knowledge/"""
-        return Path(f"content/characters/{char_id}/knowledge")
+        primary = self.user_authored_character_dir(char_id=char_id) / "knowledge"
+        return primary if primary.exists() else self.legacy_authored_character_dir(char_id=char_id) / "knowledge"
 
     def stream_collapse_signal(self, user_id: str | int, *, char_id: str = _DEFAULT_CHAR_ID) -> Path:
         """ACT-2：流式路径反坍缩一次性降级信号，下一轮 build_prompt 读到后立即消费清除。"""

@@ -6,13 +6,10 @@ LLM判断情绪类别，随机抽取对应文件夹的图片发送
 
 import logging
 import random
-from pathlib import Path
 
 from core.error_handler import log_error
 
 logger = logging.getLogger(__name__)
-
-_STICKER_ROOT = Path("assets/stickers")
 
 _EMOTION_LABELS = ["无奈", "心疼", "开心", "委屈", "害羞", "沉默"]
 
@@ -22,7 +19,9 @@ _TRIGGER_PROB = 0.06
 
 def _pick_sticker(emotion: str) -> str | None:
     """从对应情绪文件夹随机抽一张图片，返回绝对路径"""
-    folder = _STICKER_ROOT / emotion
+    from core.sandbox import get_paths
+
+    folder = get_paths().stickers_dir() / emotion
     if not folder.exists():
         return None
     files = [f for f in folder.iterdir() if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".gif")]

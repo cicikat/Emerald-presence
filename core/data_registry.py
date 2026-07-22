@@ -50,6 +50,7 @@ REGISTRY: dict[str, PathMeta] = {
     "proactive_recent":       PathMeta("runtime",   "shared",          "global",        "ignore"),
     "proactive_ledger":       PathMeta("runtime",   "shared",          "global",        "ignore"),
     "wake_delivery_ledger":   PathMeta("canonical", "shared",          "per_user",      "ignore"),
+    "api_call_log":           PathMeta("forensic",  "shared",          "global",        "ignore"),
 
     # ── forensic: 日志 / 观测 / DLQ，业务可丢 ────────────────────────────────
     "error_log":              PathMeta("forensic",  "shared",          "global",        "ignore"),
@@ -124,14 +125,28 @@ REGISTRY: dict[str, PathMeta] = {
     "dreams_archive_dir":     PathMeta("archive",   "dream",           "per_char_user", "ignore"),
 
     # ── authored: 手工维护的静态配置 ──────────────────────────────────────────
-    # activity_pool.yaml 私人手写活动池；target: content/characters/{char_id}/activity_pool.yaml
-    # accessor 已有 new-primary/old-fallback；物理文件待 S8 迁移
+    # C1 user-owned authored root plus legacy fallback readers.
+    "userdata_root":              PathMeta("authored", "shared",          "global",   "ignore-but-authored"),
+    "user_stickers_dir":          PathMeta("authored", "shared",          "global",   "ignore-but-authored"),
+    "legacy_stickers_dir":        PathMeta("authored", "shared",          "global",   "ignore-but-authored"),
+    "stickers_dir":               PathMeta("authored", "shared",          "global",   "ignore-but-authored"),
+    "user_character_cards_dir":   PathMeta("authored", "shared",          "global",   "ignore-but-authored"),
+    "legacy_character_cards_dir": PathMeta("authored", "shared",          "global",   "ignore-but-authored"),
+    "character_card_dirs":        PathMeta("authored", "shared",          "global",   "ignore-but-authored"),
+    "user_authored_character_dir": PathMeta("authored", "character_inner", "per_char", "ignore-but-authored"),
+    "legacy_authored_character_dir": PathMeta("authored", "character_inner", "per_char", "ignore-but-authored"),
+    "authored_character_dir":     PathMeta("authored", "character_inner", "per_char", "ignore-but-authored"),
+    "user_reality_dir":           PathMeta("authored", "shared",          "global",   "ignore-but-authored"),
+    "legacy_reality_dir":         PathMeta("authored", "shared",          "global",   "ignore-but-authored"),
+    "user_dream_worlds_dir":      PathMeta("authored", "dream",           "global",   "ignore-but-authored"),
+    "legacy_dream_worlds_dir":    PathMeta("authored", "dream",           "global",   "ignore-but-authored"),
+    "user_dream_presets_dir":     PathMeta("authored", "dream",           "global",   "ignore-but-authored"),
+    "legacy_dream_presets_dir":   PathMeta("authored", "dream",           "global",   "ignore-but-authored"),
+    # activity_pool.yaml 私人手写活动池；target: userdata/characters/authored/{char_id}/activity_pool.yaml
     "activity_pool":          PathMeta("authored",  "character_inner", "per_char",      "ignore-but-authored"),
-    # author_notes_pool: characters/{char_id}_author_notes.json — 私人，不可重建
-    # target: content/characters/{char_id}/{char_id}_author_notes.json
+    # author_notes_pool: 私人，不可重建；target: userdata/characters/authored/{char_id}/author_notes.json
     "author_notes_pool":      PathMeta("authored",  "character_inner", "per_char",      "ignore-but-authored"),
-    # yexuan_traits.yaml 私人 traits；target: content/characters/{char_id}/traits.yaml
-    # accessor 已有 new-primary/old-fallback；物理文件待 S8 迁移
+    # yexuan_traits.yaml 私人 traits；target: userdata/characters/authored/{char_id}/traits.yaml
     "yexuan_traits":          PathMeta("authored",  "character_inner", "per_char",      "ignore-but-authored"),
     # jailbreak_presets/ 目前无 reader（确认死代码），仅含 .example 模板，accessor 备将来使用
     "jailbreak_presets_dir":  PathMeta("authored",  "shared",          "global",        "track"),
@@ -183,7 +198,7 @@ REGISTRY: dict[str, PathMeta] = {
     # Daily session-count budget counter (logical_day + count).
     "private_exchange_budget_state": PathMeta("runtime",  "shared", "global",   "ignore"),
 
-    # ── authored: lorebooks / jailbreaks (characters/reality/ 目录，不走 data/) ─
+    # ── authored: lorebooks / jailbreaks (userdata/characters/reality/，不走 data/) ─
     "lorebooks_dir":          PathMeta("authored",  "shared",          "global",        "ignore-but-authored"),
     "jailbreaks_dir":         PathMeta("authored",  "shared",          "global",        "ignore-but-authored"),
 
@@ -223,7 +238,7 @@ REGISTRY: dict[str, PathMeta] = {
     "auth_tokens_file":       PathMeta("canonical", "shared",          "global",        "ignore"),
     "auth_audit_log":         PathMeta("forensic",  "shared",          "global",        "ignore"),
 
-    # ── authored: dream worlds/presets (characters/dream_worlds/、characters/dream_presets/，不走 data/ 沙盒偏移) ─
+    # ── authored: dream worlds/presets (userdata/characters/dream/，不走 data/ 沙盒偏移) ─
     "dream_worlds_dir":       PathMeta("authored",  "dream",           "global",        "ignore-but-authored"),
     "dream_presets_dir":      PathMeta("authored",  "dream",           "global",        "ignore-but-authored"),
     # data/dream/scenarios/{id}.yaml —— authored 剧本内容，同样是私人手写、不可重建

@@ -69,7 +69,7 @@ def test_new_character_creates_file_from_template(registry, chars_tree):
     assert result["filename"] == "newbie.json"
     assert result["label"] == "新角色"
 
-    dest = chars_tree / "characters" / "newbie.json"
+    dest = chars_tree / "userdata" / "characters" / "cards" / "newbie.json"
     assert dest.exists()
     data = json.loads(dest.read_text(encoding="utf-8"))
     assert data["name"] == "新角色"
@@ -83,7 +83,11 @@ def test_new_character_creates_file_from_template(registry, chars_tree):
 def test_new_character_name_defaults_to_id(registry, chars_tree):
     result = _new_character({"id": "bare_id"})
     assert result["label"] == "bare_id"
-    data = json.loads((chars_tree / "characters" / "bare_id.json").read_text(encoding="utf-8"))
+    data = json.loads(
+        (chars_tree / "userdata" / "characters" / "cards" / "bare_id.json").read_text(
+            encoding="utf-8"
+        )
+    )
     assert data["name"] == "bare_id"
 
 
