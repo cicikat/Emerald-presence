@@ -24,6 +24,21 @@ from core.prompt_style import apply_prompt_style
 
 logger = logging.getLogger(__name__)
 
+# Logging contract: request URLs (and therefore query strings) stay at DEBUG;
+# INFO emits exactly one completed-call summary with model, purpose and latency.
+# The OpenAI SDK uses the ``httpx`` logger for per-request URL lines, so keep it
+# quiet unless an operator explicitly enables debug logging.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+def _log_completed_call(*, model: str, purpose: str, started_at: float) -> None:
+    logger.info(
+        "[llm_client] 对话 API 调用 model=%s purpose=%s duration_ms=%d",
+        model,
+        purpose,
+        int((time.perf_counter() - started_at) * 1000),
+    )
+
 # Vision client is kept as a separate singleton; it does not participate in
 # preset routing (as specified — vision stays on its own `vision:` block).
 _vision_client: AsyncOpenAI | None = None
@@ -131,6 +146,7 @@ async def chat(
             vision_cfg = get_config().get("vision", {})
             # Vision branch: sanitize only (no prompt_style transform needed)
             safe_msgs = sanitize_messages(messages)
+            started_at = time.perf_counter()
             try:
                 response = await vision_client.chat.completions.create(
                     model=vision_cfg["model"],
@@ -138,6 +154,7 @@ async def chat(
                     max_tokens=1000,
                     timeout=_CALL_TIMEOUTS["vision"],
                 )
+                _log_completed_call(model=str(vision_cfg.get("model") or ""), purpose="vision", started_at=started_at)
                 return response.choices[0].message.content or ""
             except Exception as e:
                 log_error("llm_client.chat.vision", e)
@@ -158,6 +175,7 @@ async def chat(
     model = mc.model
     client = mc.client
     mode = mc.tool_call_mode
+    started_at = time.perf_counter()
 
     # Build generation kwargs from preset params; max_tokens_override wins
     _gen_kwargs: dict[str, Any] = dict(mc.params)
@@ -186,7 +204,9 @@ async def chat(
                         "name": tc.function.name,
                         "arguments": json.loads(tc.function.arguments),
                     })
+                _log_completed_call(model=model, purpose=call_category, started_at=started_at)
                 return "__TOOL_CALL__:" + json.dumps(tool_calls, ensure_ascii=False)
+            _log_completed_call(model=model, purpose=call_category, started_at=started_at)
             return thinking.strip_think_tags(choice.message.content) or ""
 
         # ── xml_fallback 模式（不支持 FC 的模型）────────────────────────────
@@ -210,6 +230,7 @@ async def chat(
                 messages=msgs,
                 **_gen_kwargs,
             )
+            _log_completed_call(model=model, purpose=call_category, started_at=started_at)
             return thinking.strip_think_tags(response.choices[0].message.content) or ""
 
         # ── 普通对话（无工具）────────────────────────────────────────────────
@@ -219,6 +240,7 @@ async def chat(
                 messages=messages,
                 **_gen_kwargs,
             )
+            _log_completed_call(model=model, purpose=call_category, started_at=started_at)
             return thinking.strip_think_tags(response.choices[0].message.content) or ""
 
     except Exception as e:

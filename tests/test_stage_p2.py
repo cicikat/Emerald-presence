@@ -242,3 +242,28 @@ async def test_phase_a_empty_generation_does_not_satisfy_minimum(sandbox, monkey
     result = await run_owner_turn("group-empty", "hello", generate_reply=generate)
 
     assert [entry.speaker_id for entry in result.replies] == ["yexuanJ-5412"]
+
+
+@pytest.mark.asyncio
+async def test_minimum_reply_retries_best_speaker_after_all_first_attempts_empty(sandbox, monkeypatch):
+    from core.stage.runner import run_owner_turn
+    from core.stage.store import create_stage
+
+    create_stage(
+        "group-minimum-retry",
+        "owner",
+        ["yexuan"],
+        settings=_settings(min_responders=1, max_responders=1, max_ai_chain_depth=0),
+    )
+    calls = 0
+
+    async def generate(stage, speaker_id, transcript, turn_id, triggered_by):
+        nonlocal calls
+        calls += 1
+        return "" if calls == 1 else "这次补上回应"
+
+    result = await run_owner_turn("group-minimum-retry", "hello", generate_reply=generate)
+
+    assert calls == 2
+    assert [entry.content for entry in result.replies] == ["这次补上回应"]
+    assert result.replies[0].triggered_by == "user_retry"

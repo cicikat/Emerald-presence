@@ -234,6 +234,32 @@ async def run_owner_turn(
                 replies.append(entry)
                 responded += 1
 
+        # A configured minimum is a delivery contract, not merely a scoring
+        # preference.  Every candidate may have produced an empty/invalid
+        # response on the first pass; retry the best eligible speaker once so
+        # a transient validator/provider failure cannot silently end the round.
+        if responded < min_responders:
+            fallback_ranked = _rank_candidates(stage, transcript, list(stage.roster), derived_keywords)
+            if fallback_ranked:
+                fallback = fallback_ranked[0]
+                entry, _echo_cut = await _gen_and_append(
+                    stage,
+                    fallback.char_id,
+                    transcript,
+                    resolved_turn_id,
+                    "user_retry",
+                    generate_reply,
+                    deliver_reply,
+                )
+                _trace_call(
+                    stage, transcript[:-1] if entry is not None else transcript, fallback_ranked,
+                    turn_id=resolved_turn_id, phase="A", selected=[entry.speaker_id] if entry else [],
+                    chain_depth=0, extra={"minimum_reply_retry": True},
+                )
+                if entry is not None:
+                    replies.append(entry)
+                    responded += 1
+
         # Phase B: bounded autonomous continuation, rescored after every reply.
         ai_chain_depth = 0
         while ai_chain_depth < stage.settings.max_ai_chain_depth and transcript:
