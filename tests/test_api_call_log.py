@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from datetime import datetime, timedelta
 
 from core import api_call_log
 
@@ -60,3 +61,18 @@ def test_api_call_log_never_persists_long_output_hint(tmp_path, monkeypatch):
 
     assert rows[0]["duration_ms"] == 0
     assert len(rows[0]["output_hint"]) == 120
+
+
+def test_api_call_log_uses_daily_files_and_prunes_expired_days(tmp_path):
+    ledger = tmp_path / "api_calls.jsonl"
+    today = datetime(2026, 7, 22).timestamp()
+    old_day = (datetime(2026, 7, 22) - timedelta(days=7)).strftime("%Y-%m-%d")
+    old_path = tmp_path / f"api_calls-{old_day}.jsonl"
+    old_path.write_text('{"ts": 1}\n', encoding="utf-8")
+
+    today_path = api_call_log._daily_path(ledger, today)
+    assert today_path.name == "api_calls-2026-07-22.jsonl"
+
+    api_call_log._prune_daily_logs(ledger, today)
+
+    assert not old_path.exists()
