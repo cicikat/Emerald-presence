@@ -42,6 +42,27 @@ async def test_sticker_keeps_qq_send_and_broadcasts_self_contained_payload(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_sticker_total_switch_prevents_all_side_effects(monkeypatch):
+    from core.output import sticker
+
+    monkeypatch.setattr(sticker, "get_config", lambda: {"sticker": {"enabled": False, "trigger_prob": 1.0}})
+    monkeypatch.setattr(sticker, "_pick_sticker", lambda emotion: pytest.fail("disabled sticker must not select an image"))
+
+    await sticker.maybe_send_sticker("reply", "owner-1", emotion="happy")
+
+
+@pytest.mark.asyncio
+async def test_sticker_zero_probability_never_sends(monkeypatch):
+    from core.output import sticker
+
+    monkeypatch.setattr(sticker, "get_config", lambda: {"sticker": {"enabled": True, "trigger_prob": 0.0}})
+    monkeypatch.setattr(sticker.random, "random", lambda: 0.0)
+    monkeypatch.setattr(sticker, "_pick_sticker", lambda emotion: pytest.fail("zero probability must not select an image"))
+
+    await sticker.maybe_send_sticker("reply", "owner-1", emotion="happy")
+
+
+@pytest.mark.asyncio
 async def test_sticker_payload_reaches_desktop_ws_and_mobile_queue(sandbox, monkeypatch):
     from channels import desktop_ws
     from channels.mobile import MobileChannel

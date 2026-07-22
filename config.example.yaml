@@ -176,6 +176,9 @@ dream:
     recall_enabled: true    # 强注结束后启用话题召回；false = 强注完即沉默
 watch:
   fresh_days: 3             # 3.6_watch 睡眠摘要最大新鲜度；超过即不注入
+sticker:
+  enabled: true        # 总开关
+  trigger_prob: 0.06   # 触发概率 0~1
 tts:
   # `provider` defaults to gsv. Existing top-level GSV fields remain valid and
   # are automatically mapped to providers.gsv when that block is absent.

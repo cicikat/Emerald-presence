@@ -91,6 +91,52 @@ class TtsTestRequest(BaseModel):
     emotion: str = "neutral"
 
 
+class StickerConfigUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    trigger_prob: Optional[float] = None
+
+
+@router.get("/sticker-config", summary="获取表情包配置")
+async def get_sticker_config(auth=Depends(require_scopes("admin"))):
+    cfg = get_config().get("sticker", {})
+    return {
+        "enabled": bool(cfg.get("enabled", True)),
+        "trigger_prob": float(cfg.get("trigger_prob", 0.06)),
+    }
+
+
+@router.put("/sticker-config", summary="修改表情包配置并热重载")
+async def update_sticker_config(body: StickerConfigUpdate, auth=Depends(require_scopes("admin"))):
+    if body.trigger_prob is not None and not (0.0 <= body.trigger_prob <= 1.0):
+        raise HTTPException(status_code=422, detail="trigger_prob 必须在 0~1 之间")
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            full_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {e}")
+
+    sticker_cfg = full_cfg.setdefault("sticker", {})
+    if body.enabled is not None:
+        sticker_cfg["enabled"] = body.enabled
+    if body.trigger_prob is not None:
+        sticker_cfg["trigger_prob"] = body.trigger_prob
+
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(full_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入配置文件失败: {e}")
+
+    from core import config_loader
+    config_loader.reload_config()
+    return {
+        "message": "表情包配置已更新",
+        "enabled": bool(sticker_cfg.get("enabled", True)),
+        "trigger_prob": float(sticker_cfg.get("trigger_prob", 0.06)),
+    }
+
+
 @router.get("/tts-config", summary="获取 TTS 配置")
 async def get_tts_config(auth=Depends(require_scopes("admin"))):
     cfg = get_config().get("tts", {})

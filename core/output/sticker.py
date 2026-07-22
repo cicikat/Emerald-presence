@@ -10,12 +10,13 @@ from base64 import b64encode
 from pathlib import Path
 
 from core.error_handler import log_error
+from core.config_loader import get_config
 
 logger = logging.getLogger(__name__)
 
 _EMOTION_LABELS = ["无奈", "心疼", "开心", "委屈", "害羞", "沉默"]
 
-# 触发概率，角色不常发表情包
+# 默认触发概率，角色不常发表情包。配置缺失时保持旧行为。
 _TRIGGER_PROB = 0.06
 
 
@@ -60,10 +61,15 @@ async def maybe_send_sticker(reply: str, target_id: str, is_group: bool = False,
     在post_process里调用，失败静默。
     """
     try:
+        sticker_cfg = get_config().get("sticker", {})
+        if not sticker_cfg.get("enabled", True):
+            return
+        trigger_prob = sticker_cfg.get("trigger_prob", _TRIGGER_PROB)
+
         # neutral或无情绪直接跳过
         if not emotion or emotion == "neutral":
             return
-        if random.random() > _TRIGGER_PROB:
+        if random.random() >= trigger_prob:
             return
         # 把detect_emotion的标签映射到表情包文件夹
         _EMOTION_MAP = {
