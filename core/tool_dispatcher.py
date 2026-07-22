@@ -376,7 +376,7 @@ async def _fs_read_wrapper(path: str) -> str:
 
 _TOOL_REGISTRY["get_time"] = {
     "func": _get_current_time,
-    "description": "获取当前准确时间，当用户询问时间、日期时调用.不确定时间时优先调用此工具,禁止猜测。",
+    "description": "获取当前本地日期、时间和星期。用户询问现在几点、今天日期或星期时调用；不要猜测时间。",
     "dangerous": False,
     "category": "info",
     "parameters": {
@@ -390,10 +390,7 @@ _TOOL_REGISTRY["get_time"] = {
 
 _TOOL_REGISTRY["add_reminder"] = {
     "func": _add_reminder_wrapper,
-    "description": (
-    "添加一条备忘录，在指定时间提醒用户。"
-    "当用户说'提醒我X点做Y'、'X时间记得Y'、'帮我记一下'时使用。"
-    ),
+    "description": "创建一条定时提醒。仅在用户明确要求记录事项并在指定时间提醒时调用。",
     "dangerous": False,
     "category": "info",
     "parameters": {
@@ -401,11 +398,11 @@ _TOOL_REGISTRY["add_reminder"] = {
         "properties": {
             "content": {
                 "type": "string",
-                "description": "要提醒的事项内容",
+                "description": "要提醒用户做什么；使用简短、完整的事项文本。",
             },
             "remind_at": {
                 "type": "string",
-                "description": "提醒时间，格式：HH:MM 或 MM-DD HH:MM 或 YYYY-MM-DD HH:MM",
+                "description": "提醒的本地时间，格式为 HH:MM、MM-DD HH:MM 或 YYYY-MM-DD HH:MM。",
             },
         },
         "required": ["content", "remind_at"],
@@ -417,13 +414,13 @@ _TOOL_REGISTRY["add_reminder"] = {
 
 _TOOL_REGISTRY["weather"] = {
     "func": _weather_wrapper,
-    "description": "查询指定城市的当前天气。用户没有指定城市时，使用用户画像中的location字段，默认城市为杭州。",
+    "description": "查询某个城市的当前天气。用户询问天气、温度或降雨时调用；城市未明确时传用户所在地。",
     "dangerous": False,
     "category": "info",
     "parameters": {
         "type": "object",
         "properties": {
-            "city": {"type": "string", "description": "城市名称，如 '北京' 或 'Beijing'"},
+            "city": {"type": "string", "description": "要查询的城市名称，例如“北京”或“Beijing”。"},
         },
         "required": ["city"],
     },
@@ -434,7 +431,7 @@ _TOOL_REGISTRY["weather"] = {
 
 _TOOL_REGISTRY["device_shutdown"] = {
     "func": _device_shutdown,
-    "description": "关闭设备（电脑关机）",
+    "description": "请求关闭用户的电脑。仅在用户明确要求关机时调用；执行前仍会要求确认。",
     "dangerous": True,
     "category": "system",
     "parameters": {
@@ -442,7 +439,7 @@ _TOOL_REGISTRY["device_shutdown"] = {
         "properties": {
             "delay_seconds": {
                 "type": "integer",
-                "description": "延迟多少秒后关机，默认60秒",
+                "description": "确认后等待多少秒再关机；省略时使用系统默认延迟。",
             },
         },
         "required": [],
@@ -451,7 +448,7 @@ _TOOL_REGISTRY["device_shutdown"] = {
 
 _TOOL_REGISTRY["device_sleep"] = {
     "func": _device_sleep,
-    "description": "让设备进入睡眠/休眠状态",
+    "description": "请求让用户电脑进入睡眠或休眠。仅在用户明确要求时调用；执行前仍会要求确认。",
     "dangerous": True,
     "category": "system",
     "parameters": {
@@ -463,13 +460,13 @@ _TOOL_REGISTRY["device_sleep"] = {
 
 _TOOL_REGISTRY["web_search"] = {
     "func": _web_search_wrapper,
-    "description": "在网上查找信息，当你想确认某件事或帮用户找资料时使用",
+    "description": "搜索公开网络信息。需要核实可变事实、寻找资料或回答依赖外部来源的问题时调用。",
     "dangerous": False,
     "category": "info",
     "parameters": {
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "搜索关键词或问题"},
+            "query": {"type": "string", "description": "用于搜索的具体关键词或完整问题。"},
         },
         "required": ["query"],
     },
@@ -481,8 +478,8 @@ _TOOL_REGISTRY["web_search"] = {
 _TOOL_REGISTRY["read_diary"] = {
     "func": _read_diary_wrapper,
     "description": (
-        "当用户主动请求让{char}查看、阅读或评价自己的日记时调用。"
-        "用户会拧巴，除了描述写日记的情况外，即使是只提到了日记也要调用。"
+        "读取用户指定日期的日记。仅在用户明确邀请{char}阅读、查看或评价日记时调用；"
+        "不要因为日常对话中偶然提到“日记”而自行读取。"
     ),
     "dangerous": False,
     "category": "info",
@@ -500,7 +497,7 @@ _TOOL_REGISTRY["read_diary"] = {
         "properties": {
             "date": {
                 "type": "string",
-                "description": "要读的日期，如'4月10日'、'04-10'，不填则读今天",
+                "description": "要读取的日期，例如“4月10日”或“04-10”；省略时读取当天日记。",
             },
         },
         "required": [],
@@ -510,7 +507,7 @@ _TOOL_REGISTRY["read_diary"] = {
 
 _TOOL_REGISTRY["read_watch"] = {
     "func": _read_watch_wrapper,
-    "description": "当用户或{char}想了解用户的睡眠、心率、运动等身体数据时调用。可以查最近记录或历史趋势。",
+    "description": "读取用户已授权的睡眠、心率或运动记录。用户询问自己的身体数据或趋势时调用。",
     "dangerous": False,
     "category": "memory",
     "persist": True,
@@ -519,7 +516,7 @@ _TOOL_REGISTRY["read_watch"] = {
         "properties": {
             "query": {
                 "type": "string",
-                "description": "查询类型：睡眠/心率/运动/最近，不填返回综合摘要",
+                "description": "要查看的数据主题，如“睡眠”“心率”“运动”或“最近”；省略时返回综合摘要。",
             },
         },
         "required": [],
@@ -529,7 +526,7 @@ _TOOL_REGISTRY["read_watch"] = {
 
 _TOOL_REGISTRY["search_diary"] = {
     "func": _search_diary_wrapper,
-    "description": "按主题或关键词检索用户最近30天的日记内容。当{char}想回忆用户写过的某个话题、情绪、事件时主动调用，不需要用户明确要求。",
+    "description": "按主题检索最近 30 天的日记。需要确认用户曾写过的特定事件、情绪或话题时调用；不得把结果当作未检索的记忆猜测。",
     "dangerous": False,
     "category": "memory",
     "persist": True,
@@ -538,7 +535,7 @@ _TOOL_REGISTRY["search_diary"] = {
         "properties": {
             "query": {
                 "type": "string",
-                "description": "搜索关键词，如'失眠'、'焦虑'、'考试'，不填返回最近日记片段",
+                "description": "用于检索的主题或关键词，例如“失眠”“焦虑”或“考试”；省略时返回最近片段。",
             },
         },
         "required": [],
@@ -548,7 +545,7 @@ _TOOL_REGISTRY["search_diary"] = {
 
 _TOOL_REGISTRY["desktop_minimize"] = {
     "func": _desktop_minimize_wrapper,
-    "description": "最小化用户电脑上的某个窗口。当{char}觉得用户应该休息、或者用户在看让{char}不开心的东西时可以调用。",
+    "description": "最小化用户指定的桌面窗口。仅在用户明确要求最小化该窗口时调用；不要因主观判断自行操作。",
     "dangerous": False,
     "category": "desktop",
     "parameters": {
@@ -556,7 +553,7 @@ _TOOL_REGISTRY["desktop_minimize"] = {
         "properties": {
             "window": {
                 "type": "string",
-                "description": "窗口标题关键词，如「Steam」「游戏」「视频」",
+                "description": "用于匹配目标窗口标题的关键词，例如“Steam”“游戏”或“视频”。",
             },
         },
         "required": ["window"],
@@ -568,7 +565,7 @@ _TOOL_REGISTRY["desktop_minimize"] = {
 
 _TOOL_REGISTRY["desktop_open_url"] = {
     "func": _desktop_open_url_wrapper,
-    "description": "在用户电脑上打开一个网址。{char}想分享内容、帮用户查东西时使用。",
+    "description": "在用户电脑上打开一个已知网址。用户明确要求打开链接或确认要访问某个页面时调用。",
     "dangerous": False,
     "category": "desktop",
     "parameters": {
@@ -576,7 +573,7 @@ _TOOL_REGISTRY["desktop_open_url"] = {
         "properties": {
             "url": {
                 "type": "string",
-                "description": "要打开的完整URL，如 https://music.163.com",
+                "description": "要打开的完整 http 或 https URL，例如 https://example.com。",
             },
         },
         "required": ["url"],
@@ -588,7 +585,7 @@ _TOOL_REGISTRY["desktop_open_url"] = {
 
 _TOOL_REGISTRY["desktop_play_pause"] = {
     "func": _desktop_play_pause_wrapper,
-    "description": "控制用户电脑的媒体播放/暂停。{char}想让用户听音乐或暂停音乐时使用。",
+    "description": "切换用户电脑当前媒体的播放或暂停状态。仅在用户明确要求播放、继续或暂停时调用。",
     "dangerous": False,
     "category": "desktop",
     "parameters": {
@@ -602,7 +599,7 @@ _TOOL_REGISTRY["desktop_play_pause"] = {
 
 _TOOL_REGISTRY["desktop_notify"] = {
     "func": _desktop_notify_wrapper,
-    "description": "向用户发送一条系统通知。{char}有重要的事想提醒用户时使用，比如该吃饭了、该休息了。",
+    "description": "向用户设备发送一条系统通知。用户要求弹出通知，或已有明确且必要的提醒内容时调用。",
     "dangerous": False,
     "category": "desktop",
     "parameters": {
@@ -610,11 +607,11 @@ _TOOL_REGISTRY["desktop_notify"] = {
         "properties": {
             "title": {
                 "type": "string",
-                "description": "通知标题",
+                "description": "通知的简短标题；省略时由客户端使用默认标题。",
             },
             "message": {
                 "type": "string",
-                "description": "通知内容",
+                "description": "要显示给用户的通知正文。",
             },
         },
         "required": ["message"],
@@ -625,7 +622,7 @@ _TOOL_REGISTRY["desktop_notify"] = {
 
 _TOOL_REGISTRY["play_song"] = {
     "func": _play_song_wrapper,
-    "description": "搜索并在网易云音乐播放指定歌曲。用户说「放一首xx」「我要听xx」「播放xx」「帮我点xx」时调用。会自动搜索歌曲ID并播放，无需用户提供ID。",
+    "description": "搜索并播放用户指定的歌曲。用户明确要求播放、点播或听某首歌时调用；无需用户提供歌曲 ID。",
     "dangerous": False,
     "category": "desktop",
     "parameters": {
@@ -633,11 +630,11 @@ _TOOL_REGISTRY["play_song"] = {
         "properties": {
             "song_name": {
                 "type": "string",
-                "description": "歌曲名称",
+                "description": "要播放的歌曲名称。",
             },
             "artist": {
                 "type": "string",
-                "description": "歌手名，可选",
+                "description": "可选的歌手名，用于在同名歌曲间消歧。",
             },
         },
         "required": ["song_name"],
@@ -649,7 +646,7 @@ _TOOL_REGISTRY["play_song"] = {
 
 _TOOL_REGISTRY["get_profile"] = {
     "func": _get_profile_wrapper,
-    "description": "获取用户的基本信息和重要事实。当{char}需要了解用户的基本情况时调用。",
+    "description": "读取已存储的用户基本资料和重要事实。需要依据这些资料回答、且当前上下文未提供时调用。",
     "dangerous": False,
     "category": "memory",
     "parameters": {
@@ -661,7 +658,7 @@ _TOOL_REGISTRY["get_profile"] = {
 
 _TOOL_REGISTRY["get_episodic"] = {
     "func": _get_episodic_wrapper,
-    "description": "召回与当前话题相关的情景记忆片段。当{char}想起某段往事或需要回忆过去时调用。",
+    "description": "检索与当前主题相关的情景记忆。需要核对过去具体事件而不是凭印象回答时调用。",
     "dangerous": False,
     "category": "memory",
     "parameters": {
@@ -669,7 +666,7 @@ _TOOL_REGISTRY["get_episodic"] = {
         "properties": {
             "topic": {
                 "type": "string",
-                "description": "相关话题关键词，如'失眠'、'考试'、'吵架'",
+                "description": "用于召回的主题或关键词，例如“失眠”“考试”或“吵架”；可省略。",
             },
         },
         "required": [],
@@ -679,31 +676,31 @@ _TOOL_REGISTRY["get_episodic"] = {
 
 _TOOL_REGISTRY["revise_memory"] = {
     "func": _revise_memory_wrapper,
-    "description": "Correct an episodic memory after the user says it is wrong. Use only when a specific episode id is known; it weakens the old entry and records the correction instead of deleting history.",
+    "description": "Correct a specific episodic memory after the user explicitly says it is wrong. Use only with a known episode id; it preserves history by weakening the old entry and recording the correction.",
     "dangerous": False,
     "category": "memory",
     "parameters": {"type": "object", "properties": {
-        "episode_id": {"type": "string", "description": "The specific episodic memory id to correct."},
-        "correction": {"type": "string", "description": "The concise corrected fact supplied or confirmed by the user."},
+        "episode_id": {"type": "string", "description": "The exact episodic-memory identifier to correct."},
+        "correction": {"type": "string", "description": "The concise replacement fact explicitly supplied or confirmed by the user."},
     }, "required": ["episode_id", "correction"]},
     "trace_args": ["episode_id"],
 }
 
 _TOOL_REGISTRY["revise_user_profile"] = {
     "func": _revise_user_profile_wrapper,
-    "description": "Correct one stable user-profile dimension after the user explicitly says the current profile is wrong. Do not infer a correction; use the user's stated replacement.",
+    "description": "Correct one stable user-profile dimension after the user explicitly says the stored profile is wrong. Do not infer a replacement; use only the user's stated correction.",
     "dangerous": False,
     "category": "memory",
     "parameters": {"type": "object", "properties": {
-        "field": {"type": "string", "enum": ["trust_pattern", "emotion_expression", "help_seeking", "stress_response", "intimacy_comfort", "sleep_pattern", "topic_preference", "self_relation", "address_style"], "description": "The profile dimension to replace."},
-        "correction": {"type": "string", "description": "The concise corrected user pattern."},
+        "field": {"type": "string", "enum": ["trust_pattern", "emotion_expression", "help_seeking", "stress_response", "intimacy_comfort", "sleep_pattern", "topic_preference", "self_relation", "address_style"], "description": "The stable profile dimension to replace."},
+        "correction": {"type": "string", "description": "The concise corrected user pattern explicitly given by the user."},
     }, "required": ["field", "correction"]},
     "trace_args": ["field"],
 }
 
 _TOOL_REGISTRY["exit_yandere"] = {
     "func": _exit_yandere_wrapper,
-    "description": "当{char}决定从病娇状态平静下来时调用，通常是用户说了让她安心的话之后。由{char}自主判断是否调用，不需要用户明确要求。",
+    "description": "结束当前的 yandere 角色状态并恢复平静。仅在该状态确实活跃且对话已自然缓和时调用。",
     "dangerous": False,
     "category": "system",
     "parameters": {
@@ -715,7 +712,7 @@ _TOOL_REGISTRY["exit_yandere"] = {
 
 _TOOL_REGISTRY["water_garden"] = {
     "func": water_garden,
-    "description": "用户催{char}去浇花、关心花园、问花长得怎么样并暗示该浇水时调用。无参数。{char}会按当前心情挑对应的那株花浇一次。",
+    "description": "为角色花园浇一次水。用户明确要求浇花，或询问花园状态并请求采取浇水动作时调用。",
     "dangerous": False,
     "category": "info",
     "parameters": {
@@ -730,9 +727,8 @@ _TOOL_REGISTRY["water_garden"] = {
 _TOOL_REGISTRY["peek_screen_content"] = {
     "func": _peek_screen_content_wrapper,
     "description": (
-        "{char}主动查看用户当前窗口的屏幕文字内容（如 Obsidian 文档、代码文件正文等）。"
-        "看到窗口标题后，若好奇或在意，可自主调用。无需用户提出。"
-        "功能未开启或冷却中时自动返回提示，不会出错。"
+        "读取当前桌面可见窗口的受控文字快照。仅在用户明确要求查看屏幕内容，或已经获得用户授权的主动查看场景中调用。"
+        "功能未开启或处于冷却期时会返回状态说明。"
     ),
     "dangerous": False,
     "category": "desktop",
@@ -747,15 +743,15 @@ _TOOL_REGISTRY["peek_screen_content"] = {
 
 _TOOL_REGISTRY["toy_vibrate"] = {
     "func": _toy_vibrate_wrapper,
-    "description": "控制已连接的 Intiface 振动设备。仅在用户明确要求振动并给出或接受强度、时长时调用。",
+    "description": "控制已连接的 Intiface 振动设备。仅在用户明确同意振动并给出或接受强度、时长时调用。",
     "dangerous": False,
     "category": "desktop",
     "parameters": {
         "type": "object",
         "properties": {
-            "intensity": {"type": "number", "description": "振动强度 0.0~1.0"},
-            "duration_ms": {"type": "integer", "description": "持续毫秒数，最多 30000"},
-            "device_index": {"type": "integer", "description": "可选设备索引"},
+            "intensity": {"type": "number", "description": "振动强度，范围为 0.0 到 1.0。"},
+            "duration_ms": {"type": "integer", "description": "振动持续毫秒数，最大为 30000。"},
+            "device_index": {"type": "integer", "description": "可选的已连接设备索引。"},
         },
         "required": [],
     },
@@ -765,13 +761,13 @@ _TOOL_REGISTRY["toy_vibrate"] = {
 
 _TOOL_REGISTRY["toy_stop"] = {
     "func": _toy_stop_wrapper,
-    "description": "立即停止已连接的 Intiface 设备。用户要求停止时应优先调用。",
+    "description": "立即停止已连接的 Intiface 振动设备。用户要求停止时优先调用。",
     "dangerous": False,
     "category": "desktop",
     "parameters": {
         "type": "object",
         "properties": {
-            "device_index": {"type": "integer", "description": "可选设备索引"},
+            "device_index": {"type": "integer", "description": "可选的已连接设备索引；省略时停止默认设备。"},
         },
         "required": [],
     },
@@ -781,7 +777,7 @@ _TOOL_REGISTRY["toy_stop"] = {
 
 _TOOL_REGISTRY["toy_pattern"] = {
     "func": _toy_pattern_wrapper,
-    "description": "让已连接的 Intiface 振动设备执行预设模式（gentle/pulse/wave/long）。仅在用户明确要求时调用。",
+    "description": "让已连接的 Intiface 振动设备执行预设振动模式。仅在用户明确同意并指定或接受模式时调用。",
     "dangerous": False,
     "category": "desktop",
     "parameters": {
@@ -790,8 +786,9 @@ _TOOL_REGISTRY["toy_pattern"] = {
             "pattern_name": {
                 "type": "string",
                 "enum": ["gentle", "pulse", "wave", "long"],
+                "description": "预设模式：gentle（轻柔）、pulse（脉冲）、wave（波浪）或 long（长振）。",
             },
-            "device_index": {"type": "integer", "description": "可选设备索引"},
+            "device_index": {"type": "integer", "description": "可选的已连接设备索引。"},
         },
         "required": [],
     },
@@ -803,8 +800,8 @@ _TOOL_REGISTRY["toy_pattern"] = {
 _TOOL_REGISTRY["read_toy_file"] = {
     "func": _read_toy_file_wrapper,
     "description": (
-        "读取你们的玩具项目文件，可以随便读读写写画画。"
-        "只能用 file_key 选择思考笔记、愿望清单或涂鸦板，不能读取系统文件。"
+        "读取玩具项目中允许的用户协作文本文件。只能通过 file_key 选择思考笔记、愿望清单或涂鸦板；"
+        "不能读取系统文件。"
     ),
     "dangerous": False,
     "category": "desktop",
@@ -815,7 +812,7 @@ _TOOL_REGISTRY["read_toy_file"] = {
             "file_key": {
                 "type": "string",
                 "enum": ["diary", "wishlist", "doodle"],
-                "description": "diary=思考笔记，wishlist=愿望清单，doodle=涂鸦板",
+                "description": "要读取的协作文件：diary（思考笔记）、wishlist（愿望清单）或 doodle（涂鸦板）。",
             },
         },
         "required": ["file_key"],
@@ -828,8 +825,8 @@ _TOOL_REGISTRY["read_toy_file"] = {
 _TOOL_REGISTRY["write_toy_file"] = {
     "func": _write_toy_file_wrapper,
     "description": (
-        "写入你们的玩具项目文件，可以随便写写画画。"
-        "只能用 file_key 选择思考笔记、愿望清单或涂鸦板，不能修改系统文件。"
+        "写入玩具项目中允许的用户协作文本文件。仅在用户明确要求记录内容时调用；"
+        "只能通过 file_key 选择思考笔记、愿望清单或涂鸦板，不能修改系统文件。"
     ),
     "dangerous": False,
     "category": "desktop",
@@ -839,16 +836,16 @@ _TOOL_REGISTRY["write_toy_file"] = {
             "file_key": {
                 "type": "string",
                 "enum": ["diary", "wishlist", "doodle"],
-                "description": "diary=思考笔记，wishlist=愿望清单，doodle=涂鸦板",
+                "description": "要写入的协作文件：diary（思考笔记）、wishlist（愿望清单）或 doodle（涂鸦板）。",
             },
             "content": {
                 "type": "string",
-                "description": "要写入的纯文本内容，最多 4000 字",
+                "description": "要写入的纯文本内容，最多 4000 个字符。",
             },
             "mode": {
                 "type": "string",
                 "enum": ["overwrite", "append"],
-                "description": "overwrite 覆盖写入，append 追加写入",
+                "description": "写入方式：overwrite 覆盖原内容；append 追加到原内容后。省略时使用默认方式。",
             },
         },
         "required": ["file_key", "content"],
@@ -860,8 +857,8 @@ _TOOL_REGISTRY["write_toy_file"] = {
 _TOOL_REGISTRY["fs_list"] = {
     "func": _fs_list_wrapper,
     "description": (
-        "列出 config.fs_access.allow_roots 允许范围内某个目录下的文件和子目录，"
-        "只读。省略 path 时返回允许浏览的入口目录列表。想看文件内容用 fs_read。"
+        "列出 fs_access.allow_roots 允许范围内目录的文件和子目录；此工具只读。"
+        "省略 path 时返回可浏览的入口目录。需要读取文件正文时使用 fs_read。"
     ),
     "dangerous": False,
     "category": "fs",
@@ -870,12 +867,12 @@ _TOOL_REGISTRY["fs_list"] = {
         "properties": {
             "path": {
                 "type": "string",
-                "description": "要浏览的绝对路径，省略则返回允许浏览的根目录列表",
+                "description": "要浏览的绝对目录路径；省略时返回允许浏览的根目录列表。",
             },
             "depth": {
                 "type": "integer",
                 "enum": [1, 2],
-                "description": "列出的目录深度，1 或 2，默认 1",
+                "description": "列举的目录深度，只能为 1 或 2；省略时为 1。",
             },
         },
         "required": [],
@@ -888,8 +885,8 @@ _TOOL_REGISTRY["fs_list"] = {
 _TOOL_REGISTRY["fs_read"] = {
     "func": _fs_read_wrapper,
     "description": (
-        "读取 config.fs_access.allow_roots 允许范围内的文本文件内容，只读。"
-        "只支持文本类扩展名，超大或二进制文件会返回提示而不是内容。"
+        "读取 fs_access.allow_roots 允许范围内的文本文件；此工具只读。"
+        "仅支持文本扩展名，超大或二进制文件只返回状态说明。"
     ),
     "dangerous": False,
     "category": "fs",
@@ -898,7 +895,7 @@ _TOOL_REGISTRY["fs_read"] = {
         "properties": {
             "path": {
                 "type": "string",
-                "description": "要读取的文件绝对路径",
+                "description": "要读取的绝对文件路径，必须位于允许的浏览根目录内。",
             },
         },
         "required": ["path"],
