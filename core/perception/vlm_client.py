@@ -14,6 +14,27 @@ MAX_CAPTION_CHARS = 30
 _SYSTEM_PROMPT = """你是隐私优先的本地视觉观察器。先判断敏感性：只要画面可能含支付、密码、证件、账号、私密聊天或其他敏感个人信息，就设 sensitive=true，且不要描述内容。否则只根据可见事实给出保守概括，不猜测身份、关系、情绪或屏幕文字。仅输出 JSON：{\"scene\":\"desk|away|bed|meal|outdoor|other\",\"activity\":\"working|gaming|watching|reading|phone|idle|unknown\",\"confidence\":0.0,\"sensitive\":false,\"caption\":\"不超过30字中文\"}"""
 
 
+def get_visual_perception_config() -> dict:
+    """Resolve shadow-observation config, reusing ``vision`` credentials when asked.
+
+    ``visual_perception`` is an explicit privacy gate.  Only when that gate is
+    enabled may its blank connection fields inherit the already-configured
+    general VLM client (the common GLM setup); a disabled gate never inherits.
+    """
+    from core.config_loader import get_config
+
+    cfg = get_config()
+    shadow = dict(cfg.get("visual_perception") or {})
+    if not shadow.get("enabled", False):
+        return shadow
+    vision = dict(cfg.get("vision") or {})
+    for field in ("base_url", "model", "api_key"):
+        if not shadow.get(field):
+            shadow[field] = vision.get(field, "")
+    shadow["provider"] = shadow.get("provider") or vision.get("provider") or "openai_compatible"
+    return shadow
+
+
 @dataclass(frozen=True)
 class VisualObservation:
     scene: str
@@ -42,15 +63,13 @@ def _parse_observation(raw: object) -> VisualObservation | None:
 
 async def describe_with_status(image_bytes: bytes, context_hint: str = "") -> tuple[VisualObservation | None, str | None]:
     """Internal variant that preserves the shadow trace's invalid/error distinction."""
-    from core.config_loader import get_config
-
-    cfg = get_config().get("visual_perception", {})
+    cfg = get_visual_perception_config()
     if not cfg.get("enabled", False) or not image_bytes:
         return None, "disabled"
     base_url = str(cfg.get("base_url") or "").rstrip("/")
     model = str(cfg.get("model") or "")
     if not base_url or not model:
-        logger.warning("[vlm] enabled but base_url/model missing")
+        logger.warning("[vlm] enabled but base_url/model missing provider=%s", cfg.get("provider"))
         return None, "error"
     try:
         import aiohttp
@@ -77,7 +96,11 @@ async def describe_with_status(image_bytes: bytes, context_hint: str = "") -> tu
             observation = _parse_observation(json.loads(content))
         else:
             observation = _parse_observation(content)
-        return (observation, None if observation is not None else "invalid")
+        if observation is None:
+            logger.warning("[vlm] observation response rejected as invalid model=%s", model)
+            return None, "invalid"
+        logger.info("[vlm] initialized provider=%s model=%s", cfg.get("provider"), model)
+        return observation, None
     except Exception as exc:
         logger.warning("[vlm] describe failed: %s", exc)
         return None, "error"

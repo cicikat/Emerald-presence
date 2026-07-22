@@ -48,3 +48,16 @@ def test_parse_rejects_bad_enums_and_captions():
     from core.perception.vlm_client import _parse_observation
     assert _parse_observation({"scene": "bad", "activity": "working", "confidence": .5, "sensitive": False, "caption": "x"}) is None
     assert _parse_observation({"scene": "desk", "activity": "working", "confidence": .5, "sensitive": False, "caption": "x" * 31}) is None
+
+
+def test_enabled_shadow_observation_reuses_configured_vision_credentials(monkeypatch):
+    from core.perception.vlm_client import get_visual_perception_config
+
+    monkeypatch.setattr("core.config_loader.get_config", lambda: {
+        "vision": {"enabled": True, "provider": "glm", "base_url": "https://glm", "model": "glm-4v-flash", "api_key": "secret"},
+        "visual_perception": {"enabled": True, "base_url": "", "model": "", "api_key": ""},
+    })
+    cfg = get_visual_perception_config()
+    assert cfg["provider"] == "glm"
+    assert cfg["base_url"] == "https://glm"
+    assert cfg["model"] == "glm-4v-flash"

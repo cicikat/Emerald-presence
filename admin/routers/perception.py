@@ -52,6 +52,7 @@ async def process_visual_image(image_bytes: bytes, source: str, context_hint: st
     observation, reason = await describe_with_status(image_bytes, context_hint)
     if observation is None:
         _append_trace(source=source, dropped="invalid" if reason == "invalid" else "vlm_error")
+        logger.warning("[perception] visual observation dropped source=%s reason=%s", source, reason)
     elif observation.sensitive:
         _append_trace(source=source, dropped="sensitive")
     else:
@@ -64,8 +65,8 @@ async def ingest_visual(
     source: Literal["screen", "camera"] = Form(...),
     _auth=Depends(require_scopes("sensor.write")),
 ):
-    from core.config_loader import get_config
-    if not get_config().get("visual_perception", {}).get("enabled", False):
+    from core.perception.vlm_client import get_visual_perception_config
+    if not get_visual_perception_config().get("enabled", False):
         return {"accepted": True, "processing": False}
     now = time.monotonic()
     last_accepted = _last_accepted.get(source)
