@@ -54,7 +54,8 @@ tool-loop schema 暴露层根据角色级 `interest_state` 的同域最高 level
 ```
 路径C：tool loop 多步工具执行器（Brief 28，function_calling 模型专用）
   激活条件（三者同时成立，tool_dispatcher.tool_loop_active(uid)）：
-    - config.yaml tool_loop.enabled = true（总开关，默认 false）
+    - 有效 tool_loop 开关 = true：角色卡 presence_ext.tool_loop="on" 强制开启，
+      "off" 强制关闭，字段缺失/非法时回落 config.yaml tool_loop.enabled（默认 false）
     - uid 是 owner 的真实私聊轮（QQ 私聊 main.py / /desktop/chat，群聊在到达判断前已提前 return）
     - chat preset 的 tool_call_mode == "function_calling"（xml_fallback 小模型不激活）
 
@@ -76,8 +77,8 @@ tool-loop schema 暴露层根据角色级 `interest_state` 的同域最高 level
   与路径A/B互斥表：
     | 场景                                  | 路径A探针 | 路径B意图解析 | 路径C loop |
     |---------------------------------------|-----------|---------------|------------|
-    | tool_loop 关 / preset 非 FC / 非owner  | 正常执行  | 正常执行      | 不激活     |
-    | tool_loop 开 + owner + FC preset       | 跳过      | 跳过（loop_executed）| 激活 |
+    | 有效 tool_loop 关 / preset 非 FC / 非owner  | 正常执行  | 正常执行      | 不激活     |
+    | 有效 tool_loop 开 + owner + FC preset       | 跳过      | 跳过（loop_executed）| 激活 |
 
   默认不排斥的角落：QQ 关键词快速路径命中后走 tool_result 注入，loop 里的模型能在层10
   看到这次执行结果，不会重复调用；两者理论上仍可能对同一意图各执行一次，见
@@ -102,7 +103,8 @@ tool-loop schema 暴露层根据角色级 `interest_state` 的同域最高 level
   "disabled_layers": ["0_jailbreak", "2_jailbreak", "11_jailbreak"],
   "model_routing": "claude-main",
   "tool_categories": ["info", "desktop", "memory", "mcp"],
-  "proactive": "off"
+  "proactive": "off",
+  "tool_loop": "on"
 }
 ```
 
@@ -111,7 +113,10 @@ tool-loop schema 暴露层根据角色级 `interest_state` 的同域最高 level
   硬件写类等排除项。示例卡 `examples/benwo.example.json` 把 `mcp` 类加入暴露面（`characters/`
   根目录不放模板/示例文件，见 `tests/test_authored_assets.py::test_no_template_files_in_characters_root`；
   要实际加载体验这张卡，复制到 `characters/` 下改名去掉 `.example` 再改 `active_character`）。
-- 另外三个钩子（`disabled_layers` / `model_routing` / `proactive`）分别见
+- `tool_loop`：仅接受 `"on"` / `"off"`。`"on"` 允许这张卡在全局默认关闭时启用 Path C；
+  `"off"` 关闭 Path C；字段缺失或非法值回落全局 `tool_loop.enabled`。它不会绕过 owner 私聊
+  或 `function_calling` preset 两道硬闸。`examples/assistant.example.json` 是人机直连组合示例。
+- 另外四个钩子（`disabled_layers` / `model_routing` / `proactive` / `tool_loop`）分别见
   `docs/prompt-layers.md`、`docs/model-presets.md`、`docs/scheduler.md`。
 
 ---

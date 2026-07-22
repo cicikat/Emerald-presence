@@ -89,13 +89,14 @@ model_presets:
 
 ### `tool_call_mode` 取值与 tool loop 的组合行为
 
-| `tool_call_mode` | 单发 FC（`llm_client.chat(tools=)`） | Brief 28 tool loop（`config.tool_loop.enabled=true`） |
+| `tool_call_mode` | 单发 FC（`llm_client.chat(tools=)`） | Brief 28/109 tool loop（有效开关开启） |
 |---|---|---|
-| `function_calling` | 支持，探针/路径A/B 正常调用 | 支持：`chat` preset 为此模式时 `tool_loop_active()` 才可能为真，主生成走 `run_agentic_loop`（多步自主调用） |
-| `xml_fallback` | 支持（`<tool_call>` 标签解析） | 不支持：`tool_loop_active()` 恒为假，即使总开关打开也维持原 `run_llm` 单发生成——小模型没有可靠的多步自主调用能力，这是设计边界，不是遗漏 |
+| `function_calling` | 支持，探针/路径A/B 正常调用 | 支持：`chat` preset 为此模式且有效开关开启时 `tool_loop_active()` 才可能为真，主生成走 `run_agentic_loop`（多步自主调用） |
+| `xml_fallback` | 支持（`<tool_call>` 标签解析） | 不支持：`tool_loop_active()` 恒为假，即使有效开关开启也维持原 `run_llm` 单发生成——小模型没有可靠的多步自主调用能力，这是设计边界，不是遗漏 |
 
-只有 `routing_profiles[active_routing].chat` 指向的 preset 是 `function_calling` 时，
-tool loop 才可能激活；`intent` / `probe` 等轻量 preset 的 `tool_call_mode` 与 tool loop 无关
+只有有效 routing profile 的 `chat` 指向 `function_calling` preset 时，tool loop 才可能激活；
+有效开关优先取活跃角色卡 `presence_ext.tool_loop`（`"on"`/`"off"`），字段缺失或非法值才回落
+全局 `config.tool_loop.enabled`。`intent` / `probe` 等轻量 preset 的 `tool_call_mode` 与 tool loop 无关
 （探针在 tool loop 激活时会被跳过，见 `docs/tools.md` 路径C）。
 
 ### 路由解析规则

@@ -17,6 +17,12 @@
 `null` 清除声明回落全局。可选 profile 清单走 `GET /model-presets/routing-profiles`
 （persona 级，不含 api_key/base_url）。跨群一致——不做 per-group override。
 
+`presence_ext.tool_loop` 是角色卡级 Path C 覆写，不经设置 API：`"on"` 在全局
+`tool_loop.enabled=false` 时仍为该卡开启多步工具循环，`"off"` 强制关闭，缺失或非法值回落全局。
+它仍要求 owner 私聊与当前 chat preset 的 `tool_call_mode=function_calling`；角色卡不能借此绕过
+工具暴露分类或危险工具排除。`examples/assistant.example.json` 展示人机直连组合，普通角色卡未声明时
+继续遵从全局默认关闭。
+
 TTS 有两个不同开关：`tts.enabled` 是服务端能力总开关，`tts.desktop_enabled` 决定桌面是否显示/请求语音条。`POST /tts/synthesize` 仅在两者均开启且 persona 鉴权通过时按需合成，返回 base64 WAV。桌面端契约仍是 `{text, emotion}` 请求与 `{audio_b64, mime}` 响应，不接触 provider 或密钥。
 
 TTS provider 由管理面（admin token）经 `GET/PUT /tts-config` 管理：`tts.provider` 当前支持 `gsv` 与明确标注为预留的 `openai_compatible`，每个 provider 可放在 `tts.providers.<provider>`。旧有顶层 GSV 字段（`api_url`、`ref_audio`、情绪参数等）会自动映射，保持已有本地 GPT-SoVITS 部署行为不变；预留 provider 不会猜测或发起云厂商请求。`POST /tts-config/test` 只试听已就绪 provider，`GET /observability/api-calls?caller=tts` 可查询最近合成结果与失败类别（`state.read`）。
