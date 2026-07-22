@@ -1,4 +1,9 @@
 from pathlib import Path
+from types import SimpleNamespace
+import hashlib
+import zipfile
+
+import scripts.update_release as updater
 
 
 def test_update_script_guards_running_service_dirty_tree_and_release_package():
@@ -8,4 +13,129 @@ def test_update_script_guards_running_service_dirty_tree_and_release_package():
     assert "git status --porcelain" in script
     assert "输入 Y 继续" in script
     assert ":pull_failed" in script
-    assert "不要覆盖 data、config.yaml 或 secrets" in script
+    assert "data、config.yaml 或 secrets" in script
+    assert '".venv\\Scripts\\python.exe" scripts\\update_release.py' in script
+    assert script.index('findstr /I /C:"main.py"') < script.index('if not exist ".git" goto :release_package')
+
+
+def test_release_package_protected_paths_are_never_overwritten():
+    protected = {
+        "data/runtime/state.json",
+        "userdata/characters/cards/custom.json",
+        "config.yaml",
+        "secrets.local.yaml",
+        ".venv/Scripts/python.exe",
+        "tools/uv.exe",
+    }
+    ordinary = {"main.py", "tools/helper.exe", "scripts/update_release.py"}
+
+    assert all(updater.is_protected_relative_path(Path(path)) for path in protected)
+    assert not any(updater.is_protected_relative_path(Path(path)) for path in ordinary)
+
+
+def test_sha256_validation_and_release_menu_parsing(tmp_path):
+    asset = tmp_path / "PresenceKit-v1.2.3-win64-setup.zip"
+    asset.write_bytes(b"release payload")
+    digest = updater.sha256_file(asset)
+    checksum = tmp_path / "asset.sha256"
+    checksum.write_text(f"{digest}  {asset.name}\n", encoding="utf-8")
+
+    updater.verify_sha256(asset, checksum)
+    checksum.write_text("0" * 64 + "  wrong.zip\n", encoding="utf-8")
+    try:
+        updater.verify_sha256(asset, checksum)
+    except updater.UpdateError as exc:
+        assert "SHA256" in str(exc)
+    else:
+        raise AssertionError("wrong digest must fail verification")
+
+    releases = [
+        {"tag_name": "v2.0.0", "assets": []},
+        {"tag_name": "v1.9.0", "assets": []},
+    ]
+    assert updater.parse_release_choice("", releases) == 0
+    assert updater.parse_release_choice("2", releases) == 1
+    for invalid in ("0", "3", "hello"):
+        try:
+            updater.parse_release_choice(invalid, releases)
+        except updater.UpdateError:
+            pass
+        else:
+            raise AssertionError(f"{invalid!r} must not select a release")
+
+
+def test_fetch_releases_uses_mocked_network_response(tmp_path, monkeypatch):
+    payload = [
+        {"tag_name": "v2.0.0", "draft": False, "assets": []},
+        {"tag_name": "v1.0.0-draft", "draft": True, "assets": []},
+    ]
+
+    def fake_download(url, destination, opener):
+        assert url == updater.RELEASES_URL
+        destination.write_text(__import__("json").dumps(payload), encoding="utf-8")
+
+    monkeypatch.setattr(updater, "download", fake_download)
+    releases = updater.fetch_releases(tmp_path)
+
+    assert [release["tag_name"] for release in releases] == ["v2.0.0"]
+
+
+def test_apply_release_keeps_private_paths_and_backs_up_replaced_program_files(tmp_path):
+    install = tmp_path / "PresenceKit"
+    install.mkdir()
+    (install / "VERSION").write_text("v1.0.0\n", encoding="utf-8")
+    (install / "main.py").write_text("old program", encoding="utf-8")
+    (install / "config.yaml").write_text("private config", encoding="utf-8")
+    (install / "data").mkdir()
+    (install / "data" / "state.json").write_text("private state", encoding="utf-8")
+    (install / "userdata").mkdir()
+    (install / "userdata" / "card.json").write_text("private card", encoding="utf-8")
+    source = tmp_path / "staged-release"
+    source.mkdir()
+    (source / "VERSION").write_text("v2.0.0\n", encoding="utf-8")
+    (source / "main.py").write_text("new program", encoding="utf-8")
+    (source / "config.yaml").write_text("release config", encoding="utf-8")
+    (source / "data").mkdir()
+    (source / "data" / "state.json").write_text("release state", encoding="utf-8")
+
+    backup = updater.apply_release(install, source, "v1.0.0")
+
+    assert (install / "main.py").read_text(encoding="utf-8") == "new program"
+    assert (install / "VERSION").read_text(encoding="utf-8") == "v2.0.0\n"
+    assert (install / "config.yaml").read_text(encoding="utf-8") == "private config"
+    assert (install / "data" / "state.json").read_text(encoding="utf-8") == "private state"
+    assert (install / "userdata" / "card.json").read_text(encoding="utf-8") == "private card"
+    assert (backup / "main.py").read_text(encoding="utf-8") == "old program"
+
+
+def test_offline_release_rehearsal_updates_program_but_keeps_private_files(tmp_path, monkeypatch):
+    install = tmp_path / "PresenceKit"
+    install.mkdir()
+    (install / "VERSION").write_text("v1.0.0\n", encoding="utf-8")
+    (install / "main.py").write_text("old", encoding="utf-8")
+    (install / "config.yaml").write_text("private", encoding="utf-8")
+    (install / "data").mkdir()
+    (install / "data" / "history.json").write_text("keep", encoding="utf-8")
+    archive = tmp_path / "PresenceKit-v1.1.0-win64-setup.zip"
+    with zipfile.ZipFile(archive, "w") as package:
+        package.writestr("VERSION", "v1.1.0\n")
+        package.writestr("main.py", "new")
+        package.writestr("config.yaml", "release config")
+        package.writestr("data/history.json", "release state")
+        package.writestr("scripts/update_release.py", "# packaged updater\n")
+    checksum = archive.with_suffix(archive.suffix + ".sha256")
+    checksum.write_text(f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n", encoding="utf-8")
+    monkeypatch.setattr(updater, "_service_is_running", lambda: False)
+
+    updater.update(
+        install,
+        SimpleNamespace(
+            source_zip=str(archive), sha256_file=str(checksum), target_version="v1.1.0",
+            yes=True, skip_sync=True,
+        ),
+    )
+
+    assert (install / "VERSION").read_text(encoding="utf-8") == "v1.1.0\n"
+    assert (install / "main.py").read_text(encoding="utf-8") == "new"
+    assert (install / "config.yaml").read_text(encoding="utf-8") == "private"
+    assert (install / "data" / "history.json").read_text(encoding="utf-8") == "keep"

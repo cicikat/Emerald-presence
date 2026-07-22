@@ -3,8 +3,6 @@ setlocal EnableExtensions
 chcp 65001 >nul
 cd /d "%~dp0"
 
-if not exist ".git" goto :release_package
-
 rem Do not pull while this copy of the service is still running.
 wmic process where "name='python.exe' or name='pythonw.exe'" get CommandLine 2>nul | findstr /I /C:"main.py" >nul
 if not errorlevel 1 (
@@ -13,6 +11,8 @@ if not errorlevel 1 (
     pause
     exit /b 1
 )
+
+if not exist ".git" goto :release_package
 
 set "STATUS_FILE=%TEMP%\presencekit-update-status-%RANDOM%.txt"
 git status --porcelain > "%STATUS_FILE%"
@@ -80,7 +80,17 @@ pause
 exit /b 1
 
 :release_package
-echo 当前目录不是 Git 克隆仓库，而是发行版解压包。
-echo 请下载新版 release zip，并只覆盖程序代码目录；不要覆盖 data、config.yaml 或 secrets 文件。
+echo 当前目录是发行版解压包，正在启动版本更新器...
+if not exist ".venv\Scripts\python.exe" (
+    echo 未找到 .venv，请先运行 "AA1安装并启动.bat" 完成首次安装。
+    pause
+    exit /b 1
+)
+".venv\Scripts\python.exe" scripts\update_release.py
+if errorlevel 1 (
+    echo 更新未完成。请保留上方错误信息；也可手动下载 release zip 后仅覆盖程序文件。
+    pause
+    exit /b 1
+)
 pause
 exit /b 0

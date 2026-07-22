@@ -89,6 +89,8 @@ def build(version: str, uv_version: str) -> Path:
         staging = Path(tmp) / "PresenceKit"
         _stage_source(staging)
         _download_uv(uv_version, staging / "tools" / "uv.exe")
+        # Release 包没有 .git，更新器靠这个标记展示当前版本并判断降级。
+        (staging / "VERSION").write_text(f"{version}\n", encoding="utf-8")
 
         zip_name = f"PresenceKit-{version}-win64-setup.zip"
         zip_path = DIST_DIR / zip_name
